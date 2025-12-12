@@ -7,7 +7,7 @@ SolMobile v0 is a native iOS client designed to make SolOS usable in daily life 
 The goal of v0 is **not** feature completeness.
 The goal is to validate the core interaction loop with explicit boundaries and minimal surface area.
 
----
+--- 
 
 ## What SolMobile v0 IS
 
