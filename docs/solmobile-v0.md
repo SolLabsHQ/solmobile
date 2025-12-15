@@ -45,6 +45,23 @@ SolMobile v0 includes:
   - Daily totals
 - No silent or unbounded usage
 
+### 7. Resilient connectivity (no “stuck reconnect”)
+- Every request carries a **request_id** for idempotency
+- The client maintains a **local outbox** with clear states: pending → sending → acked → failed
+- A failed send is always recoverable via **Tap to Retry**
+- Retrying reuses the same request_id; the server **dedupes** to prevent double-sends
+- No infinite spinner states without a user action path
+
+### 8. Minimal OS integration (Open Loops)
+- A lightweight App Intent / Shortcut exists for **“Park Open Loop / Recheck Later”**
+- Creates an Apple Reminders item:
+  - Title: `Recheck: <thing>`
+  - Notes:
+    - `Need: <data trigger>`
+    - `Then: <next action>`
+- Targets an **Open Loops** (or **Waiting on Data**) list
+- This is intentionally narrow: capture and offload only (no broad “actions” layer in v0)
+
 ---
 
 ## What SolMobile v0 is NOT
@@ -58,6 +75,12 @@ SolMobile v0 explicitly excludes:
 - Email, messaging, or third-party app actions
 - Automatic long-term context building
 - Cloud-synced conversation history
+- Images, camera capture, OCR, or attachment pipelines
+- Voice capture / transcription (deferred; text-first is the v0 contract)
+- Live web browsing or automated web retrieval
+- BYO private/paywalled source ingestion (text/PDF share-sheet + redaction review) — deferred to later versions
+- Kid profiles, schoolwork safeguards, or parental notification flows (V2/V3)
+- Streaming resume with cursors (may arrive after v0 once the core loop is proven)
 
 These are conscious exclusions, not missing features.
 
@@ -72,6 +95,9 @@ The following constraints are non-negotiable in v0:
 - **Server state is inspectable**
 - **No silent data flows**
 - **All memory has a clear lifecycle**
+- **Idempotent sends (request_id) prevent duplicates**
+- **Outbox-first delivery prevents message loss under bad networks**
+- **Every failure state is visible and recoverable**
 
 If a feature violates these constraints, it does not belong in v0.
 
@@ -89,6 +115,26 @@ SolMobile v0 is considered successful if:
 
 ---
 
+## Acceptance Checklist
+
+SolMobile v0 is not “done” until these are true:
+
+### Reliability
+- Airplane mode mid-send does **not** lose the user’s typed message
+- Retrying after reconnect does **not** duplicate messages (same request_id)
+- App relaunch preserves pending outbox items and allows retry
+- No “stuck reconnect” loops without a clear user action path
+
+### Cost visibility
+- Each response includes token usage metrics
+- A basic cost meter shows recent usage and daily totals
+
+### Data lifecycle
+- Unpinned threads expire at 30 days and are deleted predictably
+- Pinned threads survive TTL cleanup until unpinned or deleted
+
+---
+
 ## Open Questions (Deferred)
 
 The following topics are intentionally deferred beyond v0:
@@ -97,7 +143,7 @@ The following topics are intentionally deferred beyond v0:
 - On-device ML inference
 - Cross-device sync
 - Advanced retrieval tuning
-- Automation and actions
+- Advanced automation and actions (beyond the narrow “Open Loops” reminder capture)
 
 These will be revisited only after v0 proves its core loop.
 
@@ -107,3 +153,4 @@ These will be revisited only after v0 proves its core loop.
 
 This document defines SolMobile v0 scope.
 Changes must be intentional and recorded.
+
