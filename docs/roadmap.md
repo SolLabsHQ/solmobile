@@ -1,83 +1,106 @@
-# SolMobile Roadmap (Release Cuts)
+# SolMobile Roadmap
 
-## Intent
-Ship a **minimal but resilient** SolMobile client first, then expand capabilities without blowing up scope, cost, or trust.
+**Definition:** Local/offline means **on-device SQLite + FTS5**, not SolServer.
 
-This doc is the **version ladder**.
-For the exact “what ships in v0”, see: [solmobile-v0.md](./solmobile-v0.md)
-
----
-
-## v0 — Minimal, resilient daily driver
-**Goal:** Text-first core loop that never loses user input and never double-sends.
-
-### Must-have
-- Text chat (no images, no voice)
-- request_id per /v1/chat request (idempotent)
-- Local outbox queue: pending → sent → acked
-- Manual “Retry last send” (reuses same request_id; server dedupe)
-- Thread + message local store with TTL cleanup (default 30d unless pinned)
-- Pinned context reference (server-side template id/version/hash; client sends ref only)
-- Capsule summary per thread (small, refreshed periodically)
-- Explicit memory saves only (no auto long-term memory)
-- Cost meter basics (tokens + estimated cost per request; daily totals)
-- App Intents / Shortcuts (text)
-  - Park Open Loop / Recheck Later → Apple Reminders item in Open Loops list
-  - Quick capture → append to thread or create new thread
-
-### Non-goals
-- Images, voice, OCR, camera
-- Streaming resume cursoring
-- BYO private sources ingest
-- Parental controls / kid profile / schoolwork safeguards
+This roadmap is the version ladder. ADRs are authoritative for decisions.
+For the exact “what ships in v0”, see: `docs/solmobile-v0.md`.
 
 ---
 
-## v0.1 — Early hardening + one “wow”
-**Goal:** Make connectivity behavior feel professional, plus add one major input modality.
+## Principles (always true)
 
-### Add
-- Automatic retry with backoff (still idempotent)
-- Better connection-state UI (“sent…”, “reconnecting…”, “tap to retry”)
-- Optional streaming (no resume requirement yet)
-
-### Pick ONE
-- Voice capture (on-device speech → text → review → send)
-OR
-- Images (attach/upload) as “experimental” with tight limits
+- **Local-first by default**: threads live on-device; server is not a required dependency for core UX.
+- **Explicit memory only**: no passive capture, no hidden persistence.
+- **Resilience first**: no message loss, no duplicate sends, no dead-end reconnect loops.
+- **Cost visibility**: user can see usage; no silent runaway spend.
+- **OS primitives over custom glue**: Reminders and Notes are first-class surfaces when we offload.
 
 ---
 
-## v1 — Baseline product quality
-**Goal:** Trustable, observable, and ready for wider TestFlight.
+## v0 — Minimal, resilient daily driver (ship first)
+See docs/solmobile-v0.md for the full v0 contract.
 
-### Add
-- Streaming resume with cursor (true continuation after drop)
-- More robust outbox (replay safety, exactly-once feel)
-- Stronger cost controls
-  - hard budgets per request (input/output token caps)
-  - runaway thread guardrails + user-facing warnings
+**Goal:** Prove the local-first capture loop with trust, clarity, and reliability.
 
-### BYO Private Sources (text/PDF)
-**Default strategy:** BYO content (most legal + least brittle)
-- Share-sheet ingest (text/PDF)
-- On-device redaction
-- User review + approve outbound payload
-- Server stores summaries unless explicit Save
+**Scope (must-have)**
+- Text-first interaction
+- Local-first threads stored **on-device only**
+- Explicit memory only (no implicit background memory capture)
+- Default TTL for threads: **30 days**
+  - Unpinned threads expire and delete predictably
+  - Pinned threads persist until unpinned or deleted
+- Clear separation of concerns
+  - Client handles capture, display, local storage
+  - Server handles inference/validation/explicit memory storage
+  - No hidden shared state
+- Cost awareness
+  - token usage tracked per request
+  - basic cost meter (recent usage + daily totals)
+- Resilient connectivity (no “stuck reconnect”)
+  - `request_id` idempotency for every request
+  - local outbox queue: pending → sending → acked → failed
+  - Tap to Retry always available
+  - retry reuses `request_id` and server dedupes
+- Minimal OS integration: **Open Loops**
+  - Shortcut/App Intent: “Park Open Loop / Recheck Later”
+  - Creates Apple Reminders item: `Recheck: <thing>` with `Need:` and `Then:` notes
+
+**Explicitly out of scope**
+- Search (local or server)
+- Images, camera, OCR, attachment pipelines
+- Voice capture / transcription
+- Cloud-synced conversation history
+- BYO private/paywalled source ingest (share-sheet text/PDF + redaction) — deferred
+- Streaming resume with cursors
+- Kid profiles / schoolwork safeguards / parental flows
 
 ---
 
-## v2 / v3 — Kids + schoolwork + parental safeguards
+## v0.1 — Search + re-entry (ADR-018)
+
+**Goal:** Add reliable on-device finding and re-entry.
+
+- SQLite **FTS5** global search (on-device)
+- Deep-link to exact `message_id`
+- In-thread Find (next/prev with match count)
+- Return Stack: “Back to where I was” when search invoked inside a thread
+
+---
+
+## v0.2 — Retention foundations (ADR-019)
+
+**Goal:** Scale storage predictably as data grows (especially attachments).
+
+- Pinning overrides TTL (enforced consistently)
+- Attachments treated as primary storage driver (offload hooks)
+- BackgroundTasks maintenance hooks:
+  - FTS optimize
+  - compaction and vacuum strategy
+  - cache cleanup
+
+---
+
+## v1.0 — Optional cold archive (ADR-019)
+
+**Goal:** Enable long-term storage without making SolServer mandatory.
+
+- Optional encrypted iCloud cold archive (CryptoKit + iCloud Drive app container)
+- Local Archive Catalog for discoverability
+- “Search iCloud archive” at end of results when online
+- On-demand fetch and decrypt per thread
+
+---
+
+## v2 / v3 — Kids + schoolwork + parental safeguards (later)
+
 **Goal:** Kids can use it safely; academic integrity enforced.
 
-### Add
 - Kid profile (stricter defaults)
 - Coach Mode for graded work (teach/hints/check attempts; no verbatim completion)
 - SchoolworkIntegrityGate (server) with intent labels: practice | study | graded
-- Parental notifications
-  - If child attempts disallowed schoolwork help: notify parent with context + refusal summary
+- Parental notifications for disallowed attempts
 - On-device redaction + review becomes standard for child flows
 
-### IP boundary rule
-Implement these safeguards as SolOS Mobile features with generic naming and clean architecture boundaries.
+**IP boundary rule**
+Implement safeguards as SolMobile features with generic naming and clean architecture boundaries.
 Maintain KinCart–SolOS separation.
