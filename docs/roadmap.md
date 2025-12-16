@@ -77,6 +77,14 @@ See docs/solmobile-v0.md for the full v0 contract.
   - FTS optimize
   - compaction and vacuum strategy
   - cache cleanup
+- Thread cleanup & retention UX
+  - Multi-select threads for bulk archive / delete
+  - Quick action: archive threads older than X days (skip pinned)
+  - Archived threads hidden from default view but remain searchable
+  - Pinning overrides all auto-cleanup rules
+  - Optional auto-archive / auto-delete policies (off by default)
+  - Background maintenance aligns with retention rules
+  - ADR-020 (future): Thread Retention & Bulk Cleanup UX
 
 ---
 
