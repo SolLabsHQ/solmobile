@@ -6,16 +6,33 @@
 //
 
 import SwiftUI
+import SwiftData
 
 struct ContentView: View {
     var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
+//        VStack {
+//            Image(systemName: "globe")
+//                .imageScale(.large)
+//                .foregroundStyle(.tint)
+//            Text("Hello, world!")
+//        }
+//        .padding()
+        TabView {
+            ThreadListView()
+                .tabItem { Label("Chat", systemImage: "message") }
+//
+//            AnchorsView()
+//                .tabItem { Label("Anchors", systemImage: "bookmark") }
+//
+//            SettingsView()
+//                .tabItem { Label("Settings", systemImage: "gearshape") }
         }
-        .padding()
+        .modelContainer(for: [
+            Thread.self,
+            Message.self,
+            Packet.self,
+            Transmission.self
+        ])
     }
 }
 
