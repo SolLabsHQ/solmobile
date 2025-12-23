@@ -36,6 +36,11 @@ Ship a **modern messaging-style** SolMobile v0 where the user can:
 - Don’t leak networking payload details into Transmission itself.
 - Model: `Transmission 1..1 Packet`, and Packet can evolve/subclass.
 
+### D7 — CFB is split: Nav (local) vs Inference (payload)
+- **CFB Nav** is a *local-only* session navigation/controller object (arc, stack, active vs parked, decisions, next, persistence ledger, done criteria, mode history).
+- **CFB Inference** is a *thin* model payload sent to SolServer only when helpful (primary arc + decisions + next + optional scope guard).
+- Pinned context is **mounted law** referenced in the Packet; capsule/CFB are **runtime deltas** in request context.
+
 ---
 
 ## Domain Model
@@ -149,6 +154,17 @@ Encapsulated payload for a Transmission (extensible).
 
 > This keeps Transmission stable while Packet evolves.
 
+### Conversation Fact Block (CFB)
+SolMobile maintains two related objects:
+
+#### CFB Nav (local-only)
+A richer UI/session controller used for re-anchors and drift control.
+
+#### CFB Inference (payload)
+A thin subset optionally included in SolServer requests to reduce drift.
+
+> CFB Nav is not sent to SolServer. CFB Inference may be included in request `context` when relevant.
+
 ---
 
 ## Relationships (Cardinality)
@@ -211,7 +227,14 @@ Encapsulated payload for a Transmission (extensible).
 3. extraction/OCR/fetch updates Capture records independently
 
 ### Flow D — Remote chat request (SolServer)
-1. create `Transmission(chat)` with `Packet` describing thread + message ids + checkpoint/facts refs (if any)
+1. create `Transmission(chat)` with a `Packet` that includes:
+   - `requestId` (idempotency)
+   - thread + message ids
+   - `contextRefs` including `pinnedContextRef` (mounted law)
+   - optional checkpoint/fact refs
+   And request `context` deltas including:
+   - capsule summary
+   - optional **CFB Inference**
 2. attempts recorded in `DeliveryAttempt[]`
 3. on success → append `Message(assistant)` with usage metadata
 
@@ -224,10 +247,26 @@ Encapsulated payload for a Transmission (extensible).
 - CaptureProcessor (transcribe/extract/fetch)
 - AnchorStore
 - CheckpointStore
-- TransmissionQueue (persistence + retry)
+- CFBNavStore (local session navigation + re-anchor state)
+- TransmissionStore (persistence + retry)
 - SolServerClient
 - PreferencesStore
 - Environment (config)
 - Observability hooks
 
 ---
+
+
+---
+
+## CFB Nav Schema
+
+CFB Nav is maintained locally by SolMobile as a session navigation controller (re-anchor state). The canonical schema now lives in:
+
+- `docs/design/cfb-nav-schema.md`
+
+Only the thin **CFB Inference** subset is optionally sent to SolServer in request `context`.
+
+(Planned) A consolidated domain object schema YAML (all v0 objects in one place) can live at:
+
+- `docs/schema/solmobile-v0-domain.yaml`

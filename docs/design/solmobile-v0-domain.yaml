@@ -1,0 +1,457 @@
+schema_version: "v0"
+domain: "SolMobile"
+json_schema_draft: "2020-12"
+
+# This file is a *reference library* of JSON Schemas, written in YAML for readability.
+# Any schema block can be converted to JSON by tooling (YAML is a superset of JSON).
+
+schemas:
+  SolMobileDomain:
+    $schema: "https://json-schema.org/draft/2020-12/schema"
+    $id: "https://sollabshq.local/schema/solmobile/v0/solmobile-domain.schema.json"
+    title: "SolMobile v0 Domain Schemas"
+    type: object
+    additionalProperties: false
+    $defs:
+      Id:
+        type: string
+        minLength: 1
+
+      DateTime:
+        type: string
+        format: date-time
+
+      CreatorType:
+        type: string
+        enum: [user, assistant, system]
+
+      CaptureType:
+        type: string
+        enum: [audio, file, image, text, url]
+
+      CaptureStatus:
+        type: string
+        enum: [pending, ready, failed]
+
+      TransmissionType:
+        type: string
+        enum: [chat, memorySave, usage, sync]
+
+      TransmissionStatus:
+        type: string
+        enum: [queued, sending, succeeded, failed]
+
+      User:
+        type: object
+        additionalProperties: false
+        properties:
+          userId:
+            $ref: "#/$defs/Id"
+          displayName:
+            type: string
+            minLength: 1
+        required: [userId]
+
+      Preferences:
+        type: object
+        additionalProperties: false
+        properties:
+          maxOutputTokens:
+            type: integer
+            minimum: 1
+          maxRegenerations:
+            type: integer
+            minimum: 0
+          maxInputTokens:
+            type: integer
+            minimum: 1
+        required: [maxOutputTokens, maxRegenerations]
+
+      Thread:
+        type: object
+        additionalProperties: false
+        properties:
+          threadId:
+            $ref: "#/$defs/Id"
+          title:
+            type: string
+          createdAt:
+            $ref: "#/$defs/DateTime"
+          lastActiveAt:
+            $ref: "#/$defs/DateTime"
+          pinned:
+            type: boolean
+          expiresAt:
+            oneOf:
+              - $ref: "#/$defs/DateTime"
+              - type: "null"
+        required: [threadId, createdAt, lastActiveAt, pinned]
+
+      UsageMetrics:
+        type: object
+        additionalProperties: false
+        properties:
+          inputTokens:
+            type: integer
+            minimum: 0
+          outputTokens:
+            type: integer
+            minimum: 0
+          totalTokens:
+            type: integer
+            minimum: 0
+          latencyMs:
+            type: integer
+            minimum: 0
+          estimatedCost:
+            oneOf:
+              - type: number
+                minimum: 0
+              - type: "null"
+        required: [inputTokens, outputTokens, totalTokens]
+
+      Message:
+        type: object
+        additionalProperties: false
+        properties:
+          messageId:
+            $ref: "#/$defs/Id"
+          threadId:
+            $ref: "#/$defs/Id"
+          creatorType:
+            $ref: "#/$defs/CreatorType"
+          creatorId:
+            oneOf:
+              - type: string
+                minLength: 1
+              - type: "null"
+          text:
+            type: string
+          createdAt:
+            $ref: "#/$defs/DateTime"
+          assistantUsage:
+            oneOf:
+              - $ref: "#/$defs/UsageMetrics"
+              - type: "null"
+        required: [messageId, threadId, creatorType, text, createdAt]
+
+      Capture:
+        type: object
+        additionalProperties: false
+        properties:
+          captureId:
+            $ref: "#/$defs/Id"
+          messageId:
+            $ref: "#/$defs/Id"
+          type:
+            $ref: "#/$defs/CaptureType"
+          status:
+            $ref: "#/$defs/CaptureStatus"
+          dataReference:
+            type: string
+            minLength: 1
+          dataDescription:
+            oneOf:
+              - type: string
+              - type: "null"
+          data:
+            oneOf:
+              - type: string
+              - type: "null"
+          error:
+            oneOf:
+              - type: string
+              - type: "null"
+        required: [captureId, messageId, type, status, dataReference]
+
+      Anchor:
+        type: object
+        additionalProperties: false
+        properties:
+          anchorId:
+            $ref: "#/$defs/Id"
+          messageId:
+            $ref: "#/$defs/Id"
+          title:
+            type: string
+            minLength: 1
+          summary:
+            oneOf:
+              - type: string
+              - type: "null"
+          type:
+            type: string
+            minLength: 1
+          createdAt:
+            $ref: "#/$defs/DateTime"
+          createdByType:
+            $ref: "#/$defs/CreatorType"
+          createdById:
+            oneOf:
+              - type: string
+                minLength: 1
+              - type: "null"
+          checkpointId:
+            oneOf:
+              - $ref: "#/$defs/Id"
+              - type: "null"
+        required: [anchorId, messageId, title, type, createdAt, createdByType]
+
+      Checkpoint:
+        type: object
+        additionalProperties: false
+        properties:
+          checkpointId:
+            $ref: "#/$defs/Id"
+          threadId:
+            $ref: "#/$defs/Id"
+          createdAt:
+            $ref: "#/$defs/DateTime"
+          createdByType:
+            $ref: "#/$defs/CreatorType"
+          createdById:
+            oneOf:
+              - type: string
+                minLength: 1
+              - type: "null"
+          contextSummary:
+            type: string
+          factBlockRefs:
+            oneOf:
+              - type: array
+                items:
+                  type: string
+              - type: "null"
+          decisions:
+            type: array
+            items:
+              type: string
+          nextSteps:
+            type: array
+            items:
+              type: string
+          openQuestions:
+            type: array
+            items:
+              type: string
+        required: [checkpointId, threadId, createdAt, createdByType, contextSummary, decisions, nextSteps, openQuestions]
+
+      Packet:
+        type: object
+        additionalProperties: false
+        properties:
+          packetId:
+            $ref: "#/$defs/Id"
+          packetType:
+            type: string
+            minLength: 1
+          threadId:
+            $ref: "#/$defs/Id"
+          messageIds:
+            type: array
+            minItems: 1
+            items:
+              $ref: "#/$defs/Id"
+          checkpointIds:
+            oneOf:
+              - type: array
+                items:
+                  $ref: "#/$defs/Id"
+              - type: "null"
+          factBlockIds:
+            oneOf:
+              - type: array
+                items:
+                  type: string
+              - type: "null"
+          budgets:
+            oneOf:
+              - type: object
+              - type: "null"
+          contextRefs:
+            oneOf:
+              - type: object
+              - type: "null"
+          payload:
+            oneOf:
+              - type: object
+              - type: "null"
+        required: [packetId, packetType, threadId, messageIds]
+
+      DeliveryAttempt:
+        type: object
+        additionalProperties: false
+        properties:
+          attemptId:
+            $ref: "#/$defs/Id"
+          transmissionId:
+            $ref: "#/$defs/Id"
+          startedAt:
+            $ref: "#/$defs/DateTime"
+          endedAt:
+            oneOf:
+              - $ref: "#/$defs/DateTime"
+              - type: "null"
+          status:
+            type: string
+            minLength: 1
+          errorCode:
+            oneOf:
+              - type: string
+              - type: "null"
+          latencyMs:
+            oneOf:
+              - type: integer
+                minimum: 0
+              - type: "null"
+        required: [attemptId, transmissionId, startedAt, status]
+
+      Transmission:
+        type: object
+        additionalProperties: false
+        properties:
+          transmissionId:
+            $ref: "#/$defs/Id"
+          type:
+            $ref: "#/$defs/TransmissionType"
+          requestId:
+            type: string
+            minLength: 1
+          status:
+            $ref: "#/$defs/TransmissionStatus"
+          createdAt:
+            $ref: "#/$defs/DateTime"
+          packetId:
+            $ref: "#/$defs/Id"
+          deliveryAttempts:
+            type: array
+            items:
+              $ref: "#/$defs/DeliveryAttempt"
+        required: [transmissionId, type, requestId, status, createdAt, packetId]
+
+      CFBNav:
+        type: object
+        additionalProperties: false
+        properties:
+          version:
+            type: string
+            minLength: 1
+          session:
+            type: object
+            additionalProperties: false
+            properties:
+              thread_id:
+                type: string
+                minLength: 1
+              updated_at:
+                $ref: "#/$defs/DateTime"
+            required: [thread_id, updated_at]
+          primary_arc:
+            type: string
+          stack:
+            oneOf:
+              - type: array
+                items:
+                  type: object
+              - type: "null"
+          active:
+            oneOf:
+              - type: array
+                items:
+                  type: object
+              - type: "null"
+          parked:
+            oneOf:
+              - type: array
+                items:
+                  type: object
+              - type: "null"
+          decisions:
+            type: array
+            items:
+              type: string
+          next:
+            type: array
+            items:
+              type: string
+          done_criteria:
+            oneOf:
+              - type: array
+                items:
+                  type: string
+              - type: "null"
+          persistence_ledger:
+            oneOf:
+              - type: object
+              - type: "null"
+          mode_history:
+            oneOf:
+              - type: array
+                items:
+                  type: object
+              - type: "null"
+        required: [version, session, primary_arc, decisions, next]
+
+      CFBInference:
+        type: object
+        additionalProperties: false
+        properties:
+          primary_arc:
+            type: string
+          decisions:
+            type: array
+            items:
+              type: string
+          next:
+            type: array
+            items:
+              type: string
+          scope_guard:
+            oneOf:
+              - type: object
+                additionalProperties: false
+                properties:
+                  avoid_topics:
+                    type: array
+                    items:
+                      type: string
+                required: [avoid_topics]
+              - type: "null"
+        required: [primary_arc, decisions, next]
+
+  # Convenience per-entity schema handles (each is a $ref into SolMobileDomain $defs)
+  User:
+    $ref: "#/schemas/SolMobileDomain/$defs/User"
+  Preferences:
+    $ref: "#/schemas/SolMobileDomain/$defs/Preferences"
+  Thread:
+    $ref: "#/schemas/SolMobileDomain/$defs/Thread"
+  Message:
+    $ref: "#/schemas/SolMobileDomain/$defs/Message"
+  Capture:
+    $ref: "#/schemas/SolMobileDomain/$defs/Capture"
+  Anchor:
+    $ref: "#/schemas/SolMobileDomain/$defs/Anchor"
+  Checkpoint:
+    $ref: "#/schemas/SolMobileDomain/$defs/Checkpoint"
+  Packet:
+    $ref: "#/schemas/SolMobileDomain/$defs/Packet"
+  Transmission:
+    $ref: "#/schemas/SolMobileDomain/$defs/Transmission"
+  DeliveryAttempt:
+    $ref: "#/schemas/SolMobileDomain/$defs/DeliveryAttempt"
+  CFBNav:
+    $ref: "#/schemas/SolMobileDomain/$defs/CFBNav"
+  CFBInference:
+    $ref: "#/schemas/SolMobileDomain/$defs/CFBInference"
+
+examples:
+  cfb_inference_example:
+    primary_arc: "Lock API contracts then start Swift scaffolding"
+    decisions:
+      - "CFB Nav is local-only; CFB Inference is thin payload"
+    next:
+      - "Generate SwiftData models"
+    scope_guard:
+      avoid_topics:
+        - "Glossary work"
