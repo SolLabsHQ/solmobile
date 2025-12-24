@@ -1,10 +1,15 @@
 import SwiftUI
 import SwiftData
+import os
 
 struct ThreadDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @Bindable var thread: Thread
     @State private var isProcessingOutbox: Bool = false
+    @State private var outboxNeedsRerun: Bool = false
+
+    // Trace UI-level outbox lifecycle (retry taps, coalesced reruns, etc.)
+    private let viewLog = Logger(subsystem: "com.sollabshq.solmobile", category: "ThreadDetailView")
 
     private var sortedMessages: [Message] {
         thread.messages.sorted { $0.createdAt < $1.createdAt }
@@ -31,6 +36,7 @@ struct ThreadDetailView: View {
 
             Divider()
 
+            // Outbox banner reflects local Transmission state (queued/sending/failed)
             if let banner = outboxBanner {
                 banner
                     .padding(.horizontal, 10)
@@ -53,6 +59,8 @@ struct ThreadDetailView: View {
         thread.lastActiveAt = Date()
         modelContext.insert(m)
 
+        viewLog.info("[send] thread=\(thread.id.uuidString.prefix(8), privacy: .public) msg=\(m.id.uuidString.prefix(8), privacy: .public) len=\(text.count, privacy: .public)")
+
         let tx = TransmissionActions(modelContext: modelContext)
         tx.enqueueChat(thread: thread, userMessage: m)
 
@@ -70,8 +78,17 @@ struct ThreadDetailView: View {
                         .font(.footnote)
                     Spacer()
                     Button("Retry") {
+                        viewLog.info("[retry] tapped")
+
+                        let before = outboxSummary
+                        viewLog.info("[retry] before failed=\(before.failed, privacy: .public) queued=\(before.queued, privacy: .public) sending=\(before.sending, privacy: .public)")
+
                         let tx = TransmissionActions(modelContext: modelContext)
                         tx.retryFailed()
+
+                        let after = outboxSummary
+                        viewLog.info("[retry] after failed=\(after.failed, privacy: .public) queued=\(after.queued, privacy: .public) sending=\(after.sending, privacy: .public)")
+
                         processOutbox()
                     }
                     .font(.footnote)
@@ -106,8 +123,9 @@ struct ThreadDetailView: View {
     }
 
     private var outboxSummary: OutboxSummary {
-        // v0: simple fetch + filter by thread
+        // v0: derived state (no observer) — computed by fetching Transmissions and filtering by thread
         let all = (try? modelContext.fetch(FetchDescriptor<Transmission>())) ?? []
+
         let mine = all.filter { $0.packet.threadId == thread.id }
 
         let queued = mine.filter { $0.status == .queued }.count
@@ -117,15 +135,34 @@ struct ThreadDetailView: View {
     }
 
     private func processOutbox() {
-        guard !isProcessingOutbox else { return }
+        viewLog.info("[processOutbox] called isProcessing=\(isProcessingOutbox, privacy: .public)")
+
+        // Coalesce calls: if we're already processing, request another pass and exit.
+        guard !isProcessingOutbox else {
+            outboxNeedsRerun = true
+            viewLog.info("[processOutbox] coalesce: needsRerun=true")
+            return
+        }
+
         isProcessingOutbox = true
+
+        viewLog.info("[processOutbox] run start")
 
         Task {
             let tx = TransmissionActions(modelContext: modelContext)
             await tx.processQueue()
 
-            // bc will update UI
-            await MainActor.run { isProcessingOutbox = false }
+            viewLog.info("[processOutbox] run end")
+
+            await MainActor.run {
+                isProcessingOutbox = false
+
+                if outboxNeedsRerun {
+                    outboxNeedsRerun = false
+                    viewLog.info("[processOutbox] rerun requested -> kicking")
+                    processOutbox()
+                }
+            }
         }
     }
 }
