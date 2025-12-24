@@ -14,6 +14,13 @@ struct SettingsView: View {
     // Light tracing for debugging (non-sensitive)
     private let log = Logger(subsystem: "com.sollabshq.solmobile", category: "Settings")
 
+    // Connection test state (dev ergonomics)
+    @State private var isTestingConnection: Bool = false
+    @State private var lastHealthCheck: String? = nil
+    @State private var lastHealthCheckError: String? = nil
+    @State private var lastHealthCheckAt: Date? = nil
+    @State private var healthTask: Task<Void, Never>? = nil
+
     // Normalize and validate the URL string the user types
     private var trimmedBaseURL: String {
         solserverBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -25,6 +32,99 @@ struct SettingsView: View {
 
     private var effectiveBaseURL: String {
         isValidBaseURL ? trimmedBaseURL : "http://127.0.0.1:3333"
+    }
+
+    private var healthzURL: URL? {
+        guard let base = URL(string: effectiveBaseURL) else { return nil }
+        return base.appendingPathComponent("healthz")
+    }
+
+    private func runHealthCheck() {
+        // Cancel any in-flight test to avoid races in UI updates
+        healthTask?.cancel()
+
+        guard let url = healthzURL else {
+            lastHealthCheck = nil
+            lastHealthCheckError = "Invalid base URL"
+            return
+        }
+
+        isTestingConnection = true
+        lastHealthCheck = nil
+        lastHealthCheckError = nil
+
+        let started = Date()
+        log.info("[healthz] start url=\(url.absoluteString, privacy: .public)")
+
+        healthTask = Task {
+            // A couple quick retries helps with transient local network flakiness.
+            let backoffsNs: [UInt64] = [0, 250_000_000, 750_000_000]
+
+            for attempt in 1...backoffsNs.count {
+                if Task.isCancelled { return }
+
+                let backoff = backoffsNs[attempt - 1]
+                if backoff > 0 {
+                    try? await Task.sleep(nanoseconds: backoff)
+                }
+
+                do {
+                    var req = URLRequest(url: url)
+                    req.httpMethod = "GET"
+                    req.timeoutInterval = 4
+                    req.cachePolicy = .reloadIgnoringLocalCacheData
+                    req.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+
+                    let (data, resp) = try await URLSession.shared.data(for: req)
+                    let status = (resp as? HTTPURLResponse)?.statusCode ?? -1
+                    let body = String(data: data, encoding: .utf8) ?? ""
+
+                    let ms = Int(Date().timeIntervalSince(started) * 1000)
+
+                    if status == 200 {
+                        await MainActor.run {
+                            isTestingConnection = false
+                            lastHealthCheckError = nil
+                            lastHealthCheck = "Connected ✅ (\(ms)ms)"
+                            lastHealthCheckAt = Date()
+                        }
+
+                        log.info("[healthz] ok status=\(status, privacy: .public) attempt=\(attempt, privacy: .public) ms=\(ms, privacy: .public)")
+                        return
+                    } else {
+
+                        log.warning("[healthz] non-200 status=\(status, privacy: .public) attempt=\(attempt, privacy: .public)")
+
+                        // If it's the last attempt, surface the error.
+                        if attempt == backoffsNs.count {
+                            await MainActor.run {
+                                isTestingConnection = false
+                                lastHealthCheck = nil
+                                lastHealthCheckError = "Health check failed (HTTP \(status)). \(body)"
+                                lastHealthCheckAt = Date()
+                            }
+                            return
+                        }
+                    }
+                } catch {
+                    log.error("[healthz] error attempt=\(attempt, privacy: .public) err=\(String(describing: error), privacy: .public)")
+
+                    if attempt == backoffsNs.count {
+                        await MainActor.run {
+                            isTestingConnection = false
+                            lastHealthCheck = nil
+                            lastHealthCheckError = "Could not reach SolServer. \(String(describing: error))"
+                            lastHealthCheckAt = Date()
+                        }
+                        return
+                    }
+                }
+            }
+
+            await MainActor.run {
+                isTestingConnection = false
+            }
+        }
     }
 
     var body: some View {
@@ -88,6 +188,41 @@ struct SettingsView: View {
                     }
                     .buttonStyle(.bordered)
 
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Button {
+                            runHealthCheck()
+                        } label: {
+                            Label(isTestingConnection ? "Testing…" : "Test connection", systemImage: "antenna.radiowaves.left.and.right")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(isTestingConnection)
+
+                        if let ok = lastHealthCheck {
+                            Text(ok)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        if let err = lastHealthCheckError {
+                            Text(err)
+                                .font(.footnote)
+                                .foregroundStyle(.red)
+                        }
+
+                        if let at = lastHealthCheckAt {
+                            Text("Last checked: \(at.formatted(date: .omitted, time: .standard))")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Text("Tip: Simulator can use 127.0.0.1. A physical phone must use your Mac’s LAN IP on the same Wi‑Fi.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
                     if !isValidBaseURL {
                         Text("Invalid URL. Example: http://127.0.0.1:3333")
                             .foregroundStyle(.red)
@@ -97,9 +232,14 @@ struct SettingsView: View {
                 .onChange(of: solserverBaseURL) { _, newValue in
                     let v = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
                     log.info("[baseURL] changed -> \(v, privacy: .public)")
+
+                    // Reset health state so we don't show stale results for a new URL.
+                    lastHealthCheck = nil
+                    lastHealthCheckError = nil
+                    lastHealthCheckAt = nil
                 }
 
-                
+
                 Section("About") {
                     HStack {
                         Text("Version")
