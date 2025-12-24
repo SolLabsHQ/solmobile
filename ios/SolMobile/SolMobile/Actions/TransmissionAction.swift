@@ -163,14 +163,19 @@ struct StubChatTransport: ChatTransport {
 
     func send(envelope: PacketEnvelope) async throws -> ChatResponse {
         // v0: keep simulated failure path for pipeline testing
-        if envelope.packetType == "chat_fail" {
-            throw ChatTransportError.simulatedFailure
-        }
+        let simulate500 = (envelope.packetType == "chat_fail")
 
         let url = baseURL.appendingPathComponent("/v1/chat")
+
+        // build request
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        // set for request failures
+        if simulate500 {
+            req.setValue("500", forHTTPHeaderField: "x-sol-simulate-status")
+        }
 
         // Use packetId as idempotency key so retries dedupe server-side.
         let dto = SolServerChatRequestDTO(
@@ -183,6 +188,11 @@ struct StubChatTransport: ChatTransport {
         let (data, resp) = try await URLSession.shared.data(for: req)
         guard let http = resp as? HTTPURLResponse else {
             throw URLError(.badServerResponse)
+        }
+
+        // if 500 returns and we are simulation flow, send correct simulation failure error
+        if simulate500, http.statusCode == 500 {
+            throw ChatTransportError.simulatedFailure
         }
 
         // If server replies "pending" for an idempotent replay, surface a readable message for now.
