@@ -73,7 +73,7 @@ struct SettingsView: View {
 
                         Button {
                             // Replace with your Mac’s LAN IP (same Wi‑Fi) once you’re ready.
-                            solserverBaseURL = "http://192.168.0.10:3333"
+                            solserverBaseURL = "http://192.168.50.240:3333"
                         } label: {
                             Label("Phone (LAN)", systemImage: "iphone")
                                 .frame(maxWidth: .infinity, alignment: .leading)
