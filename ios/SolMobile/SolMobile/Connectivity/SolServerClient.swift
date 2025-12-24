@@ -32,6 +32,18 @@ struct Response: Codable {
     let status: String?
 }
 
+struct TransmissionDTO: Codable {
+    let id: String
+    let status: String
+}
+
+struct TransmissionResponse: Codable {
+    let ok: Bool
+    let transmission: TransmissionDTO
+    let pending: Bool?
+    let assistant: String?
+}
+
 final class SolServerClient {
     let baseURL: URL
     private let session: URLSession
@@ -41,10 +53,32 @@ final class SolServerClient {
         self.session = session
     }
 
-    func chat(threadId: String, clientRequestId: String, message: String) async throws -> Response {
+    func transmission(_ transmissionId: String) async throws -> TransmissionResponse {
+        let url = baseURL
+            .appendingPathComponent("/v1/transmissions")
+            .appendingPathComponent(transmissionId)
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+
+        let (data, resp) = try await session.data(for: req)
+        guard let http = resp as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+
+        guard (200...299).contains(http.statusCode) else {
+            let body = String(data: data, encoding: .utf8) ?? ""
+            throw NSError(domain: "SolServer", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: body])
+        }
+
+        return try JSONDecoder().decode(TransmissionResponse.self, from: data)
+    }
+
+    func chat(threadId: String, clientRequestId: String, message: String, simulateStatus: Int? = nil) async throws -> Response {
         var req = URLRequest(url: baseURL.appendingPathComponent("/v1/chat"))
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let simulateStatus {
+            req.setValue(String(simulateStatus), forHTTPHeaderField: "x-sol-simulate-status")
+        }
         req.httpBody = try JSONEncoder().encode(Request(threadId: threadId, clientRequestId: clientRequestId, message: message))
 
         let (data, resp) = try await session.data(for: req)

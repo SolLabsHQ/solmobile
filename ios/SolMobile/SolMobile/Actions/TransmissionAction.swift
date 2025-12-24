@@ -148,6 +148,89 @@ final class TransmissionActions {
         let attempts = tx.deliveryAttempts.sorted { $0.createdAt < $1.createdAt }
         let attemptCount = attempts.count
 
+        // If the last attempt is pending and we have a server transmissionId, poll instead of re-sending.
+        if let last = attempts.last,
+           last.outcome == .pending,
+           let serverTxId = last.transmissionId,
+           !serverTxId.isEmpty {
+
+            outboxLog.info("processQueue run=\(runId, privacy: .public) event=poll_ready tx=\(short(txId), privacy: .public) serverTx=\(shortOrDash(serverTxId), privacy: .public)")
+
+            // Mark as sending during poll for consistent UI semantics.
+            tx.status = .sending
+            tx.lastError = nil
+            outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(txId), privacy: .public) to=sending reason=poll")
+
+            do {
+                guard let polling = transport as? any ChatTransportPolling else {
+                    outboxLog.error("processQueue run=\(runId, privacy: .public) event=poll_unavailable tx=\(short(txId), privacy: .public)")
+
+                    tx.status = .failed
+                    tx.lastError = "Transport does not support polling"
+                    return
+                }
+
+                let poll = try await polling.poll(transmissionId: serverTxId)
+
+                guard let freshTx = try? fetchTransmission(id: txId) else { return }
+
+                // Record a poll attempt so backoff/TTL derivation stays honest.
+                let pollAttempt = DeliveryAttempt(
+                    statusCode: poll.statusCode,
+                    outcome: poll.pending ? .pending : .succeeded,
+                    errorMessage: nil,
+                    transmissionId: serverTxId,
+                    transmission: freshTx
+                )
+                freshTx.deliveryAttempts.append(pollAttempt)
+                modelContext.insert(pollAttempt)
+
+                if poll.pending {
+                    freshTx.status = .queued
+                    outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(txId), privacy: .public) to=queued reason=pending_poll")
+                    return
+                }
+
+                // Completed: append assistant message (if provided) and mark succeeded.
+                let assistantText = (poll.assistant?.isEmpty == false) ? poll.assistant! : "(no assistant text)"
+
+                if let thread = try? fetchThread(id: threadId) {
+                    let assistantMessage = Message(thread: thread, creatorType: .assistant, text: assistantText)
+
+                    thread.messages.append(assistantMessage)
+                    thread.lastActiveAt = Date()
+
+                    modelContext.insert(assistantMessage)
+
+                    outboxLog.info("processQueue run=\(runId, privacy: .public) event=assistant_appended tx=\(short(txId), privacy: .public) via=poll")
+                }
+
+                freshTx.status = .succeeded
+                outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(txId), privacy: .public) to=succeeded reason=poll_complete")
+                return
+            } catch {
+                outboxLog.error("processQueue run=\(runId, privacy: .public) event=poll_failed tx=\(short(txId), privacy: .public) err=\(String(describing: error), privacy: .public)")
+
+                guard let freshTx = try? fetchTransmission(id: txId) else { return }
+
+                let attempt = DeliveryAttempt(
+                    statusCode: -1,
+                    outcome: .failed,
+                    errorMessage: String(describing: error),
+                    transmissionId: serverTxId,
+                    transmission: freshTx
+                )
+                freshTx.deliveryAttempts.append(attempt)
+                modelContext.insert(attempt)
+
+                freshTx.status = .failed
+                freshTx.lastError = String(describing: error)
+
+                outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(txId), privacy: .public) to=failed reason=poll_failed")
+                return
+            }
+        }
+
         if attemptCount >= maxAttempts {
             // Client-side terminal: too many attempts.
             tx.status = .failed
@@ -248,6 +331,7 @@ final class TransmissionActions {
             freshTx.deliveryAttempts.append(attempt)
             modelContext.insert(attempt)
 
+            // Pending: keep queued so a future outbox pass can poll server-side completion.
             if response.pending || response.statusCode == 202 {
                 // Accepted but not delivered yet: keep it eligible for another outbox pass.
                 freshTx.status = .queued
@@ -376,6 +460,18 @@ protocol ChatTransport {
     func send(envelope: PacketEnvelope) async throws -> ChatResponse
 }
 
+// Optional capability: some transports can poll server-side delivery for pending (202) transmissions.
+protocol ChatTransportPolling: ChatTransport {
+    func poll(transmissionId: String) async throws -> ChatPollResponse
+}
+
+struct ChatPollResponse {
+    let pending: Bool
+    let assistant: String?
+    let serverStatus: String?
+    let statusCode: Int
+}
+
 enum ChatTransportError: Error {
     case simulatedFailure
     case httpStatus(code: Int, body: String)
@@ -403,7 +499,57 @@ private struct SolServerChatResponseDTO: Codable {
     let status: String?
 }
 
-struct StubChatTransport: ChatTransport {
+private struct SolServerTransmissionResponseDTO: Codable {
+    struct TransmissionDTO: Codable {
+        let id: String
+        let status: String
+    }
+
+    let ok: Bool
+    let transmission: TransmissionDTO
+    let pending: Bool?
+    let assistant: String?
+}
+
+struct StubChatTransport: ChatTransportPolling {
+    func poll(transmissionId: String) async throws -> ChatPollResponse {
+        let startNs = DispatchTime.now().uptimeNanoseconds
+
+        let url = baseURL
+            .appendingPathComponent("/v1/transmissions")
+            .appendingPathComponent(transmissionId)
+
+        transportLog.debug("poll event=url url=\(url.absoluteString, privacy: .public)")
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+
+        let (data, resp) = try await URLSession.shared.data(for: req)
+
+        guard let http = resp as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+
+        transportLog.info("poll event=response http=\(http.statusCode, privacy: .public) ms=\(msSince(startNs), format: .fixed(precision: 1)) tx=\(shortOrDash(transmissionId), privacy: .public)")
+
+        guard (200...299).contains(http.statusCode) else {
+            let body = String(data: data, encoding: .utf8) ?? ""
+            transportLog.error("poll event=error http=\(http.statusCode, privacy: .public) bodyLen=\(body.count, privacy: .public)")
+            throw ChatTransportError.httpStatus(code: http.statusCode, body: body)
+        }
+
+        let decoded = try JSONDecoder().decode(SolServerTransmissionResponseDTO.self, from: data)
+        let pending = decoded.pending ?? (decoded.transmission.status == "created")
+
+        transportLog.info("poll event=decoded pending=\(pending, privacy: .public) serverStatus=\(decoded.transmission.status, privacy: .public) assistantLen=\((decoded.assistant ?? "").count, privacy: .public)")
+
+        return ChatPollResponse(
+            pending: pending,
+            assistant: decoded.assistant,
+            serverStatus: decoded.transmission.status,
+            statusCode: http.statusCode
+        )
+    }
 
     // Base URL is driven by Settings (@AppStorage -> UserDefaults)
     private var baseURL: URL {
@@ -477,7 +623,7 @@ struct StubChatTransport: ChatTransport {
         if simulate202, http.statusCode == 202 {
             transportLog.info("send event=simulated_pending http=202")
         }
-
+        // 202 means accepted/pending. We return pending=true and rely on outbox polling to complete it.
         // If server replies "pending" (202), this is NOT a delivered assistant message.
         // We return pending=true so the queue can keep the Transmission queued/sending.
         if http.statusCode == 202 {
