@@ -24,6 +24,10 @@ final class Transmission {
     var createdAt: Date
     var lastError: String?
 
+    // Local ledger of delivery attempts (used to derive retry/backoff/timeout without redundant fields).
+    @Relationship(deleteRule: .cascade, inverse: \DeliveryAttempt.transmission)
+    var deliveryAttempts: [DeliveryAttempt] = []
+
     var packet: Packet
 
     init(

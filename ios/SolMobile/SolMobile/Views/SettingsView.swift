@@ -14,6 +14,32 @@ struct SettingsView: View {
     // Light tracing for debugging (non-sensitive)
     private let log = Logger(subsystem: "com.sollabshq.solmobile", category: "Settings")
 
+    // Use seconds for dev ergonomics (makes retries/latency easier to reason about).
+    private static let timeWithSecondsFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = .autoupdatingCurrent
+        f.timeZone = .autoupdatingCurrent
+        f.dateFormat = "h:mm:ss a"
+        return f
+    }()
+
+    private func formatTimeWithSeconds(_ d: Date) -> String {
+        Self.timeWithSecondsFormatter.string(from: d)
+    }
+
+    // Last chat transport status (written by TransmissionAction/Transport).
+    private let lastChatStatusCodeKey = "sol.dev.lastChatStatusCode"
+    private let lastChatStatusAtKey = "sol.dev.lastChatStatusAt"
+
+    private var lastChatStatusCode: Int? {
+        UserDefaults.standard.object(forKey: lastChatStatusCodeKey) as? Int
+    }
+
+    private var lastChatStatusAt: Date? {
+        let t = UserDefaults.standard.double(forKey: lastChatStatusAtKey)
+        return t > 0 ? Date(timeIntervalSince1970: t) : nil
+    }
+
     // Connection test state (dev ergonomics)
     @State private var isTestingConnection: Bool = false
     @State private var lastHealthCheck: String? = nil
@@ -92,7 +118,6 @@ struct SettingsView: View {
                         log.info("[healthz] ok status=\(status, privacy: .public) attempt=\(attempt, privacy: .public) ms=\(ms, privacy: .public)")
                         return
                     } else {
-
                         log.warning("[healthz] non-200 status=\(status, privacy: .public) attempt=\(attempt, privacy: .public)")
 
                         // If it's the last attempt, surface the error.
@@ -213,9 +238,21 @@ struct SettingsView: View {
                         }
 
                         if let at = lastHealthCheckAt {
-                            Text("Last checked: \(at.formatted(date: .omitted, time: .standard))")
+                            Text("Last checked: \(formatTimeWithSeconds(at))")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                        }
+
+                        if let code = lastChatStatusCode {
+                            if let at = lastChatStatusAt {
+                                Text("Last chat: HTTP \(code) @ \(formatTimeWithSeconds(at))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                Text("Last chat: HTTP \(code)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
 
                         Text("Tip: Simulator can use 127.0.0.1. A physical phone must use your Mac’s LAN IP on the same Wi‑Fi.")

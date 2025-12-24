@@ -5,6 +5,7 @@ import os
 struct ThreadDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @Bindable var thread: Thread
+    @Query private var transmissions: [Transmission]
     @State private var isProcessingOutbox: Bool = false
     @State private var outboxNeedsRerun: Bool = false
 
@@ -13,6 +14,19 @@ struct ThreadDetailView: View {
 
     private var sortedMessages: [Message] {
         thread.messages.sorted { $0.createdAt < $1.createdAt }
+    }
+
+    init(thread: Thread) {
+        self.thread = thread
+
+        // Scope the SwiftData query to this thread so the UI refreshes from the right slice of data.
+        let tid = thread.id
+        _transmissions = Query(
+            filter: #Predicate<Transmission> { tx in
+                tx.packet.threadId == tid
+            },
+            sort: [SortDescriptor(\.createdAt, order: .reverse)]
+        )
     }
 
     var body: some View {
@@ -36,7 +50,7 @@ struct ThreadDetailView: View {
 
             Divider()
 
-            // Outbox banner reflects local Transmission state (queued/sending/failed)
+            // Outbox banner reflects local Transmission state (queued/sending/failed).
             if let banner = outboxBanner {
                 banner
                     .padding(.horizontal, 10)
@@ -47,6 +61,9 @@ struct ThreadDetailView: View {
                 send(text)
             }
             .padding(10)
+        }
+        .onChange(of: outboxSummary.failed + outboxSummary.queued + outboxSummary.sending) { _, newValue in
+            viewLog.debug("[outboxBanner] refresh total=\(newValue, privacy: .public)")
         }
         .onAppear { processOutbox() }
         .navigationTitle(thread.title)
@@ -123,14 +140,12 @@ struct ThreadDetailView: View {
     }
 
     private var outboxSummary: OutboxSummary {
-        // v0: derived state (no observer) — computed by fetching Transmissions and filtering by thread
-        let all = (try? modelContext.fetch(FetchDescriptor<Transmission>())) ?? []
+        // Live derived state: @Query updates when SwiftData changes.
+        // NOTE: `transmissions` is already scoped to this thread via init().
+        let queued = transmissions.filter { $0.status == .queued }.count
+        let sending = transmissions.filter { $0.status == .sending }.count
+        let failed = transmissions.filter { $0.status == .failed }.count
 
-        let mine = all.filter { $0.packet.threadId == thread.id }
-
-        let queued = mine.filter { $0.status == .queued }.count
-        let sending = mine.filter { $0.status == .sending }.count
-        let failed = mine.filter { $0.status == .failed }.count
         return OutboxSummary(queued: queued, sending: sending, failed: failed)
     }
 
