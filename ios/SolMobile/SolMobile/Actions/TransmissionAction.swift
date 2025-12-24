@@ -51,21 +51,25 @@ final class TransmissionActions {
         let txId = tx.id
         let packet = tx.packet
         let threadId = packet.threadId
+        let firstMessageId = packet.messageIds.first
 
         tx.status = .sending
         tx.lastError = nil
 
         do {
             let packet = tx.packet
+            let userText = (firstMessageId.flatMap { try? fetchMessage(id: $0)?.text }) ?? ""
+
             let envelope = PacketEnvelope(
                 packetId: packet.id,
                 packetType: packet.packetType,
                 threadId: packet.threadId,
                 messageIds: packet.messageIds,
+                messageText: userText,
                 contextRefsJson: packet.contextRefsJson,
                 payloadJson: packet.payloadJson
             )
-            
+
 
             // IMPORTANT: Don't mutate SwiftData models after the await unless refetched.
             let response = try await transport.send(envelope: envelope)
@@ -108,6 +112,11 @@ final class TransmissionActions {
         let d = FetchDescriptor<Transmission>(predicate: #Predicate { $0.id == id })
         return try modelContext.fetch(d).first
     }
+
+    private func fetchMessage(id: UUID) throws -> Message? {
+        let d = FetchDescriptor<Message>(predicate: #Predicate { $0.id == id })
+        return try modelContext.fetch(d).first
+    }
 }
 
 struct PacketEnvelope: Sendable {
@@ -115,6 +124,7 @@ struct PacketEnvelope: Sendable {
     let packetType: String
     let threadId: UUID
     let messageIds: [UUID]
+    let messageText: String
     let contextRefsJson: String?
     let payloadJson: String?
 }
@@ -131,12 +141,62 @@ struct ChatResponse {
     let text: String
 }
 
+private struct SolServerChatRequestDTO: Codable {
+    let threadId: String
+    let clientRequestId: String
+    let message: String
+}
+
+private struct SolServerChatResponseDTO: Codable {
+    let ok: Bool
+    let transmissionId: String?
+    let assistant: String?
+    let idempotentReplay: Bool?
+    let pending: Bool?
+    let status: String?
+}
+
 struct StubChatTransport: ChatTransport {
+    /// For Simulator: http://127.0.0.1:3333 works.
+    /// For a physical iPhone: use your Mac's LAN IP (e.g., http://192.168.x.x:3333) and ensure ATS allows HTTP in dev.
+    var baseURL: URL = URL(string: "http://127.0.0.1:3333")!
+
     func send(envelope: PacketEnvelope) async throws -> ChatResponse {
-        // v0 stub: deterministic echo so you can watch the pipeline work
+        // v0: keep simulated failure path for pipeline testing
         if envelope.packetType == "chat_fail" {
             throw ChatTransportError.simulatedFailure
         }
-        return ChatResponse(text: "✅ Stub reply (packet \(envelope.packetId.uuidString.prefix(8)))")
+
+        let url = baseURL.appendingPathComponent("/v1/chat")
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        // Use packetId as idempotency key so retries dedupe server-side.
+        let dto = SolServerChatRequestDTO(
+            threadId: envelope.threadId.uuidString,
+            clientRequestId: envelope.packetId.uuidString,
+            message: envelope.messageText
+        )
+        req.httpBody = try JSONEncoder().encode(dto)
+
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        guard let http = resp as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+
+        // If server replies "pending" for an idempotent replay, surface a readable message for now.
+        if http.statusCode == 202 {
+            return ChatResponse(text: "⏳ Pending…")
+        }
+
+        // if a 2XX response then good and let pass else throw an error
+        guard (200...299).contains(http.statusCode) else {
+            let body = String(data: data, encoding: .utf8) ?? ""
+            throw NSError(domain: "SolServer", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: body])
+        }
+
+        let decoded = try JSONDecoder().decode(SolServerChatResponseDTO.self, from: data)
+        return ChatResponse(text: decoded.assistant ?? "(no assistant text)")
     }
 }
