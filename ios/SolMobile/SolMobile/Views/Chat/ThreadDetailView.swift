@@ -93,9 +93,9 @@ struct ThreadDetailView: View {
                     }
                     .font(.footnote)
                 }
-                .padding(10)
-                .background(.thinMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .padding(10)
+                    .background(.thinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
             )
         }
 
@@ -107,9 +107,9 @@ struct ThreadDetailView: View {
                         .font(.footnote)
                     Spacer()
                 }
-                .padding(10)
-                .background(.thinMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .padding(10)
+                    .background(.thinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
             )
         }
 
