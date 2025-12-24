@@ -29,9 +29,22 @@
 		0A9A00412EF133B0003FE519 /* SolMobileUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SolMobileUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		0A9DB3DA2EFB634C0048DE62 /* Exceptions for "SolMobile" folder in "SolMobile" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 0A9A00292EF133AF003FE519 /* SolMobile */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		0A9A002C2EF133AF003FE519 /* SolMobile */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				0A9DB3DA2EFB634C0048DE62 /* Exceptions for "SolMobile" folder in "SolMobile" target */,
+			);
 			path = SolMobile;
 			sourceTree = "<group>";
 		};
@@ -400,6 +413,7 @@
 				DEVELOPMENT_TEAM = H4EJ28SSE4;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = SolMobile/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = SolMobileDev;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -433,7 +447,8 @@
 				DEVELOPMENT_TEAM = H4EJ28SSE4;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = SolMobile;
+				INFOPLIST_FILE = SolMobile/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = SolMobileDev;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

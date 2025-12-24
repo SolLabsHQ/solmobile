@@ -1,0 +1,300 @@
+//
+//  SettingsView.swift
+//  SolMobile
+//
+//  Created by Jassen A. McNulty on 12/23/25.
+//
+import SwiftUI
+import os
+
+struct SettingsView: View {
+    // Persisted dev knob (UserDefaults via @AppStorage)
+    @AppStorage("solserver.baseURL") private var solserverBaseURL: String = "http://127.0.0.1:3333"
+
+    // Light tracing for debugging (non-sensitive)
+    private let log = Logger(subsystem: "com.sollabshq.solmobile", category: "Settings")
+
+    // Use seconds for dev ergonomics (makes retries/latency easier to reason about).
+    private static let timeWithSecondsFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = .autoupdatingCurrent
+        f.timeZone = .autoupdatingCurrent
+        f.dateFormat = "h:mm:ss a"
+        return f
+    }()
+
+    private func formatTimeWithSeconds(_ d: Date) -> String {
+        Self.timeWithSecondsFormatter.string(from: d)
+    }
+
+    // Last chat transport status (written by TransmissionAction/Transport).
+    private let lastChatStatusCodeKey = "sol.dev.lastChatStatusCode"
+    private let lastChatStatusAtKey = "sol.dev.lastChatStatusAt"
+
+    private var lastChatStatusCode: Int? {
+        UserDefaults.standard.object(forKey: lastChatStatusCodeKey) as? Int
+    }
+
+    private var lastChatStatusAt: Date? {
+        let t = UserDefaults.standard.double(forKey: lastChatStatusAtKey)
+        return t > 0 ? Date(timeIntervalSince1970: t) : nil
+    }
+
+    // Connection test state (dev ergonomics)
+    @State private var isTestingConnection: Bool = false
+    @State private var lastHealthCheck: String? = nil
+    @State private var lastHealthCheckError: String? = nil
+    @State private var lastHealthCheckAt: Date? = nil
+    @State private var healthTask: Task<Void, Never>? = nil
+
+    // Normalize and validate the URL string the user types
+    private var trimmedBaseURL: String {
+        solserverBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var isValidBaseURL: Bool {
+        URL(string: trimmedBaseURL) != nil
+    }
+
+    private var effectiveBaseURL: String {
+        isValidBaseURL ? trimmedBaseURL : "http://127.0.0.1:3333"
+    }
+
+    private var healthzURL: URL? {
+        guard let base = URL(string: effectiveBaseURL) else { return nil }
+        return base.appendingPathComponent("healthz")
+    }
+
+    private func runHealthCheck() {
+        // Cancel any in-flight test to avoid races in UI updates
+        healthTask?.cancel()
+
+        guard let url = healthzURL else {
+            lastHealthCheck = nil
+            lastHealthCheckError = "Invalid base URL"
+            return
+        }
+
+        isTestingConnection = true
+        lastHealthCheck = nil
+        lastHealthCheckError = nil
+
+        let started = Date()
+        log.info("[healthz] start url=\(url.absoluteString, privacy: .public)")
+
+        healthTask = Task {
+            // A couple quick retries helps with transient local network flakiness.
+            let backoffsNs: [UInt64] = [0, 250_000_000, 750_000_000]
+
+            for attempt in 1...backoffsNs.count {
+                if Task.isCancelled { return }
+
+                let backoff = backoffsNs[attempt - 1]
+                if backoff > 0 {
+                    try? await Task.sleep(nanoseconds: backoff)
+                }
+
+                do {
+                    var req = URLRequest(url: url)
+                    req.httpMethod = "GET"
+                    req.timeoutInterval = 4
+                    req.cachePolicy = .reloadIgnoringLocalCacheData
+                    req.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+
+                    let (data, resp) = try await URLSession.shared.data(for: req)
+                    let status = (resp as? HTTPURLResponse)?.statusCode ?? -1
+                    let body = String(data: data, encoding: .utf8) ?? ""
+
+                    let ms = Int(Date().timeIntervalSince(started) * 1000)
+
+                    if status == 200 {
+                        await MainActor.run {
+                            isTestingConnection = false
+                            lastHealthCheckError = nil
+                            lastHealthCheck = "Connected ✅ (\(ms)ms)"
+                            lastHealthCheckAt = Date()
+                        }
+
+                        log.info("[healthz] ok status=\(status, privacy: .public) attempt=\(attempt, privacy: .public) ms=\(ms, privacy: .public)")
+                        return
+                    } else {
+                        log.warning("[healthz] non-200 status=\(status, privacy: .public) attempt=\(attempt, privacy: .public)")
+
+                        // If it's the last attempt, surface the error.
+                        if attempt == backoffsNs.count {
+                            await MainActor.run {
+                                isTestingConnection = false
+                                lastHealthCheck = nil
+                                lastHealthCheckError = "Health check failed (HTTP \(status)). \(body)"
+                                lastHealthCheckAt = Date()
+                            }
+                            return
+                        }
+                    }
+                } catch {
+                    log.error("[healthz] error attempt=\(attempt, privacy: .public) err=\(String(describing: error), privacy: .public)")
+
+                    if attempt == backoffsNs.count {
+                        await MainActor.run {
+                            isTestingConnection = false
+                            lastHealthCheck = nil
+                            lastHealthCheckError = "Could not reach SolServer. \(String(describing: error))"
+                            lastHealthCheckAt = Date()
+                        }
+                        return
+                    }
+                }
+            }
+
+            await MainActor.run {
+                isTestingConnection = false
+            }
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("SolMobile Settings")
+                            .font(.headline)
+
+                        Text("Developer knobs are for local testing (simulator/phone) and should be set to a SolServer URL you control.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 4)
+                }
+
+
+                Section("Developer") {
+                    TextField("SolServer base URL", text: $solserverBaseURL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+
+                    // Show what the app will actually use (helps when the field is invalid)
+                    HStack {
+                        Text("Effective")
+                            .foregroundStyle(.secondary)
+
+                        Spacer()
+
+                        Text(effectiveBaseURL)
+                            .font(.footnote)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+
+                    // Presets: vertical to avoid Form/HStack hit-target weirdness
+                    VStack(alignment: .leading, spacing: 10) {
+                        Button {
+                            solserverBaseURL = "http://127.0.0.1:3333"
+                        } label: {
+                            Label("Simulator", systemImage: "laptopcomputer")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+
+                        Button {
+                            // Replace with your Mac’s LAN IP (same Wi‑Fi) once you’re ready.
+                            solserverBaseURL = "http://192.168.50.240:3333"
+                        } label: {
+                            Label("Phone (LAN)", systemImage: "iphone")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+
+                        Button(role: .destructive) {
+                            solserverBaseURL = "http://127.0.0.1:3333"
+                        } label: {
+                            Label("Reset", systemImage: "arrow.counterclockwise")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Button {
+                            runHealthCheck()
+                        } label: {
+                            Label(isTestingConnection ? "Testing…" : "Test connection", systemImage: "antenna.radiowaves.left.and.right")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(isTestingConnection)
+
+                        if let ok = lastHealthCheck {
+                            Text(ok)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        if let err = lastHealthCheckError {
+                            Text(err)
+                                .font(.footnote)
+                                .foregroundStyle(.red)
+                        }
+
+                        if let at = lastHealthCheckAt {
+                            Text("Last checked: \(formatTimeWithSeconds(at))")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        if let code = lastChatStatusCode {
+                            if let at = lastChatStatusAt {
+                                Text("Last chat: HTTP \(code) @ \(formatTimeWithSeconds(at))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                Text("Last chat: HTTP \(code)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+
+                        Text("Tip: Simulator can use 127.0.0.1. A physical phone must use your Mac’s LAN IP on the same Wi‑Fi.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if !isValidBaseURL {
+                        Text("Invalid URL. Example: http://127.0.0.1:3333")
+                            .foregroundStyle(.red)
+                            .font(.caption)
+                    }
+                }
+                .onChange(of: solserverBaseURL) { _, newValue in
+                    let v = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                    log.info("[baseURL] changed -> \(v, privacy: .public)")
+
+                    // Reset health state so we don't show stale results for a new URL.
+                    lastHealthCheck = nil
+                    lastHealthCheckError = nil
+                    lastHealthCheckAt = nil
+                }
+
+
+                Section("About") {
+                    HStack {
+                        Text("Version")
+                        Spacer()
+                        Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "-")
+                            .foregroundStyle(.secondary)
+                    }
+
+                    HStack {
+                        Text("Build")
+                        Spacer()
+                        Text(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "-")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .navigationTitle("Settings")
+        }
+    }
+
+}

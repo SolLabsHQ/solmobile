@@ -24,8 +24,8 @@ struct ContentView: View {
 //            AnchorsView()
 //                .tabItem { Label("Anchors", systemImage: "bookmark") }
 //
-//            SettingsView()
-//                .tabItem { Label("Settings", systemImage: "gearshape") }
+            SettingsView()
+                .tabItem { Label("Settings", systemImage: "gearshape") }
         }
         .modelContainer(for: [
             Thread.self,
