@@ -233,23 +233,28 @@ private struct SolServerChatResponseDTO: Codable {
 }
 
 struct StubChatTransport: ChatTransport {
-    /// For Simulator: http://127.0.0.1:3333 works.
-    /// For a physical iPhone: use your Mac's LAN IP (e.g., http://192.168.x.x:3333) and ensure ATS allows HTTP in dev.
-    var baseURL: URL = URL(string: "http://127.0.0.1:3333")!
+
+    // Base URL is driven by Settings (@AppStorage -> UserDefaults)
+    private var baseURL: URL {
+        let raw = (UserDefaults.standard.string(forKey: "solserver.baseURL") ?? "http://127.0.0.1:3333")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Hard fallback for safety
+        return URL(string: raw) ?? URL(string: "http://127.0.0.1:3333")!
+    }
 
     func send(envelope: PacketEnvelope) async throws -> ChatResponse {
         let startNs = DispatchTime.now().uptimeNanoseconds
         let isFailTest = (envelope.packetType == "chat_fail")
+        
         transportLog.info("[send] packet=\(envelope.packetId.uuidString.prefix(8), privacy: .public) thread=\(envelope.threadId.uuidString.prefix(8), privacy: .public) failTest=\(isFailTest, privacy: .public)")
 
-        
         // v0: keep simulated failure path for pipeline testing
         let simulate500 = (envelope.packetType == "chat_fail")
 
-        
         let url = baseURL.appendingPathComponent("/v1/chat")
+        transportLog.info("[send] URL=\(url.absoluteString, privacy: .public)")
 
-        
         // build request
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
