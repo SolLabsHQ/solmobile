@@ -22,6 +22,21 @@ struct ModeDecision: Codable {
     let version: String
 }
 
+// ThreadMemento is a navigation artifact returned by SolServer.
+// It is not durable knowledge; the client may choose to Accept/Decline.
+struct ThreadMementoDTO: Codable {
+    let id: String
+    let threadId: String
+    let createdAt: String
+    let version: String
+
+    let arc: String
+    let active: [String]
+    let parked: [String]
+    let decisions: [String]
+    let next: [String]
+}
+
 struct Response: Codable {
     let ok: Bool
     let transmissionId: String?
@@ -30,6 +45,9 @@ struct Response: Codable {
     let idempotentReplay: Bool?
     let pending: Bool?
     let status: String?
+
+    // Present when SolServer auto-saves a ThreadMemento (Option 1).
+    let threadMemento: ThreadMementoDTO?
 }
 
 struct TransmissionDTO: Codable {
@@ -42,6 +60,9 @@ struct TransmissionResponse: Codable {
     let transmission: TransmissionDTO
     let pending: Bool?
     let assistant: String?
+
+    // Present once the transmission is completed and the server has a memento snapshot.
+    let threadMemento: ThreadMementoDTO?
 }
 
 final class SolServerClient {

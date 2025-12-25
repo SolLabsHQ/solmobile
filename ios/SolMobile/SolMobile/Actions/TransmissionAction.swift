@@ -48,6 +48,21 @@ private func timeWithSeconds(_ d: Date) -> String {
     timeWithSecondsFormatter.string(from: d)
 }
 
+// ThreadMemento is a navigation artifact returned by SolServer.
+// It is not durable knowledge; the client may choose to Accept or Decline.
+private enum ThreadMementoFormatter {
+    static func format(_ m: ThreadMementoDTO) -> String {
+        func join(_ xs: [String]) -> String { xs.isEmpty ? "(none)" : xs.joined(separator: " | ") }
+
+        return [
+            "Arc: \(m.arc.isEmpty ? "(none)" : m.arc)",
+            "Active: \(join(m.active))",
+            "Parked: \(join(m.parked))",
+            "Decisions: \(join(m.decisions))",
+            "Next: \(join(m.next))",
+        ].joined(separator: "\n")
+    }
+}
 
 @MainActor
 final class TransmissionActions {
@@ -184,6 +199,14 @@ final class TransmissionActions {
                 )
                 freshTx.deliveryAttempts.append(pollAttempt)
                 modelContext.insert(pollAttempt)
+
+                if let m = poll.threadMemento {
+                    freshTx.serverThreadMementoId = m.id
+                    freshTx.serverThreadMementoCreatedAtISO = m.createdAt
+                    freshTx.serverThreadMementoSummary = ThreadMementoFormatter.format(m)
+
+                    outboxLog.info("processQueue run=\(runId, privacy: .public) event=memento_draft_saved tx=\(short(txId), privacy: .public) memento=\(m.id, privacy: .public) via=poll")
+                }
 
                 if poll.pending {
                     freshTx.status = .queued
@@ -331,6 +354,14 @@ final class TransmissionActions {
             freshTx.deliveryAttempts.append(attempt)
             modelContext.insert(attempt)
 
+            if let m = response.threadMemento {
+                freshTx.serverThreadMementoId = m.id
+                freshTx.serverThreadMementoCreatedAtISO = m.createdAt
+                freshTx.serverThreadMementoSummary = ThreadMementoFormatter.format(m)
+
+                outboxLog.info("processQueue run=\(runId, privacy: .public) event=memento_draft_saved tx=\(short(txId), privacy: .public) memento=\(m.id, privacy: .public) via=send")
+            }
+
             // Pending: keep queued so a future outbox pass can poll server-side completion.
             if response.pending || response.statusCode == 202 {
                 // Accepted but not delivered yet: keep it eligible for another outbox pass.
@@ -470,6 +501,8 @@ struct ChatPollResponse {
     let assistant: String?
     let serverStatus: String?
     let statusCode: Int
+
+    let threadMemento: ThreadMementoDTO?
 }
 
 enum ChatTransportError: Error {
@@ -482,6 +515,8 @@ struct ChatResponse {
     let statusCode: Int
     let transmissionId: String?
     let pending: Bool
+
+    let threadMemento: ThreadMementoDTO?
 }
 
 private struct SolServerChatRequestDTO: Codable {
@@ -497,6 +532,8 @@ private struct SolServerChatResponseDTO: Codable {
     let idempotentReplay: Bool?
     let pending: Bool?
     let status: String?
+
+    let threadMemento: ThreadMementoDTO?
 }
 
 private struct SolServerTransmissionResponseDTO: Codable {
@@ -509,6 +546,8 @@ private struct SolServerTransmissionResponseDTO: Codable {
     let transmission: TransmissionDTO
     let pending: Bool?
     let assistant: String?
+
+    let threadMemento: ThreadMementoDTO?
 }
 
 struct StubChatTransport: ChatTransportPolling {
@@ -547,7 +586,8 @@ struct StubChatTransport: ChatTransportPolling {
             pending: pending,
             assistant: decoded.assistant,
             serverStatus: decoded.transmission.status,
-            statusCode: http.statusCode
+            statusCode: http.statusCode,
+            threadMemento: decoded.threadMemento
         )
     }
 
@@ -630,7 +670,13 @@ struct StubChatTransport: ChatTransportPolling {
             let decoded = (try? JSONDecoder().decode(SolServerChatResponseDTO.self, from: data))
             let txId = headerTxId ?? decoded?.transmissionId
             transportLog.info("send event=pending http=202 tx=\(shortOrDash(txId), privacy: .public)")
-            return ChatResponse(text: "", statusCode: 202, transmissionId: txId, pending: true)
+            return ChatResponse(
+                text: "",
+                statusCode: 202,
+                transmissionId: txId,
+                pending: true,
+                threadMemento: decoded?.threadMemento
+            )
         }
 
         // If a 2XX response then good; else throw with status preserved for retry/attempt recording.
@@ -649,7 +695,8 @@ struct StubChatTransport: ChatTransportPolling {
             text: decoded.assistant ?? "(no assistant text)",
             statusCode: http.statusCode,
             transmissionId: txId,
-            pending: isPending
+            pending: isPending,
+            threadMemento: decoded.threadMemento
         )
     }
 }

@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import os
+import Foundation
 
 struct ThreadDetailView: View {
     @Environment(\.modelContext) private var modelContext
@@ -8,6 +9,11 @@ struct ThreadDetailView: View {
     @Query private var transmissions: [Transmission]
     @State private var isProcessingOutbox: Bool = false
     @State private var outboxNeedsRerun: Bool = false
+
+    // ThreadMemento (navigation artifact): model-proposed snapshot returned by SolServer.
+    // We store acceptance state locally (UserDefaults) so it survives view reloads.
+    @State private var acceptedMemento: MementoViewModel? = nil
+    @State private var mementoRefreshToken: Int = 0
 
     // Trace UI-level outbox lifecycle (retry taps, coalesced reruns, etc.)
     private let viewLog = Logger(subsystem: "com.sollabshq.solmobile", category: "ThreadDetailView")
@@ -31,6 +37,21 @@ struct ThreadDetailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+
+            // Accepted ThreadMemento (navigation snapshot).
+            if let acceptedMemento {
+                mementoAcceptedCard(acceptedMemento)
+                    .padding(.horizontal, 10)
+                    .padding(.top, 8)
+            }
+
+            // Pending ThreadMemento draft from latest server response.
+            if let pending = pendingMementoCandidate {
+                mementoPendingCard(pending)
+                    .padding(.horizontal, 10)
+                    .padding(.top, 8)
+            }
+
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 10) {
@@ -65,7 +86,10 @@ struct ThreadDetailView: View {
         .onChange(of: outboxSummary.failed + outboxSummary.queued + outboxSummary.sending) { _, newValue in
             viewLog.debug("[outboxBanner] refresh total=\(newValue, privacy: .public)")
         }
-        .onAppear { processOutbox() }
+        .onAppear {
+            loadAcceptedMementoFromDefaults()
+            processOutbox()
+        }
         .navigationTitle(thread.title)
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -138,6 +162,188 @@ struct ThreadDetailView: View {
         var sending: Int
         var failed: Int
     }
+
+    // MARK: - ThreadMemento UI + state
+
+    private struct MementoViewModel: Equatable {
+        let id: String
+        let summary: String
+        let createdAtISO: String?
+    }
+
+    private var mementoDefaultsKeyCurrent: String {
+        "sol.threadMemento.current.\(thread.id.uuidString)"
+    }
+
+    private var mementoDefaultsKeyPrev: String {
+        "sol.threadMemento.prev.\(thread.id.uuidString)"
+    }
+
+    private var mementoDefaultsKeyDismissed: String {
+        "sol.threadMemento.dismissed.\(thread.id.uuidString)"
+    }
+
+    private func mementoAcceptedCard(_ m: MementoViewModel) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Thread memento")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                Button("Undo") {
+                    viewLog.info("[memento] undo tapped")
+                    undoAcceptedMemento()
+                }
+                .font(.footnote)
+            }
+
+            Text(m.summary)
+                .font(.footnote)
+                .textSelection(.enabled)
+        }
+        .padding(10)
+        .background(.thinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func mementoPendingCard(_ m: MementoViewModel) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Image(systemName: "sparkles")
+                Text("Memento draft")
+                    .font(.footnote)
+                Spacer()
+            }
+
+            Text(m.summary)
+                .font(.footnote)
+                .textSelection(.enabled)
+
+            // Keep buttons vertical to avoid the "whole bar is one button" feel.
+            VStack(spacing: 8) {
+                Button {
+                    viewLog.info("[memento] accept tapped id=\(m.id, privacy: .public)")
+                    acceptMemento(m)
+                } label: {
+                    Text("Accept")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button {
+                    viewLog.info("[memento] decline tapped id=\(m.id, privacy: .public)")
+                    declineMemento(m)
+                } label: {
+                    Text("Decline")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .padding(10)
+        .background(.thinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func loadAcceptedMementoFromDefaults() {
+        guard let raw = UserDefaults.standard.dictionary(forKey: mementoDefaultsKeyCurrent) else {
+            acceptedMemento = nil
+            return
+        }
+
+        let id = raw["id"] as? String ?? ""
+        let summary = raw["summary"] as? String ?? ""
+        let createdAtISO = raw["createdAtISO"] as? String
+
+        if !id.isEmpty, !summary.isEmpty {
+            acceptedMemento = MementoViewModel(id: id, summary: summary, createdAtISO: createdAtISO)
+        } else {
+            acceptedMemento = nil
+        }
+    }
+
+    private func acceptMemento(_ m: MementoViewModel) {
+        // Move current -> prev for Undo.
+        if let current = UserDefaults.standard.dictionary(forKey: mementoDefaultsKeyCurrent) {
+            UserDefaults.standard.set(current, forKey: mementoDefaultsKeyPrev)
+        }
+
+        UserDefaults.standard.set(
+            ["id": m.id, "summary": m.summary, "createdAtISO": m.createdAtISO as Any],
+            forKey: mementoDefaultsKeyCurrent
+        )
+
+        // Mark this draft id as dismissed so we don’t re-show it.
+        UserDefaults.standard.set(m.id, forKey: mementoDefaultsKeyDismissed)
+
+        acceptedMemento = m
+        mementoRefreshToken &+= 1
+    }
+
+    private func declineMemento(_ m: MementoViewModel) {
+        // Decline only dismisses this draft id. It does not change the accepted memento.
+        UserDefaults.standard.set(m.id, forKey: mementoDefaultsKeyDismissed)
+        mementoRefreshToken &+= 1
+    }
+
+    private func undoAcceptedMemento() {
+        guard let prev = UserDefaults.standard.dictionary(forKey: mementoDefaultsKeyPrev) else {
+            viewLog.info("[memento] undo: no prev")
+            return
+        }
+
+        // Swap current <-> prev.
+        if let current = UserDefaults.standard.dictionary(forKey: mementoDefaultsKeyCurrent) {
+            UserDefaults.standard.set(current, forKey: mementoDefaultsKeyPrev)
+        }
+        UserDefaults.standard.set(prev, forKey: mementoDefaultsKeyCurrent)
+
+        loadAcceptedMementoFromDefaults()
+    }
+
+    private var pendingMementoCandidate: MementoViewModel? {
+        // Link to a local state token so Accept/Decline can force a re-evaluation even though
+        // UserDefaults changes are not automatically observed.
+        _ = mementoRefreshToken
+
+        // v0: best effort.
+        // Look at the latest Transmission for this thread and read the server-proposed ThreadMemento draft
+        // that `TransmissionActions` persisted from the SolServer response.
+        guard let latest = transmissions.first else {
+            return nil
+        }
+
+        guard
+            let id = latest.serverThreadMementoId,
+            let summary = latest.serverThreadMementoSummary,
+            !id.isEmpty,
+            !summary.isEmpty
+        else {
+            return nil
+        }
+
+        let extracted = MementoViewModel(
+            id: id,
+            summary: summary,
+            createdAtISO: latest.serverThreadMementoCreatedAtISO
+        )
+
+        // Do not show if the user already accepted/declined this id.
+        let dismissedId = UserDefaults.standard.string(forKey: mementoDefaultsKeyDismissed)
+        if dismissedId == extracted.id {
+            return nil
+        }
+
+        // Do not show if it matches the current accepted.
+        if acceptedMemento?.id == extracted.id {
+            return nil
+        }
+
+        return extracted
+    }
+
 
     private var outboxSummary: OutboxSummary {
         // Live derived state: @Query updates when SwiftData changes.

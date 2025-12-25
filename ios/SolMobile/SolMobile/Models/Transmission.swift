@@ -24,6 +24,12 @@ final class Transmission {
     var createdAt: Date
     var lastError: String?
 
+    // Server-proposed ThreadMemento draft (navigation artifact).
+    // Used to offer Accept/Decline in the UI without storing raw JSON.
+    var serverThreadMementoId: String?
+    var serverThreadMementoCreatedAtISO: String?
+    var serverThreadMementoSummary: String?
+
     // Local ledger of delivery attempts (used to derive retry/backoff/timeout without redundant fields).
     @Relationship(deleteRule: .cascade, inverse: \DeliveryAttempt.transmission)
     var deliveryAttempts: [DeliveryAttempt] = []
