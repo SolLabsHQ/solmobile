@@ -15,6 +15,10 @@ struct ThreadDetailView: View {
     @State private var acceptedMemento: MementoViewModel? = nil
     @State private var mementoRefreshToken: Int = 0
 
+    // Transient toast for lightweight feedback (Accept/Decline/Undo).
+    @State private var toastMessage: String? = nil
+    @State private var toastToken: Int = 0
+
     // Trace UI-level outbox lifecycle (retry taps, coalesced reruns, etc.)
     private let viewLog = Logger(subsystem: "com.sollabshq.solmobile", category: "ThreadDetailView")
 
@@ -50,6 +54,23 @@ struct ThreadDetailView: View {
                 mementoPendingCard(pending)
                     .padding(.horizontal, 10)
                     .padding(.top, 8)
+            }
+
+            // Mini toast: short-lived feedback for memento actions.
+            if let toastMessage {
+                HStack(spacing: 10) {
+                    Image(systemName: "checkmark.circle")
+                    Text(toastMessage)
+                        .font(.footnote)
+                    Spacer()
+                }
+                .padding(10)
+                .background(.thinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .padding(.horizontal, 10)
+                .padding(.top, 8)
+                .transition(.opacity)
+                .animation(.easeInOut(duration: 0.15), value: toastMessage)
             }
 
             ScrollViewReader { proxy in
@@ -264,6 +285,20 @@ struct ThreadDetailView: View {
         }
     }
 
+    @MainActor
+    private func showToast(_ text: String) {
+        toastMessage = text
+
+        // Token-based clear so rapid taps don't race.
+        toastToken &+= 1
+        let token = toastToken
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            guard self.toastToken == token else { return }
+            self.toastMessage = nil
+        }
+    }
+
 private func acceptMemento(_ m: MementoViewModel) {
     // Move current -> prev for Undo.
     if let current = UserDefaults.standard.dictionary(forKey: mementoDefaultsKeyCurrent) {
@@ -303,13 +338,19 @@ private func acceptMemento(_ m: MementoViewModel) {
 
                 await MainActor.run {
                     acceptedMemento = patched
+                    showToast("Accepted")
                 }
 
                 viewLog.info("[memento] accept applied serverId=\(applied.id, privacy: .public)")
+            } else if result.reason == "already_accepted" {
+                await MainActor.run { showToast("Already accepted") }
+                viewLog.info("[memento] accept already_accepted")
             } else {
+                await MainActor.run { showToast("Accept not applied") }
                 viewLog.info("[memento] accept not_applied reason=\(result.reason ?? "-", privacy: .public)")
             }
         } catch {
+            await MainActor.run { showToast("Accept failed") }
             viewLog.error("[memento] accept failed err=\(String(describing: error), privacy: .public)")
         }
 
@@ -325,14 +366,21 @@ private func acceptMemento(_ m: MementoViewModel) {
         Task {
             let actions = TransmissionActions(modelContext: modelContext)
             do {
-                _ = try await actions.decideThreadMemento(threadId: thread.id, mementoId: m.id, decision: .decline)
-            } catch {
-                viewLog.error("[memento] decline failed err=\(String(describing: error), privacy: .public)")
-            }
+                let result = try await actions.decideThreadMemento(threadId: thread.id, mementoId: m.id, decision: .decline)
 
-            await MainActor.run {
-                // Force re-evaluation (UserDefaults is not observed).
-                mementoRefreshToken &+= 1
+                await MainActor.run {
+                    showToast(result.applied ? "Declined" : "Decline saved")
+                    // Force re-evaluation (UserDefaults is not observed).
+                    mementoRefreshToken &+= 1
+                }
+            } catch {
+                await MainActor.run {
+                    showToast("Decline failed")
+                    // Force re-evaluation (UserDefaults is not observed).
+                    mementoRefreshToken &+= 1
+                }
+
+                viewLog.error("[memento] decline failed err=\(String(describing: error), privacy: .public)")
             }
         }
     }
@@ -354,14 +402,21 @@ private func acceptMemento(_ m: MementoViewModel) {
             Task {
                 let actions = TransmissionActions(modelContext: modelContext)
                 do {
-                    _ = try await actions.decideThreadMemento(threadId: thread.id, mementoId: id, decision: .revoke)
-                } catch {
-                    viewLog.error("[memento] revoke failed err=\(String(describing: error), privacy: .public)")
-                }
+                    let result = try await actions.decideThreadMemento(threadId: thread.id, mementoId: id, decision: .revoke)
 
-                await MainActor.run {
-                    // Force re-evaluation (UserDefaults is not observed).
-                    mementoRefreshToken &+= 1
+                    await MainActor.run {
+                        showToast(result.applied ? "Undone" : "Undo saved")
+                        // Force re-evaluation (UserDefaults is not observed).
+                        mementoRefreshToken &+= 1
+                    }
+                } catch {
+                    await MainActor.run {
+                        showToast("Undo failed")
+                        // Force re-evaluation (UserDefaults is not observed).
+                        mementoRefreshToken &+= 1
+                    }
+
+                    viewLog.error("[memento] revoke failed err=\(String(describing: error), privacy: .public)")
                 }
             }
         }
