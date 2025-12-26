@@ -264,35 +264,58 @@ struct ThreadDetailView: View {
         }
     }
 
-    private func acceptMemento(_ m: MementoViewModel) {
-
-        
-        // Move current -> prev for Undo.
-        if let current = UserDefaults.standard.dictionary(forKey: mementoDefaultsKeyCurrent) {
-            UserDefaults.standard.set(current, forKey: mementoDefaultsKeyPrev)
-        }
-
-        UserDefaults.standard.set(
-            ["id": m.id, "summary": m.summary, "createdAtISO": m.createdAtISO as Any],
-            forKey: mementoDefaultsKeyCurrent
-        )
-
-        // Mark this draft id as dismissed so we don’t re-show it.
-        UserDefaults.standard.set(m.id, forKey: mementoDefaultsKeyDismissed)
-
-        acceptedMemento = m
-
-        // Submit to SolServer and clear the local draft fields so the banner disappears immediately.
-        Task {
-            let actions = TransmissionActions(modelContext: modelContext)
-            await actions.decideThreadMemento(threadId: thread.id, mementoId: m.id, decision: .accept)
-
-            await MainActor.run {
-                // Force re-evaluation (UserDefaults is not observed).
-                mementoRefreshToken &+= 1
-            }
-        }
+private func acceptMemento(_ m: MementoViewModel) {
+    // Move current -> prev for Undo.
+    if let current = UserDefaults.standard.dictionary(forKey: mementoDefaultsKeyCurrent) {
+        UserDefaults.standard.set(current, forKey: mementoDefaultsKeyPrev)
     }
+
+    // Optimistic local accept so the UI updates immediately.
+    UserDefaults.standard.set(
+        ["id": m.id, "summary": m.summary, "createdAtISO": m.createdAtISO as Any],
+        forKey: mementoDefaultsKeyCurrent
+    )
+
+    // Mark this draft id as dismissed so we don’t re-show it.
+    UserDefaults.standard.set(m.id, forKey: mementoDefaultsKeyDismissed)
+
+    acceptedMemento = m
+
+    // Submit to SolServer (throws on transport issues). We still keep the optimistic UI.
+    Task {
+        let actions = TransmissionActions(modelContext: modelContext)
+
+        do {
+            let result = try await actions.decideThreadMemento(
+                threadId: thread.id,
+                mementoId: m.id,
+                decision: .accept
+            )
+
+            // Server may return a different id for the accepted artifact.
+            if let applied = result.memento, result.applied {
+                let patched = MementoViewModel(id: applied.id, summary: m.summary, createdAtISO: applied.createdAt)
+
+                UserDefaults.standard.set(
+                    ["id": patched.id, "summary": patched.summary, "createdAtISO": patched.createdAtISO as Any],
+                    forKey: mementoDefaultsKeyCurrent
+                )
+
+                await MainActor.run {
+                    acceptedMemento = patched
+                }
+
+                viewLog.info("[memento] accept applied serverId=\(applied.id, privacy: .public)")
+            } else {
+                viewLog.info("[memento] accept not_applied reason=\(result.reason ?? "-", privacy: .public)")
+            }
+        } catch {
+            viewLog.error("[memento] accept failed err=\(String(describing: error), privacy: .public)")
+        }
+
+        await MainActor.run { mementoRefreshToken &+= 1 }
+    }
+}
 
     private func declineMemento(_ m: MementoViewModel) {
         // Decline only dismisses this draft id. It does not change the accepted memento.
@@ -301,7 +324,11 @@ struct ThreadDetailView: View {
         // Submit to SolServer and clear the local draft fields so the banner disappears immediately.
         Task {
             let actions = TransmissionActions(modelContext: modelContext)
-            await actions.decideThreadMemento(threadId: thread.id, mementoId: m.id, decision: .decline)
+            do {
+                _ = try await actions.decideThreadMemento(threadId: thread.id, mementoId: m.id, decision: .decline)
+            } catch {
+                viewLog.error("[memento] decline failed err=\(String(describing: error), privacy: .public)")
+            }
 
             await MainActor.run {
                 // Force re-evaluation (UserDefaults is not observed).
@@ -326,7 +353,11 @@ struct ThreadDetailView: View {
             // Submit to SolServer and clear the local draft fields so the banner disappears immediately.
             Task {
                 let actions = TransmissionActions(modelContext: modelContext)
-                await actions.decideThreadMemento(threadId: thread.id, mementoId:id, decision: .revoke)
+                do {
+                    _ = try await actions.decideThreadMemento(threadId: thread.id, mementoId: id, decision: .revoke)
+                } catch {
+                    viewLog.error("[memento] revoke failed err=\(String(describing: error), privacy: .public)")
+                }
 
                 await MainActor.run {
                     // Force re-evaluation (UserDefaults is not observed).

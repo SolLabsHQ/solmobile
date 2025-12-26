@@ -1,3 +1,4 @@
+
 //
 //  TransmissionAction.swift
 //  SolMobile
@@ -9,10 +10,395 @@ import Foundation
 import SwiftData
 import os
 
+// MARK: - Logging
+
 private let transportLog = Logger(subsystem: "com.sollabshq.solmobile", category: "Transport")
+
+// MARK: - Dev telemetry (UserDefaults)
+
+/// Dev telemetry keys (UserDefaults) for quick transport health visibility.
+///
+/// Note: this is intentionally lightweight and local-only.
+private enum DevTelemetry {
+    static let lastChatStatusCodeKey = "sol.dev.lastChatStatusCode"
+    static let lastChatStatusAtKey = "sol.dev.lastChatStatusAt"
+
+    static func persistLastChat(statusCode: Int) {
+        UserDefaults.standard.set(statusCode, forKey: lastChatStatusCodeKey)
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: lastChatStatusAtKey)
+    }
+}
+
+// MARK: - Small helpers
+
+private func msSince(_ startNs: UInt64) -> Double {
+    let endNs = DispatchTime.now().uptimeNanoseconds
+    return Double(endNs &- startNs) / 1_000_000.0
+}
+
+private func short(_ id: UUID) -> String {
+    String(id.uuidString.prefix(8))
+}
+
+private func shortOrDash(_ s: String?) -> String {
+    (s?.isEmpty == false) ? s! : "-"
+}
+
+private let timeWithSecondsFormatter: DateFormatter = {
+    let f = DateFormatter()
+    f.locale = .autoupdatingCurrent
+    f.timeZone = .autoupdatingCurrent
+    f.dateFormat = "h:mm:ss a"
+    return f
+}()
+
+private func timeWithSeconds(_ d: Date) -> String {
+    timeWithSecondsFormatter.string(from: d)
+}
+
+// MARK: - ThreadMemento formatting
+
+/// ThreadMemento is a navigation artifact returned by SolServer.
+/// It is not durable knowledge; the client may choose to Accept / Decline / Revoke.
+private enum ThreadMementoFormatter {
+    static func format(_ m: ThreadMementoDTO) -> String {
+        func join(_ xs: [String]) -> String {
+            guard !xs.isEmpty else { return "(none)" }
+            return xs.joined(separator: " | ")
+        }
+
+        let arc = m.arc.isEmpty ? "(none)" : m.arc
+
+        return [
+            "Arc: \(arc)",
+            "Active: \(join(m.active))",
+            "Parked: \(join(m.parked))",
+            "Decisions: \(join(m.decisions))",
+            "Next: \(join(m.next))",
+        ].joined(separator: "\n")
+    }
+}
+
+// MARK: - Transport contracts
+
+struct PacketEnvelope: Sendable {
+    let packetId: UUID
+    let packetType: String
+    let threadId: UUID
+    let messageIds: [UUID]
+    let messageText: String
+    let contextRefsJson: String?
+    let payloadJson: String?
+}
+
+protocol ChatTransport {
+    func send(envelope: PacketEnvelope) async throws -> ChatResponse
+}
+
+/// Optional capability: some transports can poll server-side delivery for pending (202) transmissions.
+protocol ChatTransportPolling: ChatTransport {
+    func poll(transmissionId: String) async throws -> ChatPollResponse
+}
+
+// ThreadMemento decisions are user-controlled. In v0 they are applied server-side.
+// - accept: draft -> accepted
+// - decline: draft -> discarded
+// - revoke: accepted -> cleared
+// The client submits the decision and clears local draft fields for immediate UI updates.
+enum ThreadMementoDecision: String, Codable, Sendable {
+    /// Accept the current draft memento (promote to accepted).
+    case accept
+
+    /// Decline the current draft memento (discard draft).
+    case decline
+
+    /// Revoke the currently accepted memento (clear accepted state).
+    /// In v0 this is a simple “forget it” switch; no historical restore.
+    case revoke
+}
+
+struct ThreadMementoDecisionResult: Sendable {
+    let statusCode: Int
+    let applied: Bool
+    let reason: String?
+    let memento: ThreadMementoDTO?
+}
+
+protocol ChatTransportMementoDecision {
+    func decideMemento(threadId: String, mementoId: String, decision: ThreadMementoDecision) async throws -> ThreadMementoDecisionResult
+}
+
+struct ChatPollResponse {
+    let pending: Bool
+    let assistant: String?
+    let serverStatus: String?
+    let statusCode: Int
+
+    let threadMemento: ThreadMementoDTO?
+}
+
+enum TransportError: Error {
+    case simulatedFailure
+    case httpStatus(code: Int, body: String)
+
+    /// The configured transport does not support a required optional capability.
+    case unsupportedTransport(capability: String)
+}
+
+struct ChatResponse {
+    let text: String
+    let statusCode: Int
+    let transmissionId: String?
+    let pending: Bool
+
+    let threadMemento: ThreadMementoDTO?
+}
+
+// MARK: - SolServer DTOs
+
+private struct SolServerMementoDecisionRequestDTO: Codable {
+    let threadId: String
+    let mementoId: String
+    let decision: String
+}
+
+private struct SolServerMementoDecisionResponseDTO: Codable {
+    let ok: Bool
+    let decision: String
+    let applied: Bool
+    let reason: String?
+    let memento: ThreadMementoDTO?
+}
+
+private struct SolServerChatRequestDTO: Codable {
+    let threadId: String
+    let clientRequestId: String
+    let message: String
+}
+
+private struct SolServerChatResponseDTO: Codable {
+    let ok: Bool
+    let transmissionId: String?
+    let assistant: String?
+    let idempotentReplay: Bool?
+    let pending: Bool?
+    let status: String?
+
+    let threadMemento: ThreadMementoDTO?
+}
+
+private struct SolServerTransmissionResponseDTO: Codable {
+    struct TransmissionDTO: Codable {
+        let id: String
+        let status: String
+    }
+
+    let ok: Bool
+    let transmission: TransmissionDTO
+    let pending: Bool?
+    let assistant: String?
+
+    let threadMemento: ThreadMementoDTO?
+}
+
+// MARK: - Default (dev) transport
+
+struct StubChatTransport: ChatTransportPolling, ChatTransportMementoDecision {
+
+    // Base URL is driven by Settings (@AppStorage -> UserDefaults)
+    private var baseURL: URL {
+        let raw = (UserDefaults.standard.string(forKey: "solserver.baseURL") ?? "http://127.0.0.1:3333")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Hard fallback for safety
+        return URL(string: raw) ?? URL(string: "http://127.0.0.1:3333")!
+    }
+
+    func poll(transmissionId: String) async throws -> ChatPollResponse {
+        let startNs = DispatchTime.now().uptimeNanoseconds
+
+        let url = baseURL
+            .appendingPathComponent("/v1/transmissions")
+            .appendingPathComponent(transmissionId)
+
+        transportLog.debug("poll event=url url=\(url.absoluteString, privacy: .public)")
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+
+        let (data, resp) = try await URLSession.shared.data(for: req)
+
+        guard let http = resp as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+
+        transportLog.info("poll event=response http=\(http.statusCode, privacy: .public) ms=\(msSince(startNs), format: .fixed(precision: 1)) tx=\(shortOrDash(transmissionId), privacy: .public)")
+
+        guard (200...299).contains(http.statusCode) else {
+            let body = String(data: data, encoding: .utf8) ?? ""
+            transportLog.error("poll event=error http=\(http.statusCode, privacy: .public) bodyLen=\(body.count, privacy: .public)")
+            throw TransportError.httpStatus(code: http.statusCode, body: body)
+        }
+
+        let decoded = try JSONDecoder().decode(SolServerTransmissionResponseDTO.self, from: data)
+        let pending = decoded.pending ?? (decoded.transmission.status == "created")
+
+        transportLog.info("poll event=decoded pending=\(pending, privacy: .public) serverStatus=\(decoded.transmission.status, privacy: .public) assistantLen=\((decoded.assistant ?? "").count, privacy: .public)")
+
+        return ChatPollResponse(
+            pending: pending,
+            assistant: decoded.assistant,
+            serverStatus: decoded.transmission.status,
+            statusCode: http.statusCode,
+            threadMemento: decoded.threadMemento
+        )
+    }
+
+    func send(envelope: PacketEnvelope) async throws -> ChatResponse {
+        let startNs = DispatchTime.now().uptimeNanoseconds
+
+        transportLog.info("send event=start packet=\(short(envelope.packetId), privacy: .public) thread=\(short(envelope.threadId), privacy: .public) type=\(envelope.packetType, privacy: .public)")
+
+        // v0: keep simulated failure path for pipeline testing
+        let simulate500 = (envelope.packetType == "chat_fail")
+
+        let url = baseURL.appendingPathComponent("/v1/chat")
+        transportLog.debug("send event=url url=\(url.absoluteString, privacy: .public)")
+
+        // Build request
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        // Simulated 500 for pipeline testing.
+        if simulate500 {
+            req.setValue("500", forHTTPHeaderField: "x-sol-simulate-status")
+            transportLog.info("send event=simulate http=500")
+        }
+
+        // Simulated 202 for polling flow.
+        let simulate202 = envelope.messageText
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .hasPrefix("/pending")
+
+        if simulate202 {
+            req.setValue("202", forHTTPHeaderField: "x-sol-simulate-status")
+            transportLog.info("send event=simulate http=202")
+        }
+
+        // Use packetId as idempotency key so retries dedupe server-side.
+        let dto = SolServerChatRequestDTO(
+            threadId: envelope.threadId.uuidString,
+            clientRequestId: envelope.packetId.uuidString,
+            message: envelope.messageText
+        )
+
+        req.httpBody = try JSONEncoder().encode(dto)
+
+        let (data, resp) = try await URLSession.shared.data(for: req)
+
+        guard let http = resp as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+
+        // Persist for Settings/Dev UI.
+        DevTelemetry.persistLastChat(statusCode: http.statusCode)
+
+        let headerTxId = http.value(forHTTPHeaderField: "x-sol-transmission-id")
+        transportLog.info("send event=response http=\(http.statusCode, privacy: .public) ms=\(msSince(startNs), format: .fixed(precision: 1)) tx=\(shortOrDash(headerTxId), privacy: .public)")
+
+        // If 500 returns and we are simulation flow, throw the canonical simulation failure.
+        if simulate500, http.statusCode == 500 {
+            transportLog.error("send event=simulated_failure http=500 action=throw")
+            throw TransportError.simulatedFailure
+        }
+
+        // 202 means accepted/pending. We return pending=true and rely on outbox polling to complete it.
+        if http.statusCode == 202 {
+            let decoded = (try? JSONDecoder().decode(SolServerChatResponseDTO.self, from: data))
+            let txId = headerTxId ?? decoded?.transmissionId
+            transportLog.info("send event=pending http=202 tx=\(shortOrDash(txId), privacy: .public)")
+
+            return ChatResponse(
+                text: "",
+                statusCode: 202,
+                transmissionId: txId,
+                pending: true,
+                threadMemento: decoded?.threadMemento
+            )
+        }
+
+        // If a 2XX response then good; else throw with status preserved for retry/attempt recording.
+        guard (200...299).contains(http.statusCode) else {
+            let body = String(data: data, encoding: .utf8) ?? ""
+            transportLog.error("send event=error http=\(http.statusCode, privacy: .public) bodyLen=\(body.count, privacy: .public)")
+            throw TransportError.httpStatus(code: http.statusCode, body: body)
+        }
+
+        let decoded = try JSONDecoder().decode(SolServerChatResponseDTO.self, from: data)
+        let txId = headerTxId ?? decoded.transmissionId
+        let isPending = (decoded.pending ?? false) || http.statusCode == 202
+
+        transportLog.info("send event=decoded assistantLen=\((decoded.assistant ?? "").count, privacy: .public) pending=\(isPending, privacy: .public) tx=\(shortOrDash(txId), privacy: .public)")
+
+        return ChatResponse(
+            text: decoded.assistant ?? "(no assistant text)",
+            statusCode: http.statusCode,
+            transmissionId: txId,
+            pending: isPending,
+            threadMemento: decoded.threadMemento
+        )
+    }
+
+    func decideMemento(threadId: String, mementoId: String, decision: ThreadMementoDecision) async throws -> ThreadMementoDecisionResult {
+        let startNs = DispatchTime.now().uptimeNanoseconds
+
+        let url = baseURL.appendingPathComponent("/v1/memento/decision")
+        transportLog.debug("memento_decision event=url url=\(url.absoluteString, privacy: .public)")
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let dto = SolServerMementoDecisionRequestDTO(
+            threadId: threadId,
+            mementoId: mementoId,
+            decision: decision.rawValue
+        )
+        req.httpBody = try JSONEncoder().encode(dto)
+
+        let (data, resp) = try await URLSession.shared.data(for: req)
+
+        guard let http = resp as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+
+        transportLog.info("memento_decision event=response http=\(http.statusCode, privacy: .public) ms=\(msSince(startNs), format: .fixed(precision: 1)) thread=\(threadId, privacy: .public) memento=\(mementoId, privacy: .public) decision=\(decision.rawValue, privacy: .public)")
+
+        guard (200...299).contains(http.statusCode) else {
+            let body = String(data: data, encoding: .utf8) ?? ""
+            transportLog.error("memento_decision event=error http=\(http.statusCode, privacy: .public) bodyLen=\(body.count, privacy: .public)")
+            throw TransportError.httpStatus(code: http.statusCode, body: body)
+        }
+
+        let decoded = try JSONDecoder().decode(SolServerMementoDecisionResponseDTO.self, from: data)
+        transportLog.info("memento_decision event=decoded applied=\(decoded.applied, privacy: .public) reason=\(shortOrDash(decoded.reason), privacy: .public)")
+
+        return ThreadMementoDecisionResult(
+            statusCode: http.statusCode,
+            applied: decoded.applied,
+            reason: decoded.reason,
+            memento: decoded.memento
+        )
+    }
+}
+
+// MARK: - Outbox processor
 
 @MainActor
 final class TransmissionActions {
+
     private let outboxLog = Logger(subsystem: "com.sollabshq.solmobile", category: "Outbox")
 
     private let modelContext: ModelContext
@@ -262,7 +648,6 @@ final class TransmissionActions {
         outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(txId), privacy: .public) to=sending")
 
         do {
-            let packet = tx.packet
             let userText = (firstMessageId.flatMap { try? fetchMessage(id: $0)?.text }) ?? ""
 
             outboxLog.debug("processQueue run=\(runId, privacy: .public) event=context tx=\(short(txId), privacy: .public) userTextLen=\(userText.count, privacy: .public)")
@@ -311,7 +696,6 @@ final class TransmissionActions {
 
             // Pending: keep queued so a future outbox pass can poll server-side completion.
             if response.pending || response.statusCode == 202 {
-                // Accepted but not delivered yet: keep it eligible for another outbox pass.
                 freshTx.status = .queued
                 outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(txId), privacy: .public) to=queued reason=pending")
                 return
@@ -341,9 +725,9 @@ final class TransmissionActions {
             // Best-effort HTTP status extraction for observability.
             let statusCode: Int = {
                 switch error {
-                case ChatTransportError.simulatedFailure:
+                case TransportError.simulatedFailure:
                     return 500
-                case let ChatTransportError.httpStatus(code, _):
+                case let TransportError.httpStatus(code, _):
                     return code
                 default:
                     return -1
@@ -352,7 +736,7 @@ final class TransmissionActions {
 
             let errorMessage: String = {
                 switch error {
-                case let ChatTransportError.httpStatus(_, body):
+                case let TransportError.httpStatus(_, body):
                     return body.isEmpty ? String(describing: error) : body
                 default:
                     return String(describing: error)
@@ -384,7 +768,8 @@ final class TransmissionActions {
     /// - SolServer is the source of truth for draft/accepted/declined state.
     /// - SolMobile clears local draft fields (id/summary) after a successful decision so the banner disappears
     ///   without requiring a manual view refresh.
-    func decideThreadMemento(threadId: UUID, mementoId: String, decision: ThreadMementoDecision) async {
+    func decideThreadMemento(threadId: UUID, mementoId: String, decision: ThreadMementoDecision) async throws -> ThreadMementoDecisionResult {
+
         let runId = String(UUID().uuidString.prefix(8))
 
         outboxLog.info(
@@ -393,7 +778,8 @@ final class TransmissionActions {
 
         guard let decider = self.transport as? any ChatTransportMementoDecision else {
             outboxLog.error("memento_decision run=\(runId, privacy: .public) event=unsupported transport=\(String(describing: type(of: self.transport)), privacy: .public)")
-            return
+
+            throw TransportError.unsupportedTransport(capability: "memento_decision")
         }
 
         do {
@@ -418,8 +804,11 @@ final class TransmissionActions {
 
             try? modelContext.save()
             outboxLog.info("memento_decision run=\(runId, privacy: .public) event=local_cleared count=\(matching.count, privacy: .public)")
+
+            return result
         } catch {
             outboxLog.error("memento_decision run=\(runId, privacy: .public) event=server_failed err=\(String(describing: error), privacy: .public)")
+            throw error
         }
     }
 
@@ -453,6 +842,8 @@ final class TransmissionActions {
         outboxLog.info("retryFailed event=end")
     }
 
+    // MARK: - SwiftData fetch helpers
+
     private func fetchThread(id: UUID) throws -> Thread? {
         let d = FetchDescriptor<Thread>(predicate: #Predicate { $0.id == id })
         return try modelContext.fetch(d).first
@@ -466,368 +857,5 @@ final class TransmissionActions {
     private func fetchMessage(id: UUID) throws -> Message? {
         let d = FetchDescriptor<Message>(predicate: #Predicate { $0.id == id })
         return try modelContext.fetch(d).first
-    }
-}
-
-struct PacketEnvelope: Sendable {
-    let packetId: UUID
-    let packetType: String
-    let threadId: UUID
-    let messageIds: [UUID]
-    let messageText: String
-    let contextRefsJson: String?
-    let payloadJson: String?
-}
-
-protocol ChatTransport {
-    func send(envelope: PacketEnvelope) async throws -> ChatResponse
-}
-
-// Optional capability: some transports can poll server-side delivery for pending (202) transmissions.
-protocol ChatTransportPolling: ChatTransport {
-    func poll(transmissionId: String) async throws -> ChatPollResponse
-}
-
-// ThreadMemento decisions are user-controlled. In v0 they are applied server-side.
-// - accept: draft -> accepted
-// - decline: draft -> discarded
-// - revoke: accepted -> cleared
-// The client submits the decision and clears local draft fields for immediate UI updates.
-enum ThreadMementoDecision: String, Codable, Sendable {
-    /// Accept the current draft memento (promote to accepted).
-    case accept
-
-    /// Decline the current draft memento (discard draft).
-    case decline
-
-    /// Revoke the currently accepted memento (clear accepted state).
-    /// In v0 this is a simple “forget it” switch; no historical restore.
-    case revoke
-}
-
-struct ThreadMementoDecisionResult: Sendable {
-    let statusCode: Int
-    let applied: Bool
-    let reason: String?
-    let memento: ThreadMementoDTO?
-}
-
-protocol ChatTransportMementoDecision {
-    func decideMemento(threadId: String, mementoId: String, decision: ThreadMementoDecision) async throws -> ThreadMementoDecisionResult
-}
-
-struct ChatPollResponse {
-    let pending: Bool
-    let assistant: String?
-    let serverStatus: String?
-    let statusCode: Int
-
-    let threadMemento: ThreadMementoDTO?
-}
-
-enum ChatTransportError: Error {
-    case simulatedFailure
-    case httpStatus(code: Int, body: String)
-}
-
-struct ChatResponse {
-    let text: String
-    let statusCode: Int
-    let transmissionId: String?
-    let pending: Bool
-
-    let threadMemento: ThreadMementoDTO?
-}
-
-private struct SolServerMementoDecisionRequestDTO: Codable {
-    let threadId: String
-    let mementoId: String
-    let decision: String
-}
-
-private struct SolServerMementoDecisionResponseDTO: Codable {
-    let ok: Bool
-    let decision: String
-    let applied: Bool
-    let reason: String?
-    let memento: ThreadMementoDTO?
-}
-
-private struct SolServerChatRequestDTO: Codable {
-    let threadId: String
-    let clientRequestId: String
-    let message: String
-}
-
-private struct SolServerChatResponseDTO: Codable {
-    let ok: Bool
-    let transmissionId: String?
-    let assistant: String?
-    let idempotentReplay: Bool?
-    let pending: Bool?
-    let status: String?
-
-    let threadMemento: ThreadMementoDTO?
-}
-
-private struct SolServerTransmissionResponseDTO: Codable {
-    struct TransmissionDTO: Codable {
-        let id: String
-        let status: String
-    }
-
-    let ok: Bool
-    let transmission: TransmissionDTO
-    let pending: Bool?
-    let assistant: String?
-
-    let threadMemento: ThreadMementoDTO?
-}
-
-struct StubChatTransport: ChatTransportPolling, ChatTransportMementoDecision {
-    func poll(transmissionId: String) async throws -> ChatPollResponse {
-        let startNs = DispatchTime.now().uptimeNanoseconds
-
-        let url = baseURL
-            .appendingPathComponent("/v1/transmissions")
-            .appendingPathComponent(transmissionId)
-
-        transportLog.debug("poll event=url url=\(url.absoluteString, privacy: .public)")
-
-        var req = URLRequest(url: url)
-        req.httpMethod = "GET"
-
-        let (data, resp) = try await URLSession.shared.data(for: req)
-
-        guard let http = resp as? HTTPURLResponse else {
-            throw URLError(.badServerResponse)
-        }
-
-        transportLog.info("poll event=response http=\(http.statusCode, privacy: .public) ms=\(msSince(startNs), format: .fixed(precision: 1)) tx=\(shortOrDash(transmissionId), privacy: .public)")
-
-        guard (200...299).contains(http.statusCode) else {
-            let body = String(data: data, encoding: .utf8) ?? ""
-            transportLog.error("poll event=error http=\(http.statusCode, privacy: .public) bodyLen=\(body.count, privacy: .public)")
-            throw ChatTransportError.httpStatus(code: http.statusCode, body: body)
-        }
-
-        let decoded = try JSONDecoder().decode(SolServerTransmissionResponseDTO.self, from: data)
-        let pending = decoded.pending ?? (decoded.transmission.status == "created")
-
-        transportLog.info("poll event=decoded pending=\(pending, privacy: .public) serverStatus=\(decoded.transmission.status, privacy: .public) assistantLen=\((decoded.assistant ?? "").count, privacy: .public)")
-
-        return ChatPollResponse(
-            pending: pending,
-            assistant: decoded.assistant,
-            serverStatus: decoded.transmission.status,
-            statusCode: http.statusCode,
-            threadMemento: decoded.threadMemento
-        )
-    }
-
-    // Base URL is driven by Settings (@AppStorage -> UserDefaults)
-    private var baseURL: URL {
-        let raw = (UserDefaults.standard.string(forKey: "solserver.baseURL") ?? "http://127.0.0.1:3333")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // Hard fallback for safety
-        return URL(string: raw) ?? URL(string: "http://127.0.0.1:3333")!
-    }
-
-    func send(envelope: PacketEnvelope) async throws -> ChatResponse {
-        let startNs = DispatchTime.now().uptimeNanoseconds
-
-        transportLog.info("send event=start packet=\(short(envelope.packetId), privacy: .public) thread=\(short(envelope.threadId), privacy: .public) type=\(envelope.packetType, privacy: .public)")
-
-        // v0: keep simulated failure path for pipeline testing
-        let simulate500 = (envelope.packetType == "chat_fail")
-
-        let url = baseURL.appendingPathComponent("/v1/chat")
-
-        transportLog.debug("send event=url url=\(url.absoluteString, privacy: .public)")
-
-        // build request
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        // set for request failures
-        if simulate500 {
-            req.setValue("500", forHTTPHeaderField: "x-sol-simulate-status")
-            transportLog.info("send event=simulate http=500")
-        }
-
-        let simulate202 = envelope.messageText
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-            .hasPrefix("/pending")
-
-        if simulate202 {
-            req.setValue("202", forHTTPHeaderField: "x-sol-simulate-status")
-            transportLog.info("send event=simulate http=202")
-        }
-
-        // Use packetId as idempotency key so retries dedupe server-side.
-        let dto = SolServerChatRequestDTO(
-            threadId: envelope.threadId.uuidString,
-            clientRequestId: envelope.packetId.uuidString,
-            message: envelope.messageText
-        )
-
-        req.httpBody = try JSONEncoder().encode(dto)
-
-        let (data, resp) = try await URLSession.shared.data(for: req)
-
-        guard let http = resp as? HTTPURLResponse else {
-            throw URLError(.badServerResponse)
-        }
-
-        // Persist for Settings/Dev UI.
-        DevTelemetry.persistLastChat(statusCode: http.statusCode)
-
-        let headerTxId = http.value(forHTTPHeaderField: "x-sol-transmission-id")
-        transportLog.info("send event=response http=\(http.statusCode, privacy: .public) ms=\(msSince(startNs), format: .fixed(precision: 1)) tx=\(shortOrDash(headerTxId), privacy: .public)")
-
-        // If 500 returns and we are simulation flow, send correct simulation failure error.
-        if simulate500, http.statusCode == 500 {
-            transportLog.error("send event=simulated_failure http=500 action=throw")
-            throw ChatTransportError.simulatedFailure
-        }
-
-        if simulate202, http.statusCode == 202 {
-            transportLog.info("send event=simulated_pending http=202")
-        }
-        // 202 means accepted/pending. We return pending=true and rely on outbox polling to complete it.
-        // If server replies "pending" (202), this is NOT a delivered assistant message.
-        // We return pending=true so the queue can keep the Transmission queued/sending.
-        if http.statusCode == 202 {
-            let decoded = (try? JSONDecoder().decode(SolServerChatResponseDTO.self, from: data))
-            let txId = headerTxId ?? decoded?.transmissionId
-            transportLog.info("send event=pending http=202 tx=\(shortOrDash(txId), privacy: .public)")
-            return ChatResponse(
-                text: "",
-                statusCode: 202,
-                transmissionId: txId,
-                pending: true,
-                threadMemento: decoded?.threadMemento
-            )
-        }
-
-        // If a 2XX response then good; else throw with status preserved for retry/attempt recording.
-        guard (200...299).contains(http.statusCode) else {
-            let body = String(data: data, encoding: .utf8) ?? ""
-            transportLog.error("send event=error http=\(http.statusCode, privacy: .public) bodyLen=\(body.count, privacy: .public)")
-            throw ChatTransportError.httpStatus(code: http.statusCode, body: body)
-        }
-
-        let decoded = try JSONDecoder().decode(SolServerChatResponseDTO.self, from: data)
-        let txId = headerTxId ?? decoded.transmissionId
-        let isPending = (decoded.pending ?? false) || http.statusCode == 202
-        transportLog.info("send event=decoded assistantLen=\((decoded.assistant ?? "").count, privacy: .public) pending=\(isPending, privacy: .public) tx=\(shortOrDash(txId), privacy: .public)")
-
-        return ChatResponse(
-            text: decoded.assistant ?? "(no assistant text)",
-            statusCode: http.statusCode,
-            transmissionId: txId,
-            pending: isPending,
-            threadMemento: decoded.threadMemento
-        )
-    }
-
-    func decideMemento(threadId: String, mementoId: String, decision: ThreadMementoDecision) async throws -> ThreadMementoDecisionResult {
-        let startNs = DispatchTime.now().uptimeNanoseconds
-
-        let url = baseURL.appendingPathComponent("/v1/memento/decision")
-        transportLog.debug("memento_decision event=url url=\(url.absoluteString, privacy: .public)")
-
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        let dto = SolServerMementoDecisionRequestDTO(
-            threadId: threadId,
-            mementoId: mementoId,
-            decision: decision.rawValue
-        )
-        req.httpBody = try JSONEncoder().encode(dto)
-
-        let (data, resp) = try await URLSession.shared.data(for: req)
-
-        guard let http = resp as? HTTPURLResponse else {
-            throw URLError(.badServerResponse)
-        }
-
-        transportLog.info("memento_decision event=response http=\(http.statusCode, privacy: .public) ms=\(msSince(startNs), format: .fixed(precision: 1)) thread=\(threadId, privacy: .public) memento=\(mementoId, privacy: .public) decision=\(decision.rawValue, privacy: .public)")
-
-        guard (200...299).contains(http.statusCode) else {
-            let body = String(data: data, encoding: .utf8) ?? ""
-            transportLog.error("memento_decision event=error http=\(http.statusCode, privacy: .public) bodyLen=\(body.count, privacy: .public)")
-            throw ChatTransportError.httpStatus(code: http.statusCode, body: body)
-        }
-
-        let decoded = try JSONDecoder().decode(SolServerMementoDecisionResponseDTO.self, from: data)
-        transportLog.info("memento_decision event=decoded applied=\(decoded.applied, privacy: .public) reason=\(shortOrDash(decoded.reason), privacy: .public)")
-
-        return ThreadMementoDecisionResult(
-            statusCode: http.statusCode,
-            applied: decoded.applied,
-            reason: decoded.reason,
-            memento: decoded.memento
-        )
-    }
-}
-
-
-// Dev telemetry keys (UserDefaults) for quick transport health visibility.
-private enum DevTelemetry {
-    static let lastChatStatusCodeKey = "sol.dev.lastChatStatusCode"
-    static let lastChatStatusAtKey = "sol.dev.lastChatStatusAt"
-
-    static func persistLastChat(statusCode: Int) {
-        UserDefaults.standard.set(statusCode, forKey: lastChatStatusCodeKey)
-        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: lastChatStatusAtKey)
-    }
-}
-
-
-private func msSince(_ startNs: UInt64) -> Double {
-    let endNs = DispatchTime.now().uptimeNanoseconds
-    return Double(endNs &- startNs) / 1_000_000.0
-}
-
-private func short(_ id: UUID) -> String {
-    String(id.uuidString.prefix(8))
-}
-
-private func shortOrDash(_ s: String?) -> String {
-    (s?.isEmpty == false) ? s! : "-"
-}
-
-private let timeWithSecondsFormatter: DateFormatter = {
-    let f = DateFormatter()
-    f.locale = .autoupdatingCurrent
-    f.timeZone = .autoupdatingCurrent
-    f.dateFormat = "h:mm:ss a"
-    return f
-}()
-
-private func timeWithSeconds(_ d: Date) -> String {
-    timeWithSecondsFormatter.string(from: d)
-}
-
-
-// ThreadMemento is a navigation artifact returned by SolServer.
-// It is not durable knowledge; the client may choose to Accept or Decline.
-private enum ThreadMementoFormatter {
-    static func format(_ m: ThreadMementoDTO) -> String {
-        func join(_ xs: [String]) -> String { xs.isEmpty ? "(none)" : xs.joined(separator: " | ") }
-
-        return [
-            "Arc: \(m.arc.isEmpty ? "(none)" : m.arc)",
-            "Active: \(join(m.active))",
-            "Parked: \(join(m.parked))",
-            "Decisions: \(join(m.decisions))",
-            "Next: \(join(m.next))",
-        ].joined(separator: "\n")
     }
 }
