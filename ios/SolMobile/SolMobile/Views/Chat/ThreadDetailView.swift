@@ -265,6 +265,8 @@ struct ThreadDetailView: View {
     }
 
     private func acceptMemento(_ m: MementoViewModel) {
+
+        
         // Move current -> prev for Undo.
         if let current = UserDefaults.standard.dictionary(forKey: mementoDefaultsKeyCurrent) {
             UserDefaults.standard.set(current, forKey: mementoDefaultsKeyPrev)
@@ -279,13 +281,33 @@ struct ThreadDetailView: View {
         UserDefaults.standard.set(m.id, forKey: mementoDefaultsKeyDismissed)
 
         acceptedMemento = m
-        mementoRefreshToken &+= 1
+
+        // Submit to SolServer and clear the local draft fields so the banner disappears immediately.
+        Task {
+            let actions = TransmissionActions(modelContext: modelContext)
+            await actions.decideThreadMemento(threadId: thread.id, mementoId: m.id, decision: .accept)
+
+            await MainActor.run {
+                // Force re-evaluation (UserDefaults is not observed).
+                mementoRefreshToken &+= 1
+            }
+        }
     }
 
     private func declineMemento(_ m: MementoViewModel) {
         // Decline only dismisses this draft id. It does not change the accepted memento.
         UserDefaults.standard.set(m.id, forKey: mementoDefaultsKeyDismissed)
-        mementoRefreshToken &+= 1
+
+        // Submit to SolServer and clear the local draft fields so the banner disappears immediately.
+        Task {
+            let actions = TransmissionActions(modelContext: modelContext)
+            await actions.decideThreadMemento(threadId: thread.id, mementoId: m.id, decision: .decline)
+
+            await MainActor.run {
+                // Force re-evaluation (UserDefaults is not observed).
+                mementoRefreshToken &+= 1
+            }
+        }
     }
 
     private func undoAcceptedMemento() {

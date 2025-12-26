@@ -11,59 +11,6 @@ import os
 
 private let transportLog = Logger(subsystem: "com.sollabshq.solmobile", category: "Transport")
 
-// Dev telemetry keys (UserDefaults) for quick transport health visibility.
-private enum DevTelemetry {
-    static let lastChatStatusCodeKey = "sol.dev.lastChatStatusCode"
-    static let lastChatStatusAtKey = "sol.dev.lastChatStatusAt"
-
-    static func persistLastChat(statusCode: Int) {
-        UserDefaults.standard.set(statusCode, forKey: lastChatStatusCodeKey)
-        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: lastChatStatusAtKey)
-    }
-}
-
-
-private func msSince(_ startNs: UInt64) -> Double {
-    let endNs = DispatchTime.now().uptimeNanoseconds
-    return Double(endNs &- startNs) / 1_000_000.0
-}
-
-private func short(_ id: UUID) -> String {
-    String(id.uuidString.prefix(8))
-}
-
-private func shortOrDash(_ s: String?) -> String {
-    (s?.isEmpty == false) ? s! : "-"
-}
-
-private let timeWithSecondsFormatter: DateFormatter = {
-    let f = DateFormatter()
-    f.locale = .autoupdatingCurrent
-    f.timeZone = .autoupdatingCurrent
-    f.dateFormat = "h:mm:ss a"
-    return f
-}()
-
-private func timeWithSeconds(_ d: Date) -> String {
-    timeWithSecondsFormatter.string(from: d)
-}
-
-// ThreadMemento is a navigation artifact returned by SolServer.
-// It is not durable knowledge; the client may choose to Accept or Decline.
-private enum ThreadMementoFormatter {
-    static func format(_ m: ThreadMementoDTO) -> String {
-        func join(_ xs: [String]) -> String { xs.isEmpty ? "(none)" : xs.joined(separator: " | ") }
-
-        return [
-            "Arc: \(m.arc.isEmpty ? "(none)" : m.arc)",
-            "Active: \(join(m.active))",
-            "Parked: \(join(m.parked))",
-            "Decisions: \(join(m.decisions))",
-            "Next: \(join(m.next))",
-        ].joined(separator: "\n")
-    }
-}
-
 @MainActor
 final class TransmissionActions {
     private let outboxLog = Logger(subsystem: "com.sollabshq.solmobile", category: "Outbox")
@@ -431,6 +378,48 @@ final class TransmissionActions {
         outboxLog.info("processQueue run=\(runId, privacy: .public) event=end")
     }
 
+    /// Submit a ThreadMemento decision to SolServer and clear matching local draft fields so UI updates immediately.
+    ///
+    /// v0 behavior:
+    /// - SolServer is the source of truth for draft/accepted/declined state.
+    /// - SolMobile clears local draft fields (id/summary) after a successful decision so the banner disappears
+    ///   without requiring a manual view refresh.
+    func decideThreadMemento(threadId: UUID, mementoId: String, decision: ThreadMementoDecision) async {
+        let runId = String(UUID().uuidString.prefix(8))
+        outboxLog.info("memento_decision run=\(runId, privacy: .public) event=start thread=\(short(threadId), privacy: .public) decision=\(decision.rawValue, privacy: .public) memento=\(mementoId, privacy: .public)")
+
+        guard let decider = self.transport as? any ChatTransportMementoDecision else {
+            outboxLog.error("memento_decision run=\(runId, privacy: .public) event=unsupported transport=\(String(describing: type(of: self.transport)), privacy: .public)")
+            return
+        }
+
+        do {
+            let result = try await decider.decideMemento(
+                threadId: threadId.uuidString,
+                mementoId: mementoId,
+                decision: decision
+            )
+
+            outboxLog.info("memento_decision run=\(runId, privacy: .public) event=server_ok http=\(result.statusCode, privacy: .public) applied=\(result.applied, privacy: .public) reason=\(shortOrDash(result.reason), privacy: .public)")
+
+            // Clear any local draft fields that match this memento id.
+            let d = FetchDescriptor<Transmission>(predicate: #Predicate { $0.packet.threadId == threadId })
+            let all = (try? modelContext.fetch(d)) ?? []
+
+            let matching = all.filter { $0.serverThreadMementoId == mementoId }
+            for tx in matching {
+                tx.serverThreadMementoId = nil
+                tx.serverThreadMementoCreatedAtISO = nil
+                tx.serverThreadMementoSummary = nil
+            }
+
+            try? modelContext.save()
+            outboxLog.info("memento_decision run=\(runId, privacy: .public) event=local_cleared count=\(matching.count, privacy: .public)")
+        } catch {
+            outboxLog.error("memento_decision run=\(runId, privacy: .public) event=server_failed err=\(String(describing: error), privacy: .public)")
+        }
+    }
+
     func retryFailed() {
         outboxLog.info("retryFailed event=start")
 
@@ -496,6 +485,24 @@ protocol ChatTransportPolling: ChatTransport {
     func poll(transmissionId: String) async throws -> ChatPollResponse
 }
 
+// ThreadMemento decisions are user-controlled. In v0 they are applied server-side
+// (draft -> accepted or draft -> discarded). The client records the decision for UI.
+enum ThreadMementoDecision: String, Codable, Sendable {
+    case accept
+    case decline
+}
+
+struct ThreadMementoDecisionResult: Sendable {
+    let statusCode: Int
+    let applied: Bool
+    let reason: String?
+    let memento: ThreadMementoDTO?
+}
+
+protocol ChatTransportMementoDecision {
+    func decideMemento(threadId: String, mementoId: String, decision: ThreadMementoDecision) async throws -> ThreadMementoDecisionResult
+}
+
 struct ChatPollResponse {
     let pending: Bool
     let assistant: String?
@@ -517,6 +524,20 @@ struct ChatResponse {
     let pending: Bool
 
     let threadMemento: ThreadMementoDTO?
+}
+
+private struct SolServerMementoDecisionRequestDTO: Codable {
+    let threadId: String
+    let mementoId: String
+    let decision: String
+}
+
+private struct SolServerMementoDecisionResponseDTO: Codable {
+    let ok: Bool
+    let decision: String
+    let applied: Bool
+    let reason: String?
+    let memento: ThreadMementoDTO?
 }
 
 private struct SolServerChatRequestDTO: Codable {
@@ -550,7 +571,7 @@ private struct SolServerTransmissionResponseDTO: Codable {
     let threadMemento: ThreadMementoDTO?
 }
 
-struct StubChatTransport: ChatTransportPolling {
+struct StubChatTransport: ChatTransportPolling, ChatTransportMementoDecision {
     func poll(transmissionId: String) async throws -> ChatPollResponse {
         let startNs = DispatchTime.now().uptimeNanoseconds
 
@@ -698,5 +719,102 @@ struct StubChatTransport: ChatTransportPolling {
             pending: isPending,
             threadMemento: decoded.threadMemento
         )
+    }
+
+    func decideMemento(threadId: String, mementoId: String, decision: ThreadMementoDecision) async throws -> ThreadMementoDecisionResult {
+        let startNs = DispatchTime.now().uptimeNanoseconds
+
+        let url = baseURL.appendingPathComponent("/v1/memento/decision")
+        transportLog.debug("memento_decision event=url url=\(url.absoluteString, privacy: .public)")
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let dto = SolServerMementoDecisionRequestDTO(
+            threadId: threadId,
+            mementoId: mementoId,
+            decision: decision.rawValue
+        )
+        req.httpBody = try JSONEncoder().encode(dto)
+
+        let (data, resp) = try await URLSession.shared.data(for: req)
+
+        guard let http = resp as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+
+        transportLog.info("memento_decision event=response http=\(http.statusCode, privacy: .public) ms=\(msSince(startNs), format: .fixed(precision: 1)) thread=\(threadId, privacy: .public) memento=\(mementoId, privacy: .public) decision=\(decision.rawValue, privacy: .public)")
+
+        guard (200...299).contains(http.statusCode) else {
+            let body = String(data: data, encoding: .utf8) ?? ""
+            transportLog.error("memento_decision event=error http=\(http.statusCode, privacy: .public) bodyLen=\(body.count, privacy: .public)")
+            throw ChatTransportError.httpStatus(code: http.statusCode, body: body)
+        }
+
+        let decoded = try JSONDecoder().decode(SolServerMementoDecisionResponseDTO.self, from: data)
+        transportLog.info("memento_decision event=decoded applied=\(decoded.applied, privacy: .public) reason=\(shortOrDash(decoded.reason), privacy: .public)")
+
+        return ThreadMementoDecisionResult(
+            statusCode: http.statusCode,
+            applied: decoded.applied,
+            reason: decoded.reason,
+            memento: decoded.memento
+        )
+    }
+}
+
+
+// Dev telemetry keys (UserDefaults) for quick transport health visibility.
+private enum DevTelemetry {
+    static let lastChatStatusCodeKey = "sol.dev.lastChatStatusCode"
+    static let lastChatStatusAtKey = "sol.dev.lastChatStatusAt"
+
+    static func persistLastChat(statusCode: Int) {
+        UserDefaults.standard.set(statusCode, forKey: lastChatStatusCodeKey)
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: lastChatStatusAtKey)
+    }
+}
+
+
+private func msSince(_ startNs: UInt64) -> Double {
+    let endNs = DispatchTime.now().uptimeNanoseconds
+    return Double(endNs &- startNs) / 1_000_000.0
+}
+
+private func short(_ id: UUID) -> String {
+    String(id.uuidString.prefix(8))
+}
+
+private func shortOrDash(_ s: String?) -> String {
+    (s?.isEmpty == false) ? s! : "-"
+}
+
+private let timeWithSecondsFormatter: DateFormatter = {
+    let f = DateFormatter()
+    f.locale = .autoupdatingCurrent
+    f.timeZone = .autoupdatingCurrent
+    f.dateFormat = "h:mm:ss a"
+    return f
+}()
+
+private func timeWithSeconds(_ d: Date) -> String {
+    timeWithSecondsFormatter.string(from: d)
+}
+
+
+// ThreadMemento is a navigation artifact returned by SolServer.
+// It is not durable knowledge; the client may choose to Accept or Decline.
+private enum ThreadMementoFormatter {
+    static func format(_ m: ThreadMementoDTO) -> String {
+        func join(_ xs: [String]) -> String { xs.isEmpty ? "(none)" : xs.joined(separator: " | ") }
+
+        return [
+            "Arc: \(m.arc.isEmpty ? "(none)" : m.arc)",
+            "Active: \(join(m.active))",
+            "Parked: \(join(m.parked))",
+            "Decisions: \(join(m.decisions))",
+            "Next: \(join(m.next))",
+        ].joined(separator: "\n")
     }
 }
