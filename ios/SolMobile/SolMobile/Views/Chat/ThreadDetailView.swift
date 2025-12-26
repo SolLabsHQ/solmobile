@@ -316,9 +316,23 @@ struct ThreadDetailView: View {
             return
         }
 
-        // Swap current <-> prev.
+        // Remove prev.
+        UserDefaults.standard.removeObject(forKey: mementoDefaultsKeyPrev)
+
         if let current = UserDefaults.standard.dictionary(forKey: mementoDefaultsKeyCurrent) {
-            UserDefaults.standard.set(current, forKey: mementoDefaultsKeyPrev)
+
+            let id = current["id"] as? String ?? ""
+
+            // Submit to SolServer and clear the local draft fields so the banner disappears immediately.
+            Task {
+                let actions = TransmissionActions(modelContext: modelContext)
+                await actions.decideThreadMemento(threadId: thread.id, mementoId:id, decision: .revoke)
+
+                await MainActor.run {
+                    // Force re-evaluation (UserDefaults is not observed).
+                    mementoRefreshToken &+= 1
+                }
+            }
         }
         UserDefaults.standard.set(prev, forKey: mementoDefaultsKeyCurrent)
 

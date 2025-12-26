@@ -386,7 +386,10 @@ final class TransmissionActions {
     ///   without requiring a manual view refresh.
     func decideThreadMemento(threadId: UUID, mementoId: String, decision: ThreadMementoDecision) async {
         let runId = String(UUID().uuidString.prefix(8))
-        outboxLog.info("memento_decision run=\(runId, privacy: .public) event=start thread=\(short(threadId), privacy: .public) decision=\(decision.rawValue, privacy: .public) memento=\(mementoId, privacy: .public)")
+
+        outboxLog.info(
+            "memento_decision run=\(runId, privacy: .public) event=start thread=\(short(threadId), privacy: .public) decision=\(decision.rawValue, privacy: .public) memento=\(mementoId, privacy: .public)"
+        )
 
         guard let decider = self.transport as? any ChatTransportMementoDecision else {
             outboxLog.error("memento_decision run=\(runId, privacy: .public) event=unsupported transport=\(String(describing: type(of: self.transport)), privacy: .public)")
@@ -485,11 +488,21 @@ protocol ChatTransportPolling: ChatTransport {
     func poll(transmissionId: String) async throws -> ChatPollResponse
 }
 
-// ThreadMemento decisions are user-controlled. In v0 they are applied server-side
-// (draft -> accepted or draft -> discarded). The client records the decision for UI.
+// ThreadMemento decisions are user-controlled. In v0 they are applied server-side.
+// - accept: draft -> accepted
+// - decline: draft -> discarded
+// - revoke: accepted -> cleared
+// The client submits the decision and clears local draft fields for immediate UI updates.
 enum ThreadMementoDecision: String, Codable, Sendable {
+    /// Accept the current draft memento (promote to accepted).
     case accept
+
+    /// Decline the current draft memento (discard draft).
     case decline
+
+    /// Revoke the currently accepted memento (clear accepted state).
+    /// In v0 this is a simple “forget it” switch; no historical restore.
+    case revoke
 }
 
 struct ThreadMementoDecisionResult: Sendable {
