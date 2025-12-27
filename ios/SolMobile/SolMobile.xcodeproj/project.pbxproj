@@ -24,6 +24,9 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		0A6DAA082EFF4FEA00E76569 /* SolMobileTests.xctestplan */ = {isa = PBXFileReference; lastKnownFileType = text; path = SolMobileTests.xctestplan; sourceTree = "<group>"; };
+		0A6DAA0E2EFF52BC00E76569 /* SolMobileUITests.xctestplan */ = {isa = PBXFileReference; lastKnownFileType = text; name = SolMobileUITests.xctestplan; path = ../SolMobileUITests.xctestplan; sourceTree = "<group>"; };
+		0A6DAA0F2EFF52CC00E76569 /* SolMobileIntegrationTests.xctestplan */ = {isa = PBXFileReference; lastKnownFileType = text; name = SolMobileIntegrationTests.xctestplan; path = ../SolMobileIntegrationTests.xctestplan; sourceTree = "<group>"; };
 		0A9A002A2EF133AF003FE519 /* SolMobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SolMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		0A9A00372EF133B0003FE519 /* SolMobileTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SolMobileTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		0A9A00412EF133B0003FE519 /* SolMobileUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SolMobileUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -88,6 +91,9 @@
 		0A9A00212EF133AF003FE519 = {
 			isa = PBXGroup;
 			children = (
+				0A6DAA082EFF4FEA00E76569 /* SolMobileTests.xctestplan */,
+				0A6DAA0E2EFF52BC00E76569 /* SolMobileUITests.xctestplan */,
+				0A6DAA0F2EFF52CC00E76569 /* SolMobileIntegrationTests.xctestplan */,
 				0A9A002C2EF133AF003FE519 /* SolMobile */,
 				0A9A003A2EF133B0003FE519 /* SolMobileTests */,
 				0A9A00442EF133B0003FE519 /* SolMobileUITests */,

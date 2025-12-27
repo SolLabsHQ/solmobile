@@ -1,0 +1,38 @@
+{
+  "configurations" : [
+    {
+      "id" : "1318E427-5470-4FD0-B785-34A8F2D8A270",
+      "name" : "Test Scheme Action",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "codeCoverage" : {
+      "targets" : [
+        {
+          "containerPath" : "container:SolMobile.xcodeproj",
+          "identifier" : "0A9A00292EF133AF003FE519",
+          "name" : "SolMobile"
+        }
+      ]
+    },
+    "performanceAntipatternCheckerEnabled" : true,
+    "targetForVariableExpansion" : {
+      "containerPath" : "container:SolMobile.xcodeproj",
+      "identifier" : "0A9A00292EF133AF003FE519",
+      "name" : "SolMobile"
+    }
+  },
+  "testTargets" : [
+    {
+      "target" : {
+        "containerPath" : "container:SolMobile.xcodeproj",
+        "identifier" : "0A9A00362EF133B0003FE519",
+        "name" : "SolMobileTests"
+      }
+    }
+  ],
+  "version" : 1
+}
