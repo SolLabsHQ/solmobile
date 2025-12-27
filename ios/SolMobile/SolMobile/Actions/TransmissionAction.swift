@@ -438,7 +438,7 @@ final class TransmissionActions {
         return since
     }
 
-    func enqueueChat(thread: Thread, userMessage: Message) {
+    func enqueueChat(thread: ConversationThread, userMessage: Message) {
         let shouldFail = userMessage.text
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
@@ -844,8 +844,8 @@ final class TransmissionActions {
 
     // MARK: - SwiftData fetch helpers
 
-    private func fetchThread(id: UUID) throws -> Thread? {
-        let d = FetchDescriptor<Thread>(predicate: #Predicate { $0.id == id })
+    private func fetchThread(id: UUID) throws -> ConversationThread? {
+        let d = FetchDescriptor<ConversationThread>(predicate: #Predicate { $0.id == id })
         return try modelContext.fetch(d).first
     }
 

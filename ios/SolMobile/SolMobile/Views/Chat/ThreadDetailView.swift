@@ -5,7 +5,7 @@ import Foundation
 
 struct ThreadDetailView: View {
     @Environment(\.modelContext) private var modelContext
-    @Bindable var thread: Thread
+    @Bindable var thread: ConversationThread
     @Query private var transmissions: [Transmission]
     @State private var isProcessingOutbox: Bool = false
     @State private var outboxNeedsRerun: Bool = false
@@ -26,7 +26,7 @@ struct ThreadDetailView: View {
         thread.messages.sorted { $0.createdAt < $1.createdAt }
     }
 
-    init(thread: Thread) {
+    init(thread: ConversationThread) {
         self.thread = thread
 
         // Scope the SwiftData query to this thread so the UI refreshes from the right slice of data.

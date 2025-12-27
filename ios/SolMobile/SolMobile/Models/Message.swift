@@ -15,11 +15,11 @@ final class Message {
     var creatorTypeRaw: String
     var text: String
 
-    var thread: Thread
+    var thread: ConversationThread
 
     init(
         id: UUID = UUID(),
-        thread: Thread,
+        thread: ConversationThread,
         creatorType: CreatorType,
         text: String,
         createdAt: Date = Date()
