@@ -70,4 +70,95 @@ final class SolServerClientDecodingTests: XCTestCase {
         XCTAssertEqual(decoded.reason, "applied")
         XCTAssertEqual(decoded.memento?.id, "m2")
     }
+
+    func test_chatResponse_decodes_success_shape_200() throws {
+        let json = """
+        {
+          "ok": true,
+          "transmissionId": "tx-200",
+          "assistant": "[Ida] hello",
+          "pending": false,
+          "threadMemento": {
+            "id": "m1",
+            "threadId": "t1",
+            "createdAt": "2025-12-25T19:21:15.279Z",
+            "version": "memento-v0",
+            "arc": "SolServer v0 build",
+            "active": ["hello solserver"],
+            "parked": [],
+            "decisions": [],
+            "next": []
+          }
+        }
+        """.data(using: .utf8)!
+
+        struct ChatResponseEnvelope: Decodable {
+            let ok: Bool
+            let transmissionId: String?
+            let assistant: String?
+            let pending: Bool?
+            let status: String?
+            let threadMemento: ThreadMementoDTO?
+        }
+
+        let decoded: ChatResponseEnvelope = try JSONDecoder().decode(ChatResponseEnvelope.self, from: json)
+        XCTAssertTrue(decoded.ok)
+        XCTAssertEqual(decoded.transmissionId, "tx-200")
+        XCTAssertEqual(decoded.assistant, "[Ida] hello")
+        XCTAssertEqual(decoded.pending, false)
+        XCTAssertNil(decoded.status)
+        XCTAssertEqual(decoded.threadMemento?.id, "m1")
+    }
+
+    func test_chatResponse_decodes_pending_shape_202() throws {
+        // 202 responses may omit assistant text and rely on polling.
+        let json = """
+        {
+          "ok": true,
+          "transmissionId": "tx-202",
+          "pending": true,
+          "status": "created",
+          "threadMemento": {
+            "id": "m2",
+            "threadId": "t1",
+            "createdAt": "2025-12-26T00:19:38.134Z",
+            "version": "memento-v0",
+            "arc": "Arc",
+            "active": [],
+            "parked": [],
+            "decisions": [],
+            "next": []
+          }
+        }
+        """.data(using: .utf8)!
+
+        struct ChatResponseEnvelope: Decodable {
+            let ok: Bool
+            let transmissionId: String?
+            let assistant: String?
+            let pending: Bool?
+            let status: String?
+            let threadMemento: ThreadMementoDTO?
+        }
+
+        let decoded: ChatResponseEnvelope = try JSONDecoder().decode(ChatResponseEnvelope.self, from: json)
+        XCTAssertTrue(decoded.ok)
+        XCTAssertEqual(decoded.transmissionId, "tx-202")
+        XCTAssertNil(decoded.assistant)
+        XCTAssertEqual(decoded.pending, true)
+        XCTAssertEqual(decoded.status, "created")
+        XCTAssertEqual(decoded.threadMemento?.id, "m2")
+    }
+
+    func test_transportError_httpStatus_carriesCodeAndBody() throws {
+        let err = TransportError.httpStatus(code: 500, body: "boom")
+
+        switch err {
+        case let .httpStatus(code, body):
+            XCTAssertEqual(code, 500)
+            XCTAssertEqual(body, "boom")
+        default:
+            XCTFail("Expected .httpStatus")
+        }
+    }
 }

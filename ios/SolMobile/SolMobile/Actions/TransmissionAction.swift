@@ -465,23 +465,9 @@ final class TransmissionActions {
         let runId = String(UUID().uuidString.prefix(8))
         outboxLog.info("processQueue run=\(runId, privacy: .public) event=start")
 
-        let queuedRaw = TransmissionStatus.queued.rawValue
-        let descriptor = FetchDescriptor<Transmission>(
-            predicate: #Predicate { $0.statusRaw == queuedRaw },
-            sortBy: [SortDescriptor(\.createdAt, order: .forward)]
-        )
-
-        guard let queued = try? modelContext.fetch(descriptor) else {
-            outboxLog.error("processQueue run=\(runId, privacy: .public) event=fetch_failed scope=queued")
+        guard let tx = fetchFirstQueuedTransmission(runId: runId) else {
             return
         }
-
-        outboxLog.info("processQueue run=\(runId, privacy: .public) event=queued_count count=\(queued.count, privacy: .public)")
-
-        guard let tx = queued.first else {
-            outboxLog.info("processQueue run=\(runId, privacy: .public) event=empty")
-            return
-        } // v0: one in-flight at a time
 
         // Snapshot identifiers before we suspend.
         let txId = tx.id
@@ -497,154 +483,24 @@ final class TransmissionActions {
         let attemptCount = attempts.count
 
         // If the last attempt is pending and we have a server transmissionId, poll instead of re-sending.
-        if let last = attempts.last,
-           last.outcome == .pending,
-           let serverTxId = last.transmissionId,
-           !serverTxId.isEmpty {
-
-            outboxLog.info("processQueue run=\(runId, privacy: .public) event=poll_ready tx=\(short(txId), privacy: .public) serverTx=\(shortOrDash(serverTxId), privacy: .public)")
-
-            // Mark as sending during poll for consistent UI semantics.
-            tx.status = .sending
-            tx.lastError = nil
-            outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(txId), privacy: .public) to=sending reason=poll")
-
-            do {
-                guard let polling = transport as? any ChatTransportPolling else {
-                    outboxLog.error("processQueue run=\(runId, privacy: .public) event=poll_unavailable tx=\(short(txId), privacy: .public)")
-
-                    tx.status = .failed
-                    tx.lastError = "Transport does not support polling"
-                    return
-                }
-
-                let poll = try await polling.poll(transmissionId: serverTxId)
-
-                guard let freshTx = try? fetchTransmission(id: txId) else { return }
-
-                // Record a poll attempt so backoff/TTL derivation stays honest.
-                let pollAttempt = DeliveryAttempt(
-                    statusCode: poll.statusCode,
-                    outcome: poll.pending ? .pending : .succeeded,
-                    errorMessage: nil,
-                    transmissionId: serverTxId,
-                    transmission: freshTx
-                )
-                freshTx.deliveryAttempts.append(pollAttempt)
-                modelContext.insert(pollAttempt)
-
-                if let m = poll.threadMemento {
-                    freshTx.serverThreadMementoId = m.id
-                    freshTx.serverThreadMementoCreatedAtISO = m.createdAt
-                    freshTx.serverThreadMementoSummary = ThreadMementoFormatter.format(m)
-
-                    outboxLog.info("processQueue run=\(runId, privacy: .public) event=memento_draft_saved tx=\(short(txId), privacy: .public) memento=\(m.id, privacy: .public) via=poll")
-                }
-
-                if poll.pending {
-                    freshTx.status = .queued
-                    outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(txId), privacy: .public) to=queued reason=pending_poll")
-                    return
-                }
-
-                // Completed: append assistant message (if provided) and mark succeeded.
-                let assistantText = (poll.assistant?.isEmpty == false) ? poll.assistant! : "(no assistant text)"
-
-                if let thread = try? fetchThread(id: threadId) {
-                    let assistantMessage = Message(thread: thread, creatorType: .assistant, text: assistantText)
-
-                    thread.messages.append(assistantMessage)
-                    thread.lastActiveAt = Date()
-
-                    modelContext.insert(assistantMessage)
-
-                    outboxLog.info("processQueue run=\(runId, privacy: .public) event=assistant_appended tx=\(short(txId), privacy: .public) via=poll")
-                }
-
-                freshTx.status = .succeeded
-                outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(txId), privacy: .public) to=succeeded reason=poll_complete")
-                return
-            } catch {
-                outboxLog.error("processQueue run=\(runId, privacy: .public) event=poll_failed tx=\(short(txId), privacy: .public) err=\(String(describing: error), privacy: .public)")
-
-                guard let freshTx = try? fetchTransmission(id: txId) else { return }
-
-                let attempt = DeliveryAttempt(
-                    statusCode: -1,
-                    outcome: .failed,
-                    errorMessage: String(describing: error),
-                    transmissionId: serverTxId,
-                    transmission: freshTx
-                )
-                freshTx.deliveryAttempts.append(attempt)
-                modelContext.insert(attempt)
-
-                freshTx.status = .failed
-                freshTx.lastError = String(describing: error)
-
-                outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(txId), privacy: .public) to=failed reason=poll_failed")
-                return
-            }
-        }
-
-        if attemptCount >= maxAttempts {
-            // Client-side terminal: too many attempts.
-            tx.status = .failed
-            tx.lastError = "Max retry attempts exceeded (\(maxAttempts))"
-
-            let attempt = DeliveryAttempt(
-                statusCode: -1,
-                outcome: .failed,
-                errorMessage: tx.lastError,
-                transmissionId: nil,
-                transmission: tx
-            )
-            tx.deliveryAttempts.append(attempt)
-            modelContext.insert(attempt)
-
-            outboxLog.error("processQueue run=\(runId, privacy: .public) event=terminal_max_attempts tx=\(short(txId), privacy: .public) attempts=\(attemptCount, privacy: .public)")
+        if await handlePendingPollIfNeeded(runId: runId, tx: tx, txId: txId, threadId: threadId, attempts: attempts) {
             return
         }
 
-        if let pendingSince = pendingSinceIfActive(attempts) {
-            let age = now.timeIntervalSince(pendingSince)
-
-            if age > pendingTTLSeconds {
-                // Client-side terminal: pending too long.
-                tx.status = .failed
-                tx.lastError = "Timed out waiting for delivery (pending > \(Int(pendingTTLSeconds))s)"
-
-                let attempt = DeliveryAttempt(
-                    statusCode: 408,
-                    outcome: .failed,
-                    errorMessage: tx.lastError,
-                    transmissionId: nil,
-                    transmission: tx
-                )
-                tx.deliveryAttempts.append(attempt)
-                modelContext.insert(attempt)
-
-                outboxLog.error("processQueue run=\(runId, privacy: .public) event=terminal_pending_ttl tx=\(short(txId), privacy: .public) ageSec=\(age, privacy: .public) ttlSec=\(self.pendingTTLSeconds, privacy: .public)")
-                return
-            }
+        // Client-side terminal conditions.
+        if enforceTerminalConditions(runId: runId, tx: tx, txId: txId, attempts: attempts, attemptCount: attemptCount, now: now) {
+            return
         }
 
-        if let lastAt = attempts.last?.createdAt {
-            let wait = backoffSeconds(forAttemptCount: attemptCount)
-            let nextAt = lastAt.addingTimeInterval(wait)
-
-            if now < nextAt {
-                // Respect backoff: keep queued and exit quietly.
-                outboxLog.info("processQueue run=\(runId, privacy: .public) event=backoff tx=\(short(txId), privacy: .public) waitSec=\(wait, privacy: .public) nextAt=\(timeWithSeconds(nextAt), privacy: .public)")
-                return
-            }
+        // Respect backoff (quiet exit, remain queued).
+        if shouldRespectBackoffAndExit(runId: runId, txId: txId, attempts: attempts, attemptCount: attemptCount, now: now) {
+            return
         }
 
         let startNs = DispatchTime.now().uptimeNanoseconds
 
         tx.status = .sending
         tx.lastError = nil
-
         outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(txId), privacy: .public) to=sending")
 
         do {
@@ -687,11 +543,7 @@ final class TransmissionActions {
             modelContext.insert(attempt)
 
             if let m = response.threadMemento {
-                freshTx.serverThreadMementoId = m.id
-                freshTx.serverThreadMementoCreatedAtISO = m.createdAt
-                freshTx.serverThreadMementoSummary = ThreadMementoFormatter.format(m)
-
-                outboxLog.info("processQueue run=\(runId, privacy: .public) event=memento_draft_saved tx=\(short(txId), privacy: .public) memento=\(m.id, privacy: .public) via=send")
+                applyDraftMemento(runId: runId, freshTx: freshTx, txId: txId, m: m, via: "send")
             }
 
             // Pending: keep queued so a future outbox pass can poll server-side completion.
@@ -716,8 +568,7 @@ final class TransmissionActions {
 
             freshTx.status = .succeeded
             outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(txId), privacy: .public) to=succeeded")
-        }
-        catch {
+        } catch {
             outboxLog.error("processQueue run=\(runId, privacy: .public) event=transport_failed tx=\(short(txId), privacy: .public) ms=\(msSince(startNs), format: .fixed(precision: 1)) err=\(String(describing: error), privacy: .public)")
 
             guard let freshTx = try? fetchTransmission(id: txId) else { return }
@@ -760,6 +611,207 @@ final class TransmissionActions {
         }
 
         outboxLog.info("processQueue run=\(runId, privacy: .public) event=end")
+    }
+
+    // MARK: - Outbox helpers (v0)
+
+    private func fetchFirstQueuedTransmission(runId: String) -> Transmission? {
+        let queuedRaw = TransmissionStatus.queued.rawValue
+        let descriptor = FetchDescriptor<Transmission>(
+            predicate: #Predicate { $0.statusRaw == queuedRaw },
+            sortBy: [SortDescriptor(\.createdAt, order: .forward)]
+        )
+
+        guard let queued = try? modelContext.fetch(descriptor) else {
+            outboxLog.error("processQueue run=\(runId, privacy: .public) event=fetch_failed scope=queued")
+            return nil
+        }
+
+        outboxLog.info("processQueue run=\(runId, privacy: .public) event=queued_count count=\(queued.count, privacy: .public)")
+
+        guard let tx = queued.first else {
+            outboxLog.info("processQueue run=\(runId, privacy: .public) event=empty")
+            return nil
+        } // v0: one in-flight at a time
+
+        return tx
+    }
+
+    private func enforceTerminalConditions(
+        runId: String,
+        tx: Transmission,
+        txId: UUID,
+        attempts: [DeliveryAttempt],
+        attemptCount: Int,
+        now: Date
+    ) -> Bool {
+        if attemptCount >= maxAttempts {
+            // Client-side terminal: too many attempts.
+            tx.status = .failed
+            tx.lastError = "Max retry attempts exceeded (\(maxAttempts))"
+
+            let attempt = DeliveryAttempt(
+                statusCode: -1,
+                outcome: .failed,
+                errorMessage: tx.lastError,
+                transmissionId: nil,
+                transmission: tx
+            )
+            tx.deliveryAttempts.append(attempt)
+            modelContext.insert(attempt)
+
+            outboxLog.error("processQueue run=\(runId, privacy: .public) event=terminal_max_attempts tx=\(short(txId), privacy: .public) attempts=\(attemptCount, privacy: .public)")
+            return true
+        }
+
+        if let pendingSince = pendingSinceIfActive(attempts) {
+            let age = now.timeIntervalSince(pendingSince)
+
+            if age > pendingTTLSeconds {
+                // Client-side terminal: pending too long.
+                tx.status = .failed
+                tx.lastError = "Timed out waiting for delivery (pending > \(Int(pendingTTLSeconds))s)"
+
+                let attempt = DeliveryAttempt(
+                    statusCode: 408,
+                    outcome: .failed,
+                    errorMessage: tx.lastError,
+                    transmissionId: nil,
+                    transmission: tx
+                )
+                tx.deliveryAttempts.append(attempt)
+                modelContext.insert(attempt)
+
+                outboxLog.error("processQueue run=\(runId, privacy: .public) event=terminal_pending_ttl tx=\(short(txId), privacy: .public) ageSec=\(age, privacy: .public) ttlSec=\(self.pendingTTLSeconds, privacy: .public)")
+                return true
+            }
+        }
+
+        return false
+    }
+
+    private func shouldRespectBackoffAndExit(
+        runId: String,
+        txId: UUID,
+        attempts: [DeliveryAttempt],
+        attemptCount: Int,
+        now: Date
+    ) -> Bool {
+        if let lastAt = attempts.last?.createdAt {
+            let wait = backoffSeconds(forAttemptCount: attemptCount)
+            let nextAt = lastAt.addingTimeInterval(wait)
+
+            if now < nextAt {
+                // Respect backoff: keep queued and exit quietly.
+                outboxLog.info("processQueue run=\(runId, privacy: .public) event=backoff tx=\(short(txId), privacy: .public) waitSec=\(wait, privacy: .public) nextAt=\(timeWithSeconds(nextAt), privacy: .public)")
+                return true
+            }
+        }
+
+        return false
+    }
+
+    private func applyDraftMemento(runId: String, freshTx: Transmission, txId: UUID, m: ThreadMementoDTO, via: String) {
+        freshTx.serverThreadMementoId = m.id
+        freshTx.serverThreadMementoCreatedAtISO = m.createdAt
+        freshTx.serverThreadMementoSummary = ThreadMementoFormatter.format(m)
+
+        outboxLog.info("processQueue run=\(runId, privacy: .public) event=memento_draft_saved tx=\(short(txId), privacy: .public) memento=\(m.id, privacy: .public) via=\(via, privacy: .public)")
+    }
+
+    private func handlePendingPollIfNeeded(
+        runId: String,
+        tx: Transmission,
+        txId: UUID,
+        threadId: UUID,
+        attempts: [DeliveryAttempt]
+    ) async -> Bool {
+        guard let last = attempts.last,
+              last.outcome == .pending,
+              let serverTxId = last.transmissionId,
+              !serverTxId.isEmpty else {
+            return false
+        }
+
+        outboxLog.info("processQueue run=\(runId, privacy: .public) event=poll_ready tx=\(short(txId), privacy: .public) serverTx=\(shortOrDash(serverTxId), privacy: .public)")
+
+        // Mark as sending during poll for consistent UI semantics.
+        tx.status = .sending
+        tx.lastError = nil
+        outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(txId), privacy: .public) to=sending reason=poll")
+
+        do {
+            guard let polling = transport as? any ChatTransportPolling else {
+                outboxLog.error("processQueue run=\(runId, privacy: .public) event=poll_unavailable tx=\(short(txId), privacy: .public)")
+
+                tx.status = .failed
+                tx.lastError = "Transport does not support polling"
+                return true
+            }
+
+            let poll = try await polling.poll(transmissionId: serverTxId)
+
+            guard let freshTx = try? fetchTransmission(id: txId) else { return true }
+
+            // Record a poll attempt so backoff/TTL derivation stays honest.
+            let pollAttempt = DeliveryAttempt(
+                statusCode: poll.statusCode,
+                outcome: poll.pending ? .pending : .succeeded,
+                errorMessage: nil,
+                transmissionId: serverTxId,
+                transmission: freshTx
+            )
+            freshTx.deliveryAttempts.append(pollAttempt)
+            modelContext.insert(pollAttempt)
+
+            if let m = poll.threadMemento {
+                applyDraftMemento(runId: runId, freshTx: freshTx, txId: txId, m: m, via: "poll")
+            }
+
+            if poll.pending {
+                freshTx.status = .queued
+                outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(txId), privacy: .public) to=queued reason=pending_poll")
+                return true
+            }
+
+            // Completed: append assistant message (if provided) and mark succeeded.
+            let assistantText = (poll.assistant?.isEmpty == false) ? poll.assistant! : "(no assistant text)"
+
+            if let thread = try? fetchThread(id: threadId) {
+                let assistantMessage = Message(thread: thread, creatorType: .assistant, text: assistantText)
+
+                thread.messages.append(assistantMessage)
+                thread.lastActiveAt = Date()
+
+                modelContext.insert(assistantMessage)
+
+                outboxLog.info("processQueue run=\(runId, privacy: .public) event=assistant_appended tx=\(short(txId), privacy: .public) via=poll")
+            }
+
+            freshTx.status = .succeeded
+            outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(txId), privacy: .public) to=succeeded reason=poll_complete")
+            return true
+        } catch {
+            outboxLog.error("processQueue run=\(runId, privacy: .public) event=poll_failed tx=\(short(txId), privacy: .public) err=\(String(describing: error), privacy: .public)")
+
+            guard let freshTx = try? fetchTransmission(id: txId) else { return true }
+
+            let attempt = DeliveryAttempt(
+                statusCode: -1,
+                outcome: .failed,
+                errorMessage: String(describing: error),
+                transmissionId: serverTxId,
+                transmission: freshTx
+            )
+            freshTx.deliveryAttempts.append(attempt)
+            modelContext.insert(attempt)
+
+            freshTx.status = .failed
+            freshTx.lastError = String(describing: error)
+
+            outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(txId), privacy: .public) to=failed reason=poll_failed")
+            return true
+        }
     }
 
     /// Submit a ThreadMemento decision to SolServer and clear matching local draft fields so UI updates immediately.
