@@ -15,7 +15,6 @@ final class SolMobileSmokeTests: XCTestCase {
     func testModuleLoadsAndCoreTypesLink() {
         // If this compiles and runs, the test target is wired correctly.
         _ = TransmissionActions.self
-        _ = StubChatTransport.self
         _ = SolServerClient.self
 
         // Models
