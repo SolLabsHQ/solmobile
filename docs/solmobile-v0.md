@@ -62,6 +62,16 @@ SolMobile v0 includes:
 - Targets an **Open Loops** (or **Waiting on Data**) list
 - This is intentionally narrow: capture and offload only (no broad “actions” layer in v0)
 
+### 9. Storage audit (Settings)
+- A lightweight **Storage Audit** view exists in Settings
+- Shows local storage stats at a glance:
+  - Local DB size (approx)
+  - Counts: threads, messages, outbox items, evidence records
+  - TTL configuration (current defaults)
+- Includes a manual **Run TTL Sweep** action
+  - Clearly shows what would be deleted (preview) or what was deleted (result)
+  - Never touches pinned threads
+
 ---
 
 ## What SolMobile v0 is NOT
@@ -132,6 +142,8 @@ SolMobile v0 is not “done” until these are true:
 ### Data lifecycle
 - Unpinned threads expire at 30 days and are deleted predictably
 - Pinned threads survive TTL cleanup until unpinned or deleted
+- A Storage Audit view exists (Settings) showing local DB size + counts (threads/messages/outbox/evidence)
+- User can manually trigger a TTL sweep and see the result (pinned threads are never deleted)
 
 ---
 
@@ -153,4 +165,3 @@ These will be revisited only after v0 proves its core loop.
 
 This document defines SolMobile v0 scope.
 Changes must be intentional and recorded.
-
