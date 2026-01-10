@@ -11,8 +11,8 @@ import SwiftData
 struct ThreadListView: View {
     @Environment(\.modelContext) private var modelContext
 
-    @Query(sort: \Thread.lastActiveAt, order: .reverse)
-    private var threads: [Thread]
+    @Query(sort: \ConversationThread.lastActiveAt, order: .reverse)
+    private var threads: [ConversationThread]
 
     @Query private var transmissions: [Transmission]
 
@@ -57,7 +57,7 @@ struct ThreadListView: View {
     }
 
     private func createThread() {
-        let t = Thread(title: "Thread \(threads.count + 1)")
+        let t = ConversationThread(title: "Thread \(threads.count + 1)")
         modelContext.insert(t)
     }
 

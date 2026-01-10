@@ -1,13 +1,23 @@
 import SwiftUI
 import SwiftData
 import os
+import Foundation
 
 struct ThreadDetailView: View {
     @Environment(\.modelContext) private var modelContext
-    @Bindable var thread: Thread
+    @Bindable var thread: ConversationThread
     @Query private var transmissions: [Transmission]
     @State private var isProcessingOutbox: Bool = false
     @State private var outboxNeedsRerun: Bool = false
+
+    // ThreadMemento (navigation artifact): model-proposed snapshot returned by SolServer.
+    // We store acceptance state locally (UserDefaults) so it survives view reloads.
+    @State private var acceptedMemento: MementoViewModel? = nil
+    @State private var mementoRefreshToken: Int = 0
+
+    // Transient toast for lightweight feedback (Accept/Decline/Undo).
+    @State private var toastMessage: String? = nil
+    @State private var toastToken: Int = 0
 
     // Trace UI-level outbox lifecycle (retry taps, coalesced reruns, etc.)
     private let viewLog = Logger(subsystem: "com.sollabshq.solmobile", category: "ThreadDetailView")
@@ -16,7 +26,7 @@ struct ThreadDetailView: View {
         thread.messages.sorted { $0.createdAt < $1.createdAt }
     }
 
-    init(thread: Thread) {
+    init(thread: ConversationThread) {
         self.thread = thread
 
         // Scope the SwiftData query to this thread so the UI refreshes from the right slice of data.
@@ -31,6 +41,38 @@ struct ThreadDetailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+
+            // Accepted ThreadMemento (navigation snapshot).
+            if let acceptedMemento {
+                mementoAcceptedCard(acceptedMemento)
+                    .padding(.horizontal, 10)
+                    .padding(.top, 8)
+            }
+
+            // Pending ThreadMemento draft from latest server response.
+            if let pending = pendingMementoCandidate {
+                mementoPendingCard(pending)
+                    .padding(.horizontal, 10)
+                    .padding(.top, 8)
+            }
+
+            // Mini toast: short-lived feedback for memento actions.
+            if let toastMessage {
+                HStack(spacing: 10) {
+                    Image(systemName: "checkmark.circle")
+                    Text(toastMessage)
+                        .font(.footnote)
+                    Spacer()
+                }
+                .padding(10)
+                .background(.thinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .padding(.horizontal, 10)
+                .padding(.top, 8)
+                .transition(.opacity)
+                .animation(.easeInOut(duration: 0.15), value: toastMessage)
+            }
+
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 10) {
@@ -65,7 +107,10 @@ struct ThreadDetailView: View {
         .onChange(of: outboxSummary.failed + outboxSummary.queued + outboxSummary.sending) { _, newValue in
             viewLog.debug("[outboxBanner] refresh total=\(newValue, privacy: .public)")
         }
-        .onAppear { processOutbox() }
+        .onAppear {
+            loadAcceptedMementoFromDefaults()
+            processOutbox()
+        }
         .navigationTitle(thread.title)
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -138,6 +183,289 @@ struct ThreadDetailView: View {
         var sending: Int
         var failed: Int
     }
+
+    // MARK: - ThreadMemento UI + state
+
+    private struct MementoViewModel: Equatable {
+        let id: String
+        let summary: String
+        let createdAtISO: String?
+    }
+
+    private var mementoDefaultsKeyCurrent: String {
+        "sol.threadMemento.current.\(thread.id.uuidString)"
+    }
+
+    private var mementoDefaultsKeyPrev: String {
+        "sol.threadMemento.prev.\(thread.id.uuidString)"
+    }
+
+    private var mementoDefaultsKeyDismissed: String {
+        "sol.threadMemento.dismissed.\(thread.id.uuidString)"
+    }
+
+    private func mementoAcceptedCard(_ m: MementoViewModel) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Thread memento")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                Button("Undo") {
+                    viewLog.info("[memento] undo tapped")
+                    undoAcceptedMemento()
+                }
+                .font(.footnote)
+            }
+
+            Text(m.summary)
+                .font(.footnote)
+                .textSelection(.enabled)
+        }
+        .padding(10)
+        .background(.thinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func mementoPendingCard(_ m: MementoViewModel) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Image(systemName: "sparkles")
+                Text("Memento draft")
+                    .font(.footnote)
+                Spacer()
+            }
+
+            Text(m.summary)
+                .font(.footnote)
+                .textSelection(.enabled)
+
+            // Keep buttons vertical to avoid the "whole bar is one button" feel.
+            VStack(spacing: 8) {
+                Button {
+                    viewLog.info("[memento] accept tapped id=\(m.id, privacy: .public)")
+                    acceptMemento(m)
+                } label: {
+                    Text("Accept")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button {
+                    viewLog.info("[memento] decline tapped id=\(m.id, privacy: .public)")
+                    declineMemento(m)
+                } label: {
+                    Text("Decline")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .padding(10)
+        .background(.thinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func loadAcceptedMementoFromDefaults() {
+        guard let raw = UserDefaults.standard.dictionary(forKey: mementoDefaultsKeyCurrent) else {
+            acceptedMemento = nil
+            return
+        }
+
+        let id = raw["id"] as? String ?? ""
+        let summary = raw["summary"] as? String ?? ""
+        let createdAtISO = raw["createdAtISO"] as? String
+
+        if !id.isEmpty, !summary.isEmpty {
+            acceptedMemento = MementoViewModel(id: id, summary: summary, createdAtISO: createdAtISO)
+        } else {
+            acceptedMemento = nil
+        }
+    }
+
+    @MainActor
+    private func showToast(_ text: String) {
+        toastMessage = text
+
+        // Token-based clear so rapid taps don't race.
+        toastToken &+= 1
+        let token = toastToken
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            guard self.toastToken == token else { return }
+            self.toastMessage = nil
+        }
+    }
+
+private func acceptMemento(_ m: MementoViewModel) {
+    // Move current -> prev for Undo.
+    if let current = UserDefaults.standard.dictionary(forKey: mementoDefaultsKeyCurrent) {
+        UserDefaults.standard.set(current, forKey: mementoDefaultsKeyPrev)
+    }
+
+    // Optimistic local accept so the UI updates immediately.
+    UserDefaults.standard.set(
+        ["id": m.id, "summary": m.summary, "createdAtISO": m.createdAtISO as Any],
+        forKey: mementoDefaultsKeyCurrent
+    )
+
+    // Mark this draft id as dismissed so we don’t re-show it.
+    UserDefaults.standard.set(m.id, forKey: mementoDefaultsKeyDismissed)
+
+    acceptedMemento = m
+
+    // Submit to SolServer (throws on transport issues). We still keep the optimistic UI.
+    Task {
+        let actions = TransmissionActions(modelContext: modelContext)
+
+        do {
+            let result = try await actions.decideThreadMemento(
+                threadId: thread.id,
+                mementoId: m.id,
+                decision: .accept
+            )
+
+            // Server may return a different id for the accepted artifact.
+            if let applied = result.memento, result.applied {
+                let patched = MementoViewModel(id: applied.id, summary: m.summary, createdAtISO: applied.createdAt)
+
+                UserDefaults.standard.set(
+                    ["id": patched.id, "summary": patched.summary, "createdAtISO": patched.createdAtISO as Any],
+                    forKey: mementoDefaultsKeyCurrent
+                )
+
+                await MainActor.run {
+                    acceptedMemento = patched
+                    showToast("Accepted")
+                }
+
+                viewLog.info("[memento] accept applied serverId=\(applied.id, privacy: .public)")
+            } else if result.reason == "already_accepted" {
+                await MainActor.run { showToast("Already accepted") }
+                viewLog.info("[memento] accept already_accepted")
+            } else {
+                await MainActor.run { showToast("Accept not applied") }
+                viewLog.info("[memento] accept not_applied reason=\(result.reason ?? "-", privacy: .public)")
+            }
+        } catch {
+            await MainActor.run { showToast("Accept failed") }
+            viewLog.error("[memento] accept failed err=\(String(describing: error), privacy: .public)")
+        }
+
+        await MainActor.run { mementoRefreshToken &+= 1 }
+    }
+}
+
+    private func declineMemento(_ m: MementoViewModel) {
+        // Decline only dismisses this draft id. It does not change the accepted memento.
+        UserDefaults.standard.set(m.id, forKey: mementoDefaultsKeyDismissed)
+
+        // Submit to SolServer and clear the local draft fields so the banner disappears immediately.
+        Task {
+            let actions = TransmissionActions(modelContext: modelContext)
+            do {
+                let result = try await actions.decideThreadMemento(threadId: thread.id, mementoId: m.id, decision: .decline)
+
+                await MainActor.run {
+                    showToast(result.applied ? "Declined" : "Decline saved")
+                    // Force re-evaluation (UserDefaults is not observed).
+                    mementoRefreshToken &+= 1
+                }
+            } catch {
+                await MainActor.run {
+                    showToast("Decline failed")
+                    // Force re-evaluation (UserDefaults is not observed).
+                    mementoRefreshToken &+= 1
+                }
+
+                viewLog.error("[memento] decline failed err=\(String(describing: error), privacy: .public)")
+            }
+        }
+    }
+
+    private func undoAcceptedMemento() {
+        guard let prev = UserDefaults.standard.dictionary(forKey: mementoDefaultsKeyPrev) else {
+            viewLog.info("[memento] undo: no prev")
+            return
+        }
+
+        // Remove prev.
+        UserDefaults.standard.removeObject(forKey: mementoDefaultsKeyPrev)
+
+        if let current = UserDefaults.standard.dictionary(forKey: mementoDefaultsKeyCurrent) {
+
+            let id = current["id"] as? String ?? ""
+
+            // Submit to SolServer and clear the local draft fields so the banner disappears immediately.
+            Task {
+                let actions = TransmissionActions(modelContext: modelContext)
+                do {
+                    let result = try await actions.decideThreadMemento(threadId: thread.id, mementoId: id, decision: .revoke)
+
+                    await MainActor.run {
+                        showToast(result.applied ? "Undone" : "Undo saved")
+                        // Force re-evaluation (UserDefaults is not observed).
+                        mementoRefreshToken &+= 1
+                    }
+                } catch {
+                    await MainActor.run {
+                        showToast("Undo failed")
+                        // Force re-evaluation (UserDefaults is not observed).
+                        mementoRefreshToken &+= 1
+                    }
+
+                    viewLog.error("[memento] revoke failed err=\(String(describing: error), privacy: .public)")
+                }
+            }
+        }
+        UserDefaults.standard.set(prev, forKey: mementoDefaultsKeyCurrent)
+
+        loadAcceptedMementoFromDefaults()
+    }
+
+    private var pendingMementoCandidate: MementoViewModel? {
+        // Link to a local state token so Accept/Decline can force a re-evaluation even though
+        // UserDefaults changes are not automatically observed.
+        _ = mementoRefreshToken
+
+        // v0: best effort.
+        // Look at the latest Transmission for this thread and read the server-proposed ThreadMemento draft
+        // that `TransmissionActions` persisted from the SolServer response.
+        guard let latest = transmissions.first else {
+            return nil
+        }
+
+        guard
+            let id = latest.serverThreadMementoId,
+            let summary = latest.serverThreadMementoSummary,
+            !id.isEmpty,
+            !summary.isEmpty
+        else {
+            return nil
+        }
+
+        let extracted = MementoViewModel(
+            id: id,
+            summary: summary,
+            createdAtISO: latest.serverThreadMementoCreatedAtISO
+        )
+
+        // Do not show if the user already accepted/declined this id.
+        let dismissedId = UserDefaults.standard.string(forKey: mementoDefaultsKeyDismissed)
+        if dismissedId == extracted.id {
+            return nil
+        }
+
+        // Do not show if it matches the current accepted.
+        if acceptedMemento?.id == extracted.id {
+            return nil
+        }
+
+        return extracted
+    }
+
 
     private var outboxSummary: OutboxSummary {
         // Live derived state: @Query updates when SwiftData changes.

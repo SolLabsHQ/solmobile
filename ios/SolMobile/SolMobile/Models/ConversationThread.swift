@@ -9,7 +9,7 @@ import Foundation
 import SwiftData
 
 @Model
-final class Thread {
+final class ConversationThread {
     @Attribute(.unique) var id: UUID
     var title: String
     var createdAt: Date

@@ -28,7 +28,7 @@ struct ContentView: View {
                 .tabItem { Label("Settings", systemImage: "gearshape") }
         }
         .modelContainer(for: [
-            Thread.self,
+            ConversationThread.self,
             Message.self,
             Packet.self,
             Transmission.self
