@@ -186,14 +186,108 @@ struct ClaimMapEntryDTO: Codable {
     let createdAt: String
 }
 
+struct EvidenceSnapshot: Sendable {
+    let captures: [CaptureSnapshot]
+    let supports: [ClaimSupportSnapshot]
+    let claims: [ClaimMapEntrySnapshot]
+}
+
+struct CaptureSnapshot: Sendable {
+    let captureId: String
+    let kind: String
+    let url: String
+    let capturedAt: Date
+    let title: String?
+    let source: String
+}
+
+struct ClaimSupportSnapshot: Sendable {
+    let supportId: String
+    let type: ClaimSupportType
+    let captureId: String?
+    let snippetText: String?
+    let snippetHash: String?
+    let createdAt: Date
+}
+
+struct ClaimMapEntrySnapshot: Sendable {
+    let claimId: String
+    let claimText: String
+    let supportIds: [String]
+    let createdAt: Date
+}
+
 extension Message {
-    func toEvidencePayload() throws -> EvidencePayload {
+    /// Build a value-only snapshot from SwiftData relationships.
+    /// Must be called on the owning actor of this model (do not call from Task.detached without hopping).
+    func makeEvidenceSnapshot() throws -> EvidenceSnapshot {
         try validateEvidence()
 
+        let captureSnaps = (captures ?? []).map { capture in
+            CaptureSnapshot(
+                captureId: capture.captureId,
+                kind: capture.kind,
+                url: capture.url,
+                capturedAt: capture.capturedAt,
+                title: capture.title,
+                source: capture.source
+            )
+        }
+
+        let supportSnaps = try (supports ?? []).map { support -> ClaimSupportSnapshot in
+            switch support.type {
+            case .urlCapture:
+                guard let captureId = support.captureId else {
+                    throw EvidenceValidationError.missingCaptureId(supportId: support.supportId)
+                }
+                if support.snippetText != nil {
+                    throw EvidenceValidationError.forbiddenSnippetText(supportId: support.supportId)
+                }
+                return ClaimSupportSnapshot(
+                    supportId: support.supportId,
+                    type: support.type,
+                    captureId: captureId,
+                    snippetText: nil,
+                    snippetHash: support.snippetHash,
+                    createdAt: support.createdAt
+                )
+            case .textSnippet:
+                guard let snippetText = support.snippetText else {
+                    throw EvidenceValidationError.missingSnippetText(supportId: support.supportId)
+                }
+                if support.captureId != nil {
+                    throw EvidenceValidationError.forbiddenCaptureId(supportId: support.supportId)
+                }
+                return ClaimSupportSnapshot(
+                    supportId: support.supportId,
+                    type: support.type,
+                    captureId: nil,
+                    snippetText: snippetText,
+                    snippetHash: support.snippetHash,
+                    createdAt: support.createdAt
+                )
+            }
+        }
+
+        let claimSnaps = (claims ?? []).map { claim in
+            ClaimMapEntrySnapshot(
+                claimId: claim.claimId,
+                claimText: claim.claimText,
+                supportIds: claim.supportIds,
+                createdAt: claim.createdAt
+            )
+        }
+
+        return EvidenceSnapshot(captures: captureSnaps, supports: supportSnaps, claims: claimSnaps)
+    }
+}
+
+extension EvidencePayload {
+    static func from(snapshot: EvidenceSnapshot) -> EvidencePayload {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
 
-        let captureDTOs = (captures ?? []).map { capture in
+        let captureDTOs = snapshot.captures.map { capture in
             CaptureDTO(
                 captureId: capture.captureId,
                 kind: capture.kind,
@@ -204,42 +298,18 @@ extension Message {
             )
         }
 
-        let supportDTOs = try (supports ?? []).map { support -> ClaimSupportDTO in
-            switch support.type {
-            case .urlCapture:
-                guard let captureId = support.captureId else {
-                    throw EvidenceValidationError.missingCaptureId(supportId: support.supportId)
-                }
-                if support.snippetText != nil {
-                    throw EvidenceValidationError.forbiddenSnippetText(supportId: support.supportId)
-                }
-                return ClaimSupportDTO(
-                    supportId: support.supportId,
-                    type: support.type.rawValue,
-                    captureId: captureId,
-                    snippetText: nil,
-                    snippetHash: support.snippetHash,
-                    createdAt: formatter.string(from: support.createdAt)
-                )
-            case .textSnippet:
-                guard let snippetText = support.snippetText else {
-                    throw EvidenceValidationError.missingSnippetText(supportId: support.supportId)
-                }
-                if support.captureId != nil {
-                    throw EvidenceValidationError.forbiddenCaptureId(supportId: support.supportId)
-                }
-                return ClaimSupportDTO(
-                    supportId: support.supportId,
-                    type: support.type.rawValue,
-                    captureId: nil,
-                    snippetText: snippetText,
-                    snippetHash: support.snippetHash,
-                    createdAt: formatter.string(from: support.createdAt)
-                )
-            }
+        let supportDTOs = snapshot.supports.map { support in
+            ClaimSupportDTO(
+                supportId: support.supportId,
+                type: support.type.rawValue,
+                captureId: support.captureId,
+                snippetText: support.snippetText,
+                snippetHash: support.snippetHash,
+                createdAt: formatter.string(from: support.createdAt)
+            )
         }
 
-        let claimDTOs = (claims ?? []).map { claim in
+        let claimDTOs = snapshot.claims.map { claim in
             ClaimMapEntryDTO(
                 claimId: claim.claimId,
                 claimText: claim.claimText,
@@ -249,5 +319,13 @@ extension Message {
         }
 
         return EvidencePayload(captures: captureDTOs, supports: supportDTOs, claims: claimDTOs)
+    }
+}
+
+extension Message {
+    @available(*, deprecated, message: "Use makeEvidenceSnapshot() on the owning actor, then EvidencePayload.from(snapshot:).")
+    func toEvidencePayload() throws -> EvidencePayload {
+        let snapshot = try makeEvidenceSnapshot()
+        return EvidencePayload.from(snapshot: snapshot)
     }
 }
