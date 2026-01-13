@@ -8,12 +8,17 @@
 import Foundation
 import SwiftData
 
+enum ClaimSupportType: String, Codable {
+    case urlCapture = "url_capture"
+    case textSnippet = "text_snippet"
+}
+
 @Model
 final class ClaimSupport {
     @Attribute(.unique) var supportId: String
-    var type: String // "url_capture" or "text_snippet"
-    var captureId: String? // Required for url_capture, optional for text_snippet
-    var snippetText: String? // Optional for url_capture, required for text_snippet
+    private(set) var typeRaw: String
+    private(set) var captureId: String? // Required for url_capture, forbidden for text_snippet
+    private(set) var snippetText: String? // Required for text_snippet, forbidden for url_capture
     var snippetHash: String?
     var createdAt: Date
     
@@ -25,33 +30,83 @@ final class ClaimSupport {
     
     init(
         supportId: String,
-        type: String,
+        type: ClaimSupportType,
         captureId: String? = nil,
         snippetText: String? = nil,
         snippetHash: String? = nil,
         createdAt: Date = Date(),
         message: Message
-    ) {
+    ) throws {
         self.supportId = supportId
-        self.type = type
+        self.typeRaw = type.rawValue
+        let trimmedSnippet = snippetText.map { String($0.prefix(EvidenceBounds.maxSnippetLength)) }
+        try ClaimSupport.validate(
+            supportId: supportId,
+            type: type,
+            captureId: captureId,
+            snippetText: trimmedSnippet
+        )
         self.captureId = captureId
-        // Trim snippetText to max length
-        self.snippetText = snippetText.map { String($0.prefix(EvidenceBounds.maxSnippetLength)) }
+        self.snippetText = trimmedSnippet
         self.snippetHash = snippetHash
         self.createdAt = createdAt
         self.message = message
-        
-        // Validation: type-specific requirements
-        #if DEBUG
-        switch type {
-        case "url_capture":
-            assert(captureId != nil, "url_capture requires captureId")
-        case "text_snippet":
-            assert(snippetText != nil, "text_snippet requires snippetText")
-        default:
-            assertionFailure("Invalid ClaimSupport type: \(type)")
+    }
+
+    var type: ClaimSupportType {
+        get {
+            ClaimSupportType(rawValue: typeRaw) ?? .textSnippet
         }
-        #endif
+    }
+
+    func setUrlCapture(captureId: String) throws {
+        try ClaimSupport.validate(
+            supportId: supportId,
+            type: .urlCapture,
+            captureId: captureId,
+            snippetText: nil
+        )
+        typeRaw = ClaimSupportType.urlCapture.rawValue
+        self.captureId = captureId
+        self.snippetText = nil
+    }
+
+    func setTextSnippet(snippetText: String, snippetHash: String? = nil) throws {
+        let trimmedSnippet = String(snippetText.prefix(EvidenceBounds.maxSnippetLength))
+        try ClaimSupport.validate(
+            supportId: supportId,
+            type: .textSnippet,
+            captureId: nil,
+            snippetText: trimmedSnippet
+        )
+        typeRaw = ClaimSupportType.textSnippet.rawValue
+        captureId = nil
+        self.snippetText = trimmedSnippet
+        self.snippetHash = snippetHash
+    }
+
+    private static func validate(
+        supportId: String,
+        type: ClaimSupportType,
+        captureId: String?,
+        snippetText: String?
+    ) throws {
+        switch type {
+        case .urlCapture:
+            guard let captureId, !captureId.isEmpty else {
+                throw EvidenceValidationError.missingCaptureId(supportId: supportId)
+            }
+            if snippetText != nil {
+                throw EvidenceValidationError.forbiddenSnippetText(supportId: supportId)
+            }
+        case .textSnippet:
+            guard let snippetText, !snippetText.isEmpty else {
+                throw EvidenceValidationError.missingSnippetText(supportId: supportId)
+            }
+            if captureId != nil {
+                throw EvidenceValidationError.forbiddenCaptureId(supportId: supportId)
+            }
+        }
     }
 }
 
@@ -69,7 +124,7 @@ extension ClaimSupport: Codable {
     convenience init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let supportId = try container.decode(String.self, forKey: .supportId)
-        let type = try container.decode(String.self, forKey: .type)
+        let typeRaw = try container.decode(String.self, forKey: .type)
         let captureId = try container.decodeIfPresent(String.self, forKey: .captureId)
         let snippetText = try container.decodeIfPresent(String.self, forKey: .snippetText)
         let snippetHash = try container.decodeIfPresent(String.self, forKey: .snippetHash)
@@ -86,31 +141,19 @@ extension ClaimSupport: Codable {
             )
         }
         
-        // Validate type-specific requirements
-        switch type {
-        case "url_capture":
-            guard captureId != nil else {
-                throw DecodingError.dataCorruptedError(
-                    forKey: .captureId,
-                    in: container,
-                    debugDescription: "url_capture requires captureId"
-                )
-            }
-        case "text_snippet":
-            guard snippetText != nil else {
-                throw DecodingError.dataCorruptedError(
-                    forKey: .snippetText,
-                    in: container,
-                    debugDescription: "text_snippet requires snippetText"
-                )
-            }
-        default:
+        guard let type = ClaimSupportType(rawValue: typeRaw) else {
             throw DecodingError.dataCorruptedError(
                 forKey: .type,
                 in: container,
-                debugDescription: "Invalid type: \(type)"
+                debugDescription: "Invalid type: \(typeRaw)"
             )
         }
+        try ClaimSupport.validate(
+            supportId: supportId,
+            type: type,
+            captureId: captureId,
+            snippetText: snippetText
+        )
         
         // Note: Message must be set after decoding by the parent
         fatalError("ClaimSupport.init(from:) requires Message context - use Message decoding instead")
@@ -119,51 +162,21 @@ extension ClaimSupport: Codable {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         
-        // Validate type-specific requirements at encode-time
-        switch type {
-        case "url_capture":
-            guard captureId != nil else {
-                #if DEBUG
-                fatalError("url_capture requires captureId")
-                #else
-                throw EvidenceValidationError.orphanedCaptureReference(
-                    supportId: supportId,
-                    captureId: "missing"
-                )
-                #endif
-            }
-        case "text_snippet":
-            guard snippetText != nil else {
-                #if DEBUG
-                fatalError("text_snippet requires snippetText")
-                #else
-                throw EncodingError.invalidValue(
-                    self,
-                    EncodingError.Context(
-                        codingPath: encoder.codingPath,
-                        debugDescription: "text_snippet requires snippetText"
-                    )
-                )
-                #endif
-            }
-        default:
-            #if DEBUG
-            fatalError("Invalid ClaimSupport type: \(type)")
-            #else
-            throw EncodingError.invalidValue(
-                self,
-                EncodingError.Context(
-                    codingPath: encoder.codingPath,
-                    debugDescription: "Invalid type: \(type)"
-                )
-            )
-            #endif
-        }
+        try ClaimSupport.validate(
+            supportId: supportId,
+            type: type,
+            captureId: captureId,
+            snippetText: snippetText
+        )
         
         try container.encode(supportId, forKey: .supportId)
-        try container.encode(type, forKey: .type)
-        try container.encodeIfPresent(captureId, forKey: .captureId)
-        try container.encodeIfPresent(snippetText, forKey: .snippetText)
+        try container.encode(type.rawValue, forKey: .type)
+        switch type {
+        case .urlCapture:
+            try container.encode(captureId, forKey: .captureId)
+        case .textSnippet:
+            try container.encode(snippetText, forKey: .snippetText)
+        }
         try container.encodeIfPresent(snippetHash, forKey: .snippetHash)
         
         // Encode datetime as ISO8601 string

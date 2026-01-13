@@ -24,26 +24,19 @@ final class ClaimMapEntry {
         supportIds: [String],
         createdAt: Date = Date(),
         message: Message
-    ) {
+    ) throws {
         self.claimId = claimId
         // Trim claimText to max length
         self.claimText = String(claimText.prefix(EvidenceBounds.maxClaimTextLength))
         
         // Enforce supportIds count at model boundary
-        #if DEBUG
-        assert(
-            supportIds.count <= EvidenceBounds.maxSupportIdsPerClaim,
-            "supportIds count \(supportIds.count) exceeds max \(EvidenceBounds.maxSupportIdsPerClaim)"
-        )
-        #else
         if supportIds.count > EvidenceBounds.maxSupportIdsPerClaim {
-            // In production, this should be caught earlier, but fail closed
-            self.supportIds = Array(supportIds.prefix(EvidenceBounds.maxSupportIdsPerClaim))
-        } else {
-            self.supportIds = supportIds
+            throw EvidenceValidationError.supportIdsCountOverflow(
+                claimId: claimId,
+                count: supportIds.count,
+                max: EvidenceBounds.maxSupportIdsPerClaim
+            )
         }
-        #endif
-        
         self.supportIds = supportIds
         self.createdAt = createdAt
         self.message = message

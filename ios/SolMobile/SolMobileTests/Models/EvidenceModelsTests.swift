@@ -47,15 +47,15 @@ final class EvidenceModelsTests: XCTestCase {
         )
         ctx.insert(capture)
         
-        let support = ClaimSupport(
+        let support = try ClaimSupport(
             supportId: "sup1",
-            type: "url_capture",
+            type: .urlCapture,
             captureId: "cap1",
             message: message
         )
         ctx.insert(support)
         
-        let claim = ClaimMapEntry(
+        let claim = try ClaimMapEntry(
             claimId: "claim1",
             claimText: "Test claim",
             supportIds: ["sup1"],
@@ -107,10 +107,10 @@ final class EvidenceModelsTests: XCTestCase {
         let capture = Capture(captureId: "cap1", url: "https://example.com", message: message)
         ctx.insert(capture)
         
-        let support = ClaimSupport(supportId: "sup1", type: "text_snippet", snippetText: "Test snippet", message: message)
+        let support = try ClaimSupport(supportId: "sup1", type: .textSnippet, snippetText: "Test snippet", message: message)
         ctx.insert(support)
         
-        let claim = ClaimMapEntry(claimId: "claim1", claimText: "Test", supportIds: ["sup1"], message: message)
+        let claim = try ClaimMapEntry(claimId: "claim1", claimText: "Test", supportIds: ["sup1"], message: message)
         ctx.insert(claim)
         
         message.captures = [capture]
@@ -174,9 +174,9 @@ final class EvidenceModelsTests: XCTestCase {
         
         // Create snippet longer than max
         let longSnippet = String(repeating: "x", count: 15000)
-        let support = ClaimSupport(
+        let support = try ClaimSupport(
             supportId: "sup1",
-            type: "text_snippet",
+            type: .textSnippet,
             snippetText: longSnippet,
             message: message
         )
@@ -201,7 +201,7 @@ final class EvidenceModelsTests: XCTestCase {
         
         // Create claim text longer than max
         let longClaim = String(repeating: "x", count: 3000)
-        let claim = ClaimMapEntry(
+        let claim = try ClaimMapEntry(
             claimId: "claim1",
             claimText: longClaim,
             supportIds: [],
@@ -229,9 +229,9 @@ final class EvidenceModelsTests: XCTestCase {
         ctx.insert(message)
         
         // Create support referencing non-existent capture
-        let support = ClaimSupport(
+        let support = try ClaimSupport(
             supportId: "sup1",
-            type: "url_capture",
+            type: .urlCapture,
             captureId: "nonexistent",
             message: message
         )
@@ -271,7 +271,7 @@ final class EvidenceModelsTests: XCTestCase {
         ctx.insert(message)
         
         // Create claim referencing non-existent support
-        let claim = ClaimMapEntry(
+        let claim = try ClaimMapEntry(
             claimId: "claim1",
             claimText: "Test claim",
             supportIds: ["nonexistent"],
@@ -322,15 +322,15 @@ final class EvidenceModelsTests: XCTestCase {
         let capture = Capture(captureId: "cap1", url: "https://example.com", message: message)
         ctx.insert(capture)
         
-        let support = ClaimSupport(
+        let support = try ClaimSupport(
             supportId: "sup1",
-            type: "url_capture",
+            type: .urlCapture,
             captureId: "cap1",
             message: message
         )
         ctx.insert(support)
         
-        let claim = ClaimMapEntry(
+        let claim = try ClaimMapEntry(
             claimId: "claim1",
             claimText: "Valid claim",
             supportIds: ["sup1"],
@@ -367,9 +367,9 @@ final class EvidenceModelsTests: XCTestCase {
         #if DEBUG
         // In DEBUG mode, this would trigger an assertion
         // We can't test assertions directly, so we verify the requirement in the model
-        let support = ClaimSupport(
+        let support = try ClaimSupport(
             supportId: "sup1",
-            type: "url_capture",
+            type: .urlCapture,
             captureId: "cap1", // Required
             message: message
         )
@@ -393,14 +393,62 @@ final class EvidenceModelsTests: XCTestCase {
         // text_snippet without snippetText should fail in DEBUG
         #if DEBUG
         // In DEBUG mode, this would trigger an assertion
-        let support = ClaimSupport(
+        let support = try ClaimSupport(
             supportId: "sup1",
-            type: "text_snippet",
+            type: .textSnippet,
             snippetText: "Required text", // Required
             message: message
         )
         XCTAssertNotNil(support.snippetText)
         #endif
+    }
+
+    @MainActor
+    func test_url_capture_forbids_snippet_text() throws {
+        let schema = Schema([ConversationThread.self, Message.self, ClaimSupport.self])
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: [config])
+        let ctx = ModelContext(container)
+
+        let thread = ConversationThread(title: "Conditional")
+        ctx.insert(thread)
+
+        let message = Message(thread: thread, creatorType: .user, text: "Test")
+        ctx.insert(message)
+
+        XCTAssertThrowsError(
+            try ClaimSupport(
+                supportId: "sup1",
+                type: .urlCapture,
+                captureId: "cap1",
+                snippetText: "should fail",
+                message: message
+            )
+        )
+    }
+
+    @MainActor
+    func test_text_snippet_forbids_capture_id() throws {
+        let schema = Schema([ConversationThread.self, Message.self, ClaimSupport.self])
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: [config])
+        let ctx = ModelContext(container)
+
+        let thread = ConversationThread(title: "Conditional")
+        ctx.insert(thread)
+
+        let message = Message(thread: thread, creatorType: .user, text: "Test")
+        ctx.insert(message)
+
+        XCTAssertThrowsError(
+            try ClaimSupport(
+                supportId: "sup1",
+                type: .textSnippet,
+                captureId: "cap1",
+                snippetText: "required text",
+                message: message
+            )
+        )
     }
     
     // MARK: - JSON Encoding/Decoding (camelCase)
@@ -473,6 +521,43 @@ final class EvidenceModelsTests: XCTestCase {
         XCTAssertNil(json["claim_id"]) // No snake_case
         XCTAssertNil(json["support_ids"]) // No snake_case
     }
+
+    func test_evidence_payload_encoding_is_flat_and_camel_case() throws {
+        let thread = ConversationThread(title: "DTO")
+        let message = Message(thread: thread, creatorType: .assistant, text: "Test")
+
+        let capture = Capture(captureId: "cap1", url: "https://example.com", message: message)
+        let support = try ClaimSupport(
+            supportId: "sup1",
+            type: .urlCapture,
+            captureId: "cap1",
+            message: message
+        )
+        let claim = try ClaimMapEntry(
+            claimId: "claim1",
+            claimText: "Test claim",
+            supportIds: ["sup1"],
+            message: message
+        )
+
+        message.captures = [capture]
+        message.supports = [support]
+        message.claims = [claim]
+
+        let payload = try message.toEvidencePayload()
+        let data = try JSONEncoder().encode(payload)
+        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+
+        XCTAssertNotNil(json["captures"])
+        XCTAssertNotNil(json["supports"])
+        XCTAssertNotNil(json["claims"])
+        XCTAssertNil(json["capture_id"])
+        XCTAssertNil(json["support_ids"])
+
+        let supports = json["supports"] as! [[String: Any]]
+        XCTAssertNotNil(supports.first?["captureId"])
+        XCTAssertNil(supports.first?["snippetText"])
+    }
     
     // MARK: - Count Overflow Validation
     
@@ -536,9 +621,9 @@ final class EvidenceModelsTests: XCTestCase {
         // Create more supports than allowed
         var supports: [ClaimSupport] = []
         for i in 0..<(EvidenceBounds.maxSupports + 1) {
-            let support = ClaimSupport(
+            let support = try ClaimSupport(
                 supportId: "sup\(i)",
-                type: "text_snippet",
+                type: .textSnippet,
                 snippetText: "Snippet \(i)",
                 message: message
             )
@@ -563,5 +648,79 @@ final class EvidenceModelsTests: XCTestCase {
                 XCTFail("Expected supportCountOverflow error")
             }
         }
+    }
+
+    @MainActor
+    func test_support_ids_overflow_fails_in_init() throws {
+        let schema = Schema([ConversationThread.self, Message.self, ClaimMapEntry.self])
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: [config])
+        let ctx = ModelContext(container)
+
+        let thread = ConversationThread(title: "Overflow")
+        ctx.insert(thread)
+
+        let message = Message(thread: thread, creatorType: .assistant, text: "Test")
+        ctx.insert(message)
+
+        let supportIds = (0..<(EvidenceBounds.maxSupportIdsPerClaim + 1)).map { "sup\($0)" }
+        XCTAssertThrowsError(
+            try ClaimMapEntry(
+                claimId: "claim1",
+                claimText: "Test",
+                supportIds: supportIds,
+                message: message
+            )
+        )
+    }
+
+    @MainActor
+    func test_dto_encode_fails_for_orphaned_capture_reference() throws {
+        let schema = Schema([ConversationThread.self, Message.self, ClaimSupport.self])
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: [config])
+        let ctx = ModelContext(container)
+
+        let thread = ConversationThread(title: "DTO Orphan")
+        ctx.insert(thread)
+
+        let message = Message(thread: thread, creatorType: .assistant, text: "Test")
+        ctx.insert(message)
+
+        let support = try ClaimSupport(
+            supportId: "sup1",
+            type: .urlCapture,
+            captureId: "missing",
+            message: message
+        )
+        ctx.insert(support)
+        message.supports = [support]
+
+        XCTAssertThrowsError(try message.toEvidencePayload())
+    }
+
+    @MainActor
+    func test_dto_encode_fails_for_orphaned_support_reference() throws {
+        let schema = Schema([ConversationThread.self, Message.self, ClaimMapEntry.self])
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: [config])
+        let ctx = ModelContext(container)
+
+        let thread = ConversationThread(title: "DTO Orphan")
+        ctx.insert(thread)
+
+        let message = Message(thread: thread, creatorType: .assistant, text: "Test")
+        ctx.insert(message)
+
+        let claim = try ClaimMapEntry(
+            claimId: "claim1",
+            claimText: "Test claim",
+            supportIds: ["missing"],
+            message: message
+        )
+        ctx.insert(claim)
+        message.claims = [claim]
+
+        XCTAssertThrowsError(try message.toEvidencePayload())
     }
 }

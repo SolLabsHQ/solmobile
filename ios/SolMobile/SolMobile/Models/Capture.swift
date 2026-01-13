@@ -28,6 +28,11 @@ enum EvidenceValidationError: Error, LocalizedError {
     case supportCountOverflow(count: Int, max: Int)
     case claimCountOverflow(count: Int, max: Int)
     case supportIdsCountOverflow(claimId: String, count: Int, max: Int)
+    case missingCaptureId(supportId: String)
+    case missingSnippetText(supportId: String)
+    case forbiddenCaptureId(supportId: String)
+    case forbiddenSnippetText(supportId: String)
+    case invalidSupportType(supportId: String, type: String)
     
     var errorDescription: String? {
         switch self {
@@ -43,6 +48,16 @@ enum EvidenceValidationError: Error, LocalizedError {
             return "Claim count \(count) exceeds maximum \(max)"
         case .supportIdsCountOverflow(let claimId, let count, let max):
             return "Claim \(claimId) has \(count) supportIds, exceeds maximum \(max)"
+        case .missingCaptureId(let supportId):
+            return "Support \(supportId) requires captureId for url_capture"
+        case .missingSnippetText(let supportId):
+            return "Support \(supportId) requires snippetText for text_snippet"
+        case .forbiddenCaptureId(let supportId):
+            return "Support \(supportId) must not include captureId for text_snippet"
+        case .forbiddenSnippetText(let supportId):
+            return "Support \(supportId) must not include snippetText for url_capture"
+        case .invalidSupportType(let supportId, let type):
+            return "Support \(supportId) has invalid type: \(type)"
         }
     }
 }
