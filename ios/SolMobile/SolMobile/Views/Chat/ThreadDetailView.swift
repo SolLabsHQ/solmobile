@@ -517,12 +517,30 @@ private struct MessageBubble: View {
         HStack {
             if message.creatorType == .user { Spacer(minLength: 40) }
 
-            Text(message.text)
-                .padding(10)
-                .background(message.creatorType == .user ? Color.gray.opacity(0.2) : Color.blue.opacity(0.15))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+            VStack(alignment: .leading, spacing: 0) {
+                Text(message.text)
+                    .padding(10)
+                    .background(message.creatorType == .user ? Color.gray.opacity(0.2) : Color.blue.opacity(0.15))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                
+                // Evidence UI (PR #8) - only show for assistant messages with evidence
+                if message.creatorType == .assistant && hasEvidence {
+                    EvidenceView(
+                        message: message,
+                        urlOpener: SystemURLOpener()
+                    )
+                    .padding(.horizontal, 10)
+                }
+            }
 
             if message.creatorType != .user { Spacer(minLength: 40) }
         }
+    }
+    
+    private var hasEvidence: Bool {
+        let hasCaptures = message.captures?.isEmpty == false
+        let hasSupports = message.supports?.isEmpty == false
+        let hasClaims = message.claims?.isEmpty == false
+        return hasCaptures || hasSupports || hasClaims
     }
 }
