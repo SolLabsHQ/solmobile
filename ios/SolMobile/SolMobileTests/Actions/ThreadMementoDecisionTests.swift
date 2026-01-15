@@ -69,7 +69,10 @@ final class ThreadMementoDecisionTests: SwiftDataTestBase {
                 statusCode: 200,
                 transmissionId: "tx-1",
                 pending: false,
-                threadMemento: nil
+                threadMemento: nil,
+                evidenceSummary: nil,
+                evidence: nil,
+                evidenceWarnings: nil
             )
         }
     }

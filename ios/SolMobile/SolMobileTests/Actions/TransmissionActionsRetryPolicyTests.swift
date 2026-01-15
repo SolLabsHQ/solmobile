@@ -94,7 +94,16 @@ final class TransmissionActionsRetryPolicyTests: XCTestCase {
         // Arrange
         let transport = CountingTransport { _ in
             // If this gets called, we violated backoff.
-            return ChatResponse(text: "ok", statusCode: 200, transmissionId: "tx-1", pending: false, threadMemento: nil)
+            return ChatResponse(
+                text: "ok",
+                statusCode: 200,
+                transmissionId: "tx-1",
+                pending: false,
+                threadMemento: nil,
+                evidenceSummary: nil,
+                evidence: nil,
+                evidenceWarnings: nil
+            )
         }
 
         let (thread, user) = makeThreadAndUserMessage(text: "hello")
@@ -135,7 +144,16 @@ final class TransmissionActionsRetryPolicyTests: XCTestCase {
         // Arrange
         let transport = CountingTransport { _ in
             // TTL expiry should short-circuit before send.
-            return ChatResponse(text: "ok", statusCode: 200, transmissionId: "tx-1", pending: false, threadMemento: nil)
+            return ChatResponse(
+                text: "ok",
+                statusCode: 200,
+                transmissionId: "tx-1",
+                pending: false,
+                threadMemento: nil,
+                evidenceSummary: nil,
+                evidence: nil,
+                evidenceWarnings: nil
+            )
         }
 
         let (thread, user) = makeThreadAndUserMessage(text: "hello")
@@ -183,7 +201,16 @@ final class TransmissionActionsRetryPolicyTests: XCTestCase {
         // Arrange
         let transport = CountingTransport { _ in
             // Max-attempts terminal should short-circuit before send.
-            return ChatResponse(text: "ok", statusCode: 200, transmissionId: "tx-1", pending: false, threadMemento: nil)
+            return ChatResponse(
+                text: "ok",
+                statusCode: 200,
+                transmissionId: "tx-1",
+                pending: false,
+                threadMemento: nil,
+                evidenceSummary: nil,
+                evidence: nil,
+                evidenceWarnings: nil
+            )
         }
 
         let (thread, user) = makeThreadAndUserMessage(text: "hello")

@@ -21,7 +21,10 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
                 statusCode: 202,
                 transmissionId: txId,
                 pending: true,
-                threadMemento: nil
+                threadMemento: nil,
+                evidenceSummary: nil,
+                evidence: nil,
+                evidenceWarnings: nil
             )
         }
 
@@ -33,7 +36,10 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
                 assistant: "done",
                 serverStatus: "completed",
                 statusCode: 200,
-                threadMemento: nil
+                threadMemento: nil,
+                evidenceSummary: nil,
+                evidence: nil,
+                evidenceWarnings: nil
             )
         }
     }
@@ -48,7 +54,10 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
                 statusCode: 202,
                 transmissionId: txId,
                 pending: true,
-                threadMemento: nil
+                threadMemento: nil,
+                evidenceSummary: nil,
+                evidence: nil,
+                evidenceWarnings: nil
             )
         }
     }
@@ -63,7 +72,10 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
                 statusCode: 202,
                 transmissionId: txId,
                 pending: true,
-                threadMemento: nil
+                threadMemento: nil,
+                evidenceSummary: nil,
+                evidence: nil,
+                evidenceWarnings: nil
             )
         }
 
@@ -75,7 +87,10 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
                 assistant: nil,
                 serverStatus: "created",
                 statusCode: 200,
-                threadMemento: nil
+                threadMemento: nil,
+                evidenceSummary: nil,
+                evidence: nil,
+                evidenceWarnings: nil
             )
         }
     }
@@ -90,7 +105,10 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
                 statusCode: 202,
                 transmissionId: txId,
                 pending: true,
-                threadMemento: nil
+                threadMemento: nil,
+                evidenceSummary: nil,
+                evidence: nil,
+                evidenceWarnings: nil
             )
         }
 
