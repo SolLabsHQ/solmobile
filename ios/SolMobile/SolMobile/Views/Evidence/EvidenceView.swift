@@ -230,7 +230,7 @@ struct SupportCard: View {
                     
                     Text(previewText)
                         .font(.subheadline)
-                        .lineLimit(1)
+                        .lineLimit(2)
                         .foregroundColor(.primary)
                     
                     Spacer()
@@ -240,13 +240,13 @@ struct SupportCard: View {
             
             if isExpanded {
                 VStack(alignment: .leading, spacing: 8) {
-                    if support.type == "url_capture", let captureId = support.captureId {
+                    if support.type == .urlCapture, let captureId = support.captureId {
                         Text("Capture: \(captureId)")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
                     
-                    if support.type == "text_snippet", let snippetText = support.snippetText {
+                    if support.type == .textSnippet, let snippetText = support.snippetText {
                         Text(snippetText)
                             .font(.caption)
                             .foregroundColor(.secondary)
@@ -262,7 +262,7 @@ struct SupportCard: View {
     }
     
     private var previewText: String {
-        if support.type == "url_capture" {
+        if support.type == .urlCapture {
             return "URL Capture"
         } else if let snippetText = support.snippetText {
             return snippetText.count > 50 ? String(snippetText.prefix(47)) + "..." : snippetText
@@ -286,9 +286,8 @@ struct ClaimCard: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                     
-                    Text(previewText)
+                    Text(claim.claimText)
                         .font(.subheadline)
-                        .lineLimit(1)
                         .foregroundColor(.primary)
                     
                     Spacer()
@@ -318,7 +317,7 @@ struct ClaimCard: View {
     }
     
     private var previewText: String {
-        claim.claimText.count > 50 ? String(claim.claimText.prefix(47)) + "..." : claim.claimText
+        claim.claimText
     }
 }
 
@@ -340,16 +339,16 @@ struct SourceBadge: View {
 }
 
 struct TypeBadge: View {
-    let type: String
+    let type: ClaimSupportType
     
     var body: some View {
-        Text(type == "url_capture" ? "URL" : "Text")
+        Text(type == .urlCapture ? "URL" : "Text")
             .font(.caption2)
             .fontWeight(.medium)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .background(type == "url_capture" ? Color.purple.opacity(0.2) : Color.orange.opacity(0.2))
-            .foregroundColor(type == "url_capture" ? .purple : .orange)
+            .background(type == .urlCapture ? Color.purple.opacity(0.2) : Color.orange.opacity(0.2))
+            .foregroundColor(type == .urlCapture ? .purple : .orange)
             .cornerRadius(4)
     }
 }

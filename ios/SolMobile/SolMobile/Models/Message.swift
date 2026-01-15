@@ -160,14 +160,14 @@ extension Message {
     }
 }
 
-// Evidence DTOs (flat payload, contract-aligned)
+// Evidence DTOs for outbound payloads (flat, contract-aligned)
 struct EvidencePayload: Codable {
-    let captures: [CaptureDTO]
-    let supports: [ClaimSupportDTO]
-    let claims: [ClaimMapEntryDTO]
+    let captures: [EvidencePayloadCaptureDTO]
+    let supports: [EvidencePayloadClaimSupportDTO]
+    let claims: [EvidencePayloadClaimMapEntryDTO]
 }
 
-struct CaptureDTO: Codable {
+struct EvidencePayloadCaptureDTO: Codable {
     let captureId: String
     let kind: String
     let url: String
@@ -176,7 +176,7 @@ struct CaptureDTO: Codable {
     let source: String
 }
 
-struct ClaimSupportDTO: Codable {
+struct EvidencePayloadClaimSupportDTO: Codable {
     let supportId: String
     let type: String
     let captureId: String?
@@ -185,7 +185,7 @@ struct ClaimSupportDTO: Codable {
     let createdAt: String
 }
 
-struct ClaimMapEntryDTO: Codable {
+struct EvidencePayloadClaimMapEntryDTO: Codable {
     let claimId: String
     let claimText: String
     let supportIds: [String]
@@ -294,7 +294,7 @@ extension EvidencePayload {
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
 
         let captureDTOs = snapshot.captures.map { capture in
-            CaptureDTO(
+            EvidencePayloadCaptureDTO(
                 captureId: capture.captureId,
                 kind: capture.kind,
                 url: capture.url,
@@ -305,7 +305,7 @@ extension EvidencePayload {
         }
 
         let supportDTOs = snapshot.supports.map { support in
-            ClaimSupportDTO(
+            EvidencePayloadClaimSupportDTO(
                 supportId: support.supportId,
                 type: support.type.rawValue,
                 captureId: support.captureId,
@@ -316,7 +316,7 @@ extension EvidencePayload {
         }
 
         let claimDTOs = snapshot.claims.map { claim in
-            ClaimMapEntryDTO(
+            EvidencePayloadClaimMapEntryDTO(
                 claimId: claim.claimId,
                 claimText: claim.claimText,
                 supportIds: claim.supportIds,

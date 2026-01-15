@@ -8,78 +8,107 @@
 import Foundation
 import SwiftData
 
+enum EvidenceMappingError: Error {
+    case invalidCaptureTimestamp(captureId: String, value: String)
+    case invalidSupportTimestamp(supportId: String, value: String)
+    case invalidClaimTimestamp(claimId: String, value: String)
+}
+
 extension Message {
-    /// Map Evidence DTOs to SwiftData models and attach to this message
-    /// Must be called on the ModelContext's actor (typically @MainActor)
-    ///
-    /// - Parameters:
-    ///   - evidence: Optional evidence DTO from server response
-    ///   - context: ModelContext for creating SwiftData objects
-    ///
-    /// - Note: Initializes relationship arrays if nil before appending
-    func mapAndAttachEvidence(from evidence: EvidenceDTO?, context: ModelContext) {
-        guard let evidence = evidence else { return }
-        
-        // Map Captures
+    /// Build Evidence models from DTOs without inserting them.
+    /// Must be called on the ModelContext's actor (typically @MainActor).
+    func buildEvidenceModels(from evidence: EvidenceDTO?) throws -> (
+        captures: [Capture],
+        supports: [ClaimSupport],
+        claims: [ClaimMapEntry]
+    ) {
+        guard let evidence = evidence else { return ([], [], []) }
+
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        var captures: [Capture] = []
+        var supports: [ClaimSupport] = []
+        var claims: [ClaimMapEntry] = []
+
         if let captureDTOs = evidence.captures {
-            // Initialize relationship if nil
-            if self.captures == nil {
-                self.captures = []
-            }
-            
             for dto in captureDTOs {
+                guard let capturedAt = formatter.date(from: dto.capturedAt) else {
+                    throw EvidenceMappingError.invalidCaptureTimestamp(
+                        captureId: dto.captureId,
+                        value: dto.capturedAt
+                    )
+                }
                 let capture = Capture(
                     captureId: dto.captureId,
                     kind: dto.kind,
                     url: dto.url,
-                    capturedAt: ISO8601DateFormatter().date(from: dto.capturedAt) ?? Date(),
-                    source: dto.source,
+                    capturedAt: capturedAt,
+                    title: dto.title,
+                    source: normalizeCaptureSource(dto.source),
                     message: self
                 )
-                context.insert(capture)
-                self.captures!.append(capture)
+                captures.append(capture)
             }
         }
-        
-        // Map Supports
+
         if let supportDTOs = evidence.supports {
-            // Initialize relationship if nil
-            if self.supports == nil {
-                self.supports = []
-            }
-            
             for dto in supportDTOs {
-                let support = ClaimSupport(
+                guard let createdAt = formatter.date(from: dto.createdAt) else {
+                    throw EvidenceMappingError.invalidSupportTimestamp(
+                        supportId: dto.supportId,
+                        value: dto.createdAt
+                    )
+                }
+                guard let type = ClaimSupportType(rawValue: dto.type) else {
+                    throw EvidenceValidationError.invalidSupportType(
+                        supportId: dto.supportId,
+                        type: dto.type
+                    )
+                }
+                let support = try ClaimSupport(
                     supportId: dto.supportId,
-                    type: dto.type,
-                    createdAt: ISO8601DateFormatter().date(from: dto.createdAt) ?? Date(),
+                    type: type,
                     captureId: dto.captureId,
                     snippetText: dto.snippetText,
+                    snippetHash: dto.snippetHash,
+                    createdAt: createdAt,
                     message: self
                 )
-                context.insert(support)
-                self.supports!.append(support)
+                supports.append(support)
             }
         }
-        
-        // Map Claims
+
         if let claimDTOs = evidence.claims {
-            // Initialize relationship if nil
-            if self.claims == nil {
-                self.claims = []
-            }
-            
             for dto in claimDTOs {
-                let claim = ClaimMapEntry(
+                guard let createdAt = formatter.date(from: dto.createdAt) else {
+                    throw EvidenceMappingError.invalidClaimTimestamp(
+                        claimId: dto.claimId,
+                        value: dto.createdAt
+                    )
+                }
+                let claim = try ClaimMapEntry(
                     claimId: dto.claimId,
                     claimText: dto.claimText,
                     supportIds: dto.supportIds,
-                    createdAt: ISO8601DateFormatter().date(from: dto.createdAt) ?? Date(),
+                    createdAt: createdAt,
                     message: self
                 )
-                context.insert(claim)
-                self.claims!.append(claim)
+                claims.append(claim)
             }
         }
+
+        return (captures, supports, claims)
+    }
+}
+
+private func normalizeCaptureSource(_ source: String) -> String {
+    switch source {
+    case "user_provided":
+        return "user_provided"
+    case "auto_detected", "auto_extracted":
+        return "auto_detected"
+    default:
+        return "auto_detected"
     }
 }

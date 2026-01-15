@@ -50,7 +50,7 @@ struct Response: Codable {
     let threadMemento: ThreadMementoDTO?
     
     // Evidence fields (PR #7.1 / PR #8)
-    let evidenceSummary: EvidenceSummaryDTO?  // Always present in successful responses
+    let evidenceSummary: EvidenceSummaryDTO  // Always present in successful responses
     let evidence: EvidenceDTO?  // Omitted when none
     let evidenceWarnings: [EvidenceWarningDTO]?  // Omitted when none
 }

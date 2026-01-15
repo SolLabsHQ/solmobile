@@ -362,13 +362,42 @@ final class TransmissionActions {
             transmissionId: transmissionId
         )
 
+        let evidenceModels: (captures: [Capture], supports: [ClaimSupport], claims: [ClaimMapEntry])
+
+        do {
+            evidenceModels = try assistantMessage.buildEvidenceModels(from: evidence)
+        } catch {
+            outboxLog.error(
+                "processQueue run=\(runId, privacy: .public) event=evidence_mapping_failed tx=\(short(txId), privacy: .public) err=\(String(describing: error), privacy: .public)"
+            )
+            return
+        }
+
         thread.messages.append(assistantMessage)
         thread.lastActiveAt = Date()
 
         modelContext.insert(assistantMessage)
-        
-        // Map evidence DTOs to SwiftData models (PR #8)
-        assistantMessage.mapAndAttachEvidence(from: evidence, context: modelContext)
+
+        if !evidenceModels.captures.isEmpty {
+            assistantMessage.captures = evidenceModels.captures
+            for capture in evidenceModels.captures {
+                modelContext.insert(capture)
+            }
+        }
+
+        if !evidenceModels.supports.isEmpty {
+            assistantMessage.supports = evidenceModels.supports
+            for support in evidenceModels.supports {
+                modelContext.insert(support)
+            }
+        }
+
+        if !evidenceModels.claims.isEmpty {
+            assistantMessage.claims = evidenceModels.claims
+            for claim in evidenceModels.claims {
+                modelContext.insert(claim)
+            }
+        }
 
         outboxLog.info("processQueue run=\(runId, privacy: .public) event=assistant_appended tx=\(short(txId), privacy: .public) via=\(via, privacy: .public)")
     }
@@ -609,7 +638,7 @@ final class TransmissionActions {
             appendAssistantMessageIfPossible(
                 threadId: threadId,
                 assistantText: assistantText,
-                transmissionId: freshTx.transmissionId,
+                transmissionId: serverTxId,
                 evidence: poll.evidence,
                 runId: runId,
                 txId: txId,

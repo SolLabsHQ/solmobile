@@ -41,7 +41,8 @@ struct CaptureDTO: Codable {
     let kind: String  // "url"
     let url: String
     let capturedAt: String  // ISO-8601
-    let source: String  // "user_provided" | "auto_extracted"
+    let title: String?
+    let source: String  // "user_provided" | "auto_detected"
 }
 
 // MARK: - ClaimSupport (discriminated union)
@@ -56,6 +57,7 @@ struct ClaimSupportDTO: Codable {
     
     // text_snippet fields
     let snippetText: String?
+    let snippetHash: String?
 }
 
 // MARK: - ClaimMapEntry
