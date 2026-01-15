@@ -14,11 +14,29 @@ final class FakeTransport: ChatTransport, ChatTransportPolling, ChatTransportMem
 
     // Configure behavior per test
     var nextSend: () throws -> ChatResponse = {
-        ChatResponse(text: "ok", statusCode: 200, transmissionId: "tx1", pending: false, threadMemento: nil)
+        ChatResponse(
+            text: "ok",
+            statusCode: 200,
+            transmissionId: "tx1",
+            pending: false,
+            threadMemento: nil,
+            evidenceSummary: nil,
+            evidence: nil,
+            evidenceWarnings: nil
+        )
     }
 
     var nextPoll: (String) throws -> ChatPollResponse = { _ in
-        ChatPollResponse(pending: false, assistant: "polled", serverStatus: "completed", statusCode: 200, threadMemento: nil)
+        ChatPollResponse(
+            pending: false,
+            assistant: "polled",
+            serverStatus: "completed",
+            statusCode: 200,
+            threadMemento: nil,
+            evidenceSummary: nil,
+            evidence: nil,
+            evidenceWarnings: nil
+        )
     }
 
     var nextDecision: (String, String, ThreadMementoDecision) throws -> ThreadMementoDecisionResult = { _, _, _ in

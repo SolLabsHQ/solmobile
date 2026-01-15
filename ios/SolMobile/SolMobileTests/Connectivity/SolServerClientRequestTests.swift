@@ -71,6 +71,12 @@ final class SolServerClientRequestTests: XCTestCase {
                 "transmissionId": "tx-200",
                 "assistant": "[Ida] hi",
                 "pending": false,
+                "evidenceSummary": [
+                    "captures": 0,
+                    "supports": 0,
+                    "claims": 0,
+                    "warnings": 0
+                ],
                 "threadMemento": [
                     "id": "m1",
                     "threadId": "t1",
@@ -112,6 +118,12 @@ final class SolServerClientRequestTests: XCTestCase {
                 "transmissionId": "tx-202",
                 "pending": true,
                 "status": "created",
+                "evidenceSummary": [
+                    "captures": 0,
+                    "supports": 0,
+                    "claims": 0,
+                    "warnings": 0
+                ],
                 "threadMemento": [
                     "id": "m2",
                     "threadId": "t1",
@@ -153,7 +165,13 @@ final class SolServerClientRequestTests: XCTestCase {
                 "ok": true,
                 "transmissionId": "tx-sim",
                 "pending": true,
-                "status": "created"
+                "status": "created",
+                "evidenceSummary": [
+                    "captures": 0,
+                    "supports": 0,
+                    "claims": 0,
+                    "warnings": 0
+                ]
             ]
 
             return URLProtocolStub.StubbedResponse(

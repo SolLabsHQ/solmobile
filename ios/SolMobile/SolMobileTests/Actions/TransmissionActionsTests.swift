@@ -28,7 +28,16 @@ final class TransmissionActionsTests: SwiftDataTestBase {
         // Arrange
         let transport = FakeTransport()
         transport.nextSend = {
-            ChatResponse(text: "hello from server", statusCode: 200, transmissionId: "tx123", pending: false, threadMemento: nil)
+            ChatResponse(
+                text: "hello from server",
+                statusCode: 200,
+                transmissionId: "tx123",
+                pending: false,
+                threadMemento: nil,
+                evidenceSummary: nil,
+                evidence: nil,
+                evidenceWarnings: nil
+            )
         }
 
         let thread = ConversationThread(title: "T1")
@@ -103,7 +112,10 @@ final class TransmissionActionsTests: SwiftDataTestBase {
                 statusCode: 200,
                 transmissionId: "tx-retry",
                 pending: false,
-                threadMemento: nil
+                threadMemento: nil,
+                evidenceSummary: nil,
+                evidence: nil,
+                evidenceWarnings: nil
             )
         }
 

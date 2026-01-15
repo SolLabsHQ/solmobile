@@ -51,13 +51,14 @@ final class EvidenceDTOTests: XCTestCase {
         XCTAssertEqual(warning.urlPreview, "example.com/very/long/path/...")
     }
     
-    func testCaptureDTO Decoding() throws {
+    func testCaptureDTODecoding() throws {
         let json = """
         {
             "captureId": "cap-1",
             "kind": "url",
             "url": "https://example.com",
             "capturedAt": "2026-01-13T10:00:00Z",
+            "title": "Example",
             "source": "user_provided"
         }
         """
@@ -68,6 +69,7 @@ final class EvidenceDTOTests: XCTestCase {
         XCTAssertEqual(capture.captureId, "cap-1")
         XCTAssertEqual(capture.kind, "url")
         XCTAssertEqual(capture.url, "https://example.com")
+        XCTAssertEqual(capture.title, "Example")
         XCTAssertEqual(capture.source, "user_provided")
     }
     
@@ -96,7 +98,8 @@ final class EvidenceDTOTests: XCTestCase {
             "supportId": "sup-2",
             "type": "text_snippet",
             "createdAt": "2026-01-13T10:00:00Z",
-            "snippetText": "This is a text snippet"
+            "snippetText": "This is a text snippet",
+            "snippetHash": "hash-123"
         }
         """
         
@@ -106,6 +109,7 @@ final class EvidenceDTOTests: XCTestCase {
         XCTAssertEqual(support.supportId, "sup-2")
         XCTAssertEqual(support.type, "text_snippet")
         XCTAssertEqual(support.snippetText, "This is a text snippet")
+        XCTAssertEqual(support.snippetHash, "hash-123")
         XCTAssertNil(support.captureId)
     }
     
@@ -145,7 +149,7 @@ final class EvidenceDTOTests: XCTestCase {
                     "kind": "url",
                     "url": "https://example.com",
                     "capturedAt": "2026-01-13T10:00:00Z",
-                    "source": "auto_extracted"
+                    "source": "auto_detected"
                 }],
                 "supports": [{
                     "supportId": "sup-1",
@@ -164,9 +168,8 @@ final class EvidenceDTOTests: XCTestCase {
         XCTAssertEqual(response.transmissionId, "tx-123")
         XCTAssertEqual(response.assistant, "Here's the answer")
         
-        XCTAssertNotNil(response.evidenceSummary)
-        XCTAssertEqual(response.evidenceSummary?.captures, 1)
-        XCTAssertEqual(response.evidenceSummary?.supports, 1)
+        XCTAssertEqual(response.evidenceSummary.captures, 1)
+        XCTAssertEqual(response.evidenceSummary.supports, 1)
         
         XCTAssertNotNil(response.evidence)
         XCTAssertEqual(response.evidence?.captures?.count, 1)

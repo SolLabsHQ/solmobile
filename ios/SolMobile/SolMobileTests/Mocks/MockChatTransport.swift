@@ -54,15 +54,42 @@ final class MockChatTransport: ChatTransportPolling, ChatTransportMementoDecisio
     func send(envelope: PacketEnvelope) async throws -> ChatResponse {
         sendCalls.append(envelope)
         guard !sendModes.isEmpty else {
-            return ChatResponse(text: "(default)", statusCode: 200, transmissionId: "tx-default", pending: false, threadMemento: nil)
+            return ChatResponse(
+                text: "(default)",
+                statusCode: 200,
+                transmissionId: "tx-default",
+                pending: false,
+                threadMemento: nil,
+                evidenceSummary: nil,
+                evidence: nil,
+                evidenceWarnings: nil
+            )
         }
 
         let m = sendModes.removeFirst()
         switch m {
         case let .succeed(text, status, txId, pending):
-            return ChatResponse(text: text, statusCode: status, transmissionId: txId, pending: pending, threadMemento: nil)
+            return ChatResponse(
+                text: text,
+                statusCode: status,
+                transmissionId: txId,
+                pending: pending,
+                threadMemento: nil,
+                evidenceSummary: nil,
+                evidence: nil,
+                evidenceWarnings: nil
+            )
         case let .pending(status, txId):
-            return ChatResponse(text: "", statusCode: status, transmissionId: txId, pending: true, threadMemento: nil)
+            return ChatResponse(
+                text: "",
+                statusCode: status,
+                transmissionId: txId,
+                pending: true,
+                threadMemento: nil,
+                evidenceSummary: nil,
+                evidence: nil,
+                evidenceWarnings: nil
+            )
         case let .fail(err):
             throw err
         }
@@ -71,15 +98,42 @@ final class MockChatTransport: ChatTransportPolling, ChatTransportMementoDecisio
     func poll(transmissionId: String) async throws -> ChatPollResponse {
         pollCalls.append(transmissionId)
         guard !pollModes.isEmpty else {
-            return ChatPollResponse(pending: false, assistant: "(default poll)", serverStatus: "completed", statusCode: 200, threadMemento: nil)
+            return ChatPollResponse(
+                pending: false,
+                assistant: "(default poll)",
+                serverStatus: "completed",
+                statusCode: 200,
+                threadMemento: nil,
+                evidenceSummary: nil,
+                evidence: nil,
+                evidenceWarnings: nil
+            )
         }
 
         let m = pollModes.removeFirst()
         switch m {
         case let .succeed(text, status, _, _):
-            return ChatPollResponse(pending: false, assistant: text, serverStatus: "completed", statusCode: status, threadMemento: nil)
+            return ChatPollResponse(
+                pending: false,
+                assistant: text,
+                serverStatus: "completed",
+                statusCode: status,
+                threadMemento: nil,
+                evidenceSummary: nil,
+                evidence: nil,
+                evidenceWarnings: nil
+            )
         case .pending:
-            return ChatPollResponse(pending: true, assistant: nil, serverStatus: "created", statusCode: 200, threadMemento: nil)
+            return ChatPollResponse(
+                pending: true,
+                assistant: nil,
+                serverStatus: "created",
+                statusCode: 200,
+                threadMemento: nil,
+                evidenceSummary: nil,
+                evidence: nil,
+                evidenceWarnings: nil
+            )
         case let .fail(err):
             throw err
         }
