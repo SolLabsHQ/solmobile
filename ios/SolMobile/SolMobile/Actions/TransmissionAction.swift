@@ -119,6 +119,11 @@ struct ChatPollResponse {
     let statusCode: Int
 
     let threadMemento: ThreadMementoDTO?
+    
+    // Evidence fields (PR #7.1 / PR #8)
+    let evidenceSummary: EvidenceSummaryDTO?
+    let evidence: EvidenceDTO?
+    let evidenceWarnings: [EvidenceWarningDTO]?
 }
 
 enum TransportError: Error {
@@ -136,6 +141,11 @@ struct ChatResponse {
     let pending: Bool
 
     let threadMemento: ThreadMementoDTO?
+    
+    // Evidence fields (PR #7.1 / PR #8)
+    let evidenceSummary: EvidenceSummaryDTO?
+    let evidence: EvidenceDTO?
+    let evidenceWarnings: [EvidenceWarningDTO]?
 }
 
 
@@ -333,16 +343,32 @@ final class TransmissionActions {
         }
     }
 
-    private func appendAssistantMessageIfPossible(threadId: UUID, assistantText: String, runId: String, txId: UUID, via: String) {
+    private func appendAssistantMessageIfPossible(
+        threadId: UUID,
+        assistantText: String,
+        transmissionId: String?,
+        evidence: EvidenceDTO?,
+        runId: String,
+        txId: UUID,
+        via: String
+    ) {
         guard let thread = try? fetchThread(id: threadId) else { return }
 
         let text = assistantText.isEmpty ? "(no assistant text)" : assistantText
-        let assistantMessage = Message(thread: thread, creatorType: .assistant, text: text)
+        let assistantMessage = Message(
+            thread: thread,
+            creatorType: .assistant,
+            text: text,
+            transmissionId: transmissionId
+        )
 
         thread.messages.append(assistantMessage)
         thread.lastActiveAt = Date()
 
         modelContext.insert(assistantMessage)
+        
+        // Map evidence DTOs to SwiftData models (PR #8)
+        assistantMessage.mapAndAttachEvidence(from: evidence, context: modelContext)
 
         outboxLog.info("processQueue run=\(runId, privacy: .public) event=assistant_appended tx=\(short(txId), privacy: .public) via=\(via, privacy: .public)")
     }
@@ -406,6 +432,8 @@ final class TransmissionActions {
             appendAssistantMessageIfPossible(
                 threadId: sel.threadId,
                 assistantText: response.text,
+                transmissionId: response.transmissionId,
+                evidence: response.evidence,
                 runId: runId,
                 txId: sel.txId,
                 via: "send"
@@ -581,6 +609,8 @@ final class TransmissionActions {
             appendAssistantMessageIfPossible(
                 threadId: threadId,
                 assistantText: assistantText,
+                transmissionId: freshTx.transmissionId,
+                evidence: poll.evidence,
                 runId: runId,
                 txId: txId,
                 via: "poll"

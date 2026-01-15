@@ -48,6 +48,11 @@ struct Response: Codable {
 
     // Present when SolServer auto-saves a ThreadMemento (Option 1).
     let threadMemento: ThreadMementoDTO?
+    
+    // Evidence fields (PR #7.1 / PR #8)
+    let evidenceSummary: EvidenceSummaryDTO?  // Always present in successful responses
+    let evidence: EvidenceDTO?  // Omitted when none
+    let evidenceWarnings: [EvidenceWarningDTO]?  // Omitted when none
 }
 
 struct TransmissionDTO: Codable {
@@ -230,7 +235,10 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
                 statusCode: 202,
                 transmissionId: txId,
                 pending: true,
-                threadMemento: decoded?.threadMemento
+                threadMemento: decoded?.threadMemento,
+                evidenceSummary: decoded?.evidenceSummary,
+                evidence: decoded?.evidence,
+                evidenceWarnings: decoded?.evidenceWarnings
             )
         }
 
@@ -244,7 +252,10 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
             statusCode: http.statusCode,
             transmissionId: txId,
             pending: decoded.pending ?? false,
-            threadMemento: decoded.threadMemento
+            threadMemento: decoded.threadMemento,
+            evidenceSummary: decoded.evidenceSummary,
+            evidence: decoded.evidence,
+            evidenceWarnings: decoded.evidenceWarnings
         )
     }
 
@@ -267,7 +278,10 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
             assistant: decoded.assistant,
             serverStatus: decoded.transmission.status,
             statusCode: http.statusCode,
-            threadMemento: decoded.threadMemento
+            threadMemento: decoded.threadMemento,
+            evidenceSummary: nil,  // Poll endpoint doesn't return evidence for MVP
+            evidence: nil,
+            evidenceWarnings: nil
         )
     }
 }

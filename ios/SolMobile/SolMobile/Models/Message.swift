@@ -14,6 +14,10 @@ final class Message {
     var createdAt: Date
     var creatorTypeRaw: String
     var text: String
+    
+    // Server transmission ID (PR #7.1 / PR #8)
+    // Only present for assistant messages that came from server
+    var transmissionId: String?
 
     var thread: ConversationThread
     
@@ -33,6 +37,7 @@ final class Message {
         creatorType: CreatorType,
         text: String,
         createdAt: Date = Date(),
+        transmissionId: String? = nil,
         captures: [Capture]? = nil,
         supports: [ClaimSupport]? = nil,
         claims: [ClaimMapEntry]? = nil
@@ -42,6 +47,7 @@ final class Message {
         self.creatorTypeRaw = creatorType.rawValue
         self.text = text
         self.createdAt = createdAt
+        self.transmissionId = transmissionId
         self.captures = captures
         self.supports = supports
         self.claims = claims
