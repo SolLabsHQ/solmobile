@@ -2,8 +2,11 @@ import SwiftUI
 import SwiftData
 import os
 import Foundation
+import UIKit
 
 struct ThreadDetailView: View {
+    private static let perfLog = OSLog(subsystem: "com.sollabshq.solmobile", category: "ThreadDetailPerf")
+
     @Environment(\.modelContext) private var modelContext
     @Bindable var thread: ConversationThread
     @Query private var messages: [Message]
@@ -11,6 +14,8 @@ struct ThreadDetailView: View {
     @State private var isProcessingOutbox: Bool = false
     @State private var outboxNeedsRerun: Bool = false
     @State private var cachedOutboxSummary = OutboxSummary(queued: 0, sending: 0, failed: 0)
+    @State private var keyboardSignpostId = OSSignpostID(log: ThreadDetailView.perfLog)
+    @State private var keyboardSignpostActive = false
 
     // ThreadMemento (navigation artifact): model-proposed snapshot returned by SolServer.
     // We store acceptance state locally (UserDefaults) so it survives view reloads.
@@ -113,6 +118,17 @@ struct ThreadDetailView: View {
         }
         .onChange(of: outboxStatusSignature) { _, _ in
             updateOutboxSummary()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+            let id = OSSignpostID(log: Self.perfLog)
+            keyboardSignpostId = id
+            keyboardSignpostActive = true
+            os_signpost(.begin, log: Self.perfLog, name: "KeyboardShow", signpostID: id)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
+            guard keyboardSignpostActive else { return }
+            os_signpost(.end, log: Self.perfLog, name: "KeyboardShow", signpostID: keyboardSignpostId)
+            keyboardSignpostActive = false
         }
         .onAppear {
             loadAcceptedMementoFromDefaults()
@@ -504,12 +520,15 @@ private func acceptMemento(_ m: MementoViewModel) {
         viewLog.info("[processOutbox] run start")
 
         let container = modelContext.container
+        let signpostId = OSSignpostID(log: Self.perfLog)
+        os_signpost(.begin, log: Self.perfLog, name: "OutboxProcess", signpostID: signpostId)
         Task.detached { [container] in
             let bgContext = ModelContext(container)
             let tx = TransmissionActions(modelContext: bgContext)
             await tx.processQueue()
 
             viewLog.info("[processOutbox] run end")
+            os_signpost(.end, log: Self.perfLog, name: "OutboxProcess", signpostID: signpostId)
 
             await MainActor.run {
                 isProcessingOutbox = false
