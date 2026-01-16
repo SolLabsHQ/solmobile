@@ -6,9 +6,11 @@ import Foundation
 struct ThreadDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @Bindable var thread: ConversationThread
+    @Query private var messages: [Message]
     @Query private var transmissions: [Transmission]
     @State private var isProcessingOutbox: Bool = false
     @State private var outboxNeedsRerun: Bool = false
+    @State private var cachedOutboxSummary = OutboxSummary(queued: 0, sending: 0, failed: 0)
 
     // ThreadMemento (navigation artifact): model-proposed snapshot returned by SolServer.
     // We store acceptance state locally (UserDefaults) so it survives view reloads.
@@ -22,15 +24,17 @@ struct ThreadDetailView: View {
     // Trace UI-level outbox lifecycle (retry taps, coalesced reruns, etc.)
     private let viewLog = Logger(subsystem: "com.sollabshq.solmobile", category: "ThreadDetailView")
 
-    private var sortedMessages: [Message] {
-        thread.messages.sorted { $0.createdAt < $1.createdAt }
-    }
-
     init(thread: ConversationThread) {
         self.thread = thread
 
         // Scope the SwiftData query to this thread so the UI refreshes from the right slice of data.
         let tid = thread.id
+        _messages = Query(
+            filter: #Predicate<Message> { msg in
+                msg.thread.id == tid
+            },
+            sort: [SortDescriptor(\.createdAt, order: .forward)]
+        )
         _transmissions = Query(
             filter: #Predicate<Transmission> { tx in
                 tx.packet.threadId == tid
@@ -76,7 +80,7 @@ struct ThreadDetailView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 10) {
-                        ForEach(sortedMessages) { msg in
+                        ForEach(messages) { msg in
                             MessageBubble(message: msg)
                                 .id(msg.id)
                         }
@@ -84,8 +88,8 @@ struct ThreadDetailView: View {
                     .padding(.vertical, 12)
                     .padding(.horizontal, 12)
                 }
-                .onChange(of: sortedMessages.count) { _, _ in
-                    guard let last = sortedMessages.last else { return }
+                .onChange(of: messages.count) { _, _ in
+                    guard let last = messages.last else { return }
                     proxy.scrollTo(last.id, anchor: .bottom)
                 }
             }
@@ -107,8 +111,12 @@ struct ThreadDetailView: View {
         .onChange(of: outboxSummary.failed + outboxSummary.queued + outboxSummary.sending) { _, newValue in
             viewLog.debug("[outboxBanner] refresh total=\(newValue, privacy: .public)")
         }
+        .onChange(of: outboxStatusSignature) { _, _ in
+            updateOutboxSummary()
+        }
         .onAppear {
             loadAcceptedMementoFromDefaults()
+            updateOutboxSummary()
             processOutbox()
         }
         .navigationTitle(thread.title)
@@ -467,14 +475,18 @@ private func acceptMemento(_ m: MementoViewModel) {
     }
 
 
-    private var outboxSummary: OutboxSummary {
-        // Live derived state: @Query updates when SwiftData changes.
-        // NOTE: `transmissions` is already scoped to this thread via init().
+    private var outboxSummary: OutboxSummary { cachedOutboxSummary }
+
+    private var outboxStatusSignature: String {
+        transmissions.map { $0.statusRaw }.joined(separator: "|")
+    }
+
+    private func updateOutboxSummary() {
+        // Derived state from SwiftData query; cache to avoid repeated filters during renders.
         let queued = transmissions.filter { $0.status == .queued }.count
         let sending = transmissions.filter { $0.status == .sending }.count
         let failed = transmissions.filter { $0.status == .failed }.count
-
-        return OutboxSummary(queued: queued, sending: sending, failed: failed)
+        cachedOutboxSummary = OutboxSummary(queued: queued, sending: sending, failed: failed)
     }
 
     private func processOutbox() {
@@ -491,8 +503,10 @@ private func acceptMemento(_ m: MementoViewModel) {
 
         viewLog.info("[processOutbox] run start")
 
-        Task {
-            let tx = TransmissionActions(modelContext: modelContext)
+        let container = modelContext.container
+        Task.detached { [container] in
+            let bgContext = ModelContext(container)
+            let tx = TransmissionActions(modelContext: bgContext)
             await tx.processQueue()
 
             viewLog.info("[processOutbox] run end")
@@ -538,9 +552,6 @@ private struct MessageBubble: View {
     }
     
     private var hasEvidence: Bool {
-        let hasCaptures = message.captures?.isEmpty == false
-        let hasSupports = message.supports?.isEmpty == false
-        let hasClaims = message.claims?.isEmpty == false
-        return hasCaptures || hasSupports || hasClaims
+        message.hasEvidence
     }
 }
