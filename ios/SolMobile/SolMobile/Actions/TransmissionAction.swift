@@ -373,6 +373,10 @@ final class TransmissionActions {
             return
         }
 
+        assistantMessage.hasEvidence = !evidenceModels.captures.isEmpty
+            || !evidenceModels.supports.isEmpty
+            || !evidenceModels.claims.isEmpty
+
         thread.messages.append(assistantMessage)
         thread.lastActiveAt = Date()
 

@@ -19,6 +19,9 @@ final class Message {
     // Only present for assistant messages that came from server
     var transmissionId: String?
 
+    // Evidence flag to avoid relationship faults in list rendering.
+    var hasEvidence: Bool
+
     var thread: ConversationThread
     
     // Evidence ownership (cascade delete)
@@ -38,6 +41,7 @@ final class Message {
         text: String,
         createdAt: Date = Date(),
         transmissionId: String? = nil,
+        hasEvidence: Bool = false,
         captures: [Capture]? = nil,
         supports: [ClaimSupport]? = nil,
         claims: [ClaimMapEntry]? = nil
@@ -48,6 +52,7 @@ final class Message {
         self.text = text
         self.createdAt = createdAt
         self.transmissionId = transmissionId
+        self.hasEvidence = hasEvidence
         self.captures = captures
         self.supports = supports
         self.claims = claims
