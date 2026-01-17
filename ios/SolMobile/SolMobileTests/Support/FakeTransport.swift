@@ -22,7 +22,8 @@ final class FakeTransport: ChatTransport, ChatTransportPolling, ChatTransportMem
             threadMemento: nil,
             evidenceSummary: nil,
             evidence: nil,
-            evidenceWarnings: nil
+            evidenceWarnings: nil,
+            outputEnvelope: nil
         )
     }
 
@@ -35,7 +36,8 @@ final class FakeTransport: ChatTransport, ChatTransportPolling, ChatTransportMem
             threadMemento: nil,
             evidenceSummary: nil,
             evidence: nil,
-            evidenceWarnings: nil
+            evidenceWarnings: nil,
+            outputEnvelope: nil
         )
     }
 

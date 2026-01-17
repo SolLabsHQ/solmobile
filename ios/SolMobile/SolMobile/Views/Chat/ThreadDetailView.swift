@@ -545,6 +545,7 @@ private func acceptMemento(_ m: MementoViewModel) {
 
 private struct MessageBubble: View {
     let message: Message
+    @State private var showingClaims = false
 
     var body: some View {
         HStack {
@@ -555,6 +556,25 @@ private struct MessageBubble: View {
                     .padding(10)
                     .background(message.creatorType == .user ? Color.gray.opacity(0.2) : Color.blue.opacity(0.15))
                     .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                if message.creatorType == .assistant && hasClaimsBadge {
+                    Button {
+                        showingClaims = true
+                    } label: {
+                        Text("Evidence (\(message.claimsCount))")
+                            .font(.caption)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.gray.opacity(0.15))
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 6)
+                    .padding(.horizontal, 10)
+                    .sheet(isPresented: $showingClaims) {
+                        EvidenceClaimsSheet(message: message)
+                    }
+                }
                 
                 // Evidence UI (PR #8) - only show for assistant messages with evidence
                 if message.creatorType == .assistant && hasEvidence {
@@ -572,5 +592,9 @@ private struct MessageBubble: View {
     
     private var hasEvidence: Bool {
         message.hasEvidence
+    }
+
+    private var hasClaimsBadge: Bool {
+        message.claimsCount > 0 || message.claimsTruncated
     }
 }
