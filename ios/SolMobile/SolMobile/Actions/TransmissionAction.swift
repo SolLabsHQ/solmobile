@@ -385,7 +385,6 @@ final class TransmissionActions {
             || !evidenceModels.claims.isEmpty
 
         assistantMessage.applyOutputEnvelopeMeta(outputEnvelope)
-
         thread.messages.append(assistantMessage)
         thread.lastActiveAt = Date()
 

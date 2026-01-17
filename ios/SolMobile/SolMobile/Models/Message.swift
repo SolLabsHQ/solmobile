@@ -26,7 +26,6 @@ final class Message {
     var claimsCount: Int
     var claimsJson: Data?
     var claimsTruncated: Bool
-
     // Evidence flag to avoid relationship faults in list rendering.
     var hasEvidence: Bool
 
