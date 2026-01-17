@@ -19,6 +19,14 @@ final class Message {
     // Only present for assistant messages that came from server
     var transmissionId: String?
 
+    // OutputEnvelope metadata (PR #23)
+    var evidenceMetaVersion: String?
+    var evidencePackId: String?
+    var usedEvidenceIdsCsv: String?
+    var claimsCount: Int
+    var claimsJson: Data?
+    var claimsTruncated: Bool
+
     // Evidence flag to avoid relationship faults in list rendering.
     var hasEvidence: Bool
 
@@ -41,6 +49,12 @@ final class Message {
         text: String,
         createdAt: Date = Date(),
         transmissionId: String? = nil,
+        evidenceMetaVersion: String? = nil,
+        evidencePackId: String? = nil,
+        usedEvidenceIdsCsv: String? = nil,
+        claimsCount: Int = 0,
+        claimsJson: Data? = nil,
+        claimsTruncated: Bool = false,
         hasEvidence: Bool = false,
         captures: [Capture]? = nil,
         supports: [ClaimSupport]? = nil,
@@ -52,6 +66,12 @@ final class Message {
         self.text = text
         self.createdAt = createdAt
         self.transmissionId = transmissionId
+        self.evidenceMetaVersion = evidenceMetaVersion
+        self.evidencePackId = evidencePackId
+        self.usedEvidenceIdsCsv = usedEvidenceIdsCsv
+        self.claimsCount = claimsCount
+        self.claimsJson = claimsJson
+        self.claimsTruncated = claimsTruncated
         self.hasEvidence = hasEvidence
         self.captures = captures
         self.supports = supports

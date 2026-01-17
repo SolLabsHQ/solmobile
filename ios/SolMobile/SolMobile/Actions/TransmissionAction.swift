@@ -124,6 +124,9 @@ struct ChatPollResponse {
     let evidenceSummary: EvidenceSummaryDTO?
     let evidence: EvidenceDTO?
     let evidenceWarnings: [EvidenceWarningDTO]?
+
+    // OutputEnvelope (PR #23)
+    let outputEnvelope: OutputEnvelopeDTO?
 }
 
 enum TransportError: Error {
@@ -146,6 +149,9 @@ struct ChatResponse {
     let evidenceSummary: EvidenceSummaryDTO?
     let evidence: EvidenceDTO?
     let evidenceWarnings: [EvidenceWarningDTO]?
+
+    // OutputEnvelope (PR #23)
+    let outputEnvelope: OutputEnvelopeDTO?
 }
 
 
@@ -348,6 +354,7 @@ final class TransmissionActions {
         assistantText: String,
         transmissionId: String?,
         evidence: EvidenceDTO?,
+        outputEnvelope: OutputEnvelopeDTO?,
         runId: String,
         txId: UUID,
         via: String
@@ -376,6 +383,8 @@ final class TransmissionActions {
         assistantMessage.hasEvidence = !evidenceModels.captures.isEmpty
             || !evidenceModels.supports.isEmpty
             || !evidenceModels.claims.isEmpty
+
+        assistantMessage.applyOutputEnvelopeMeta(outputEnvelope)
 
         thread.messages.append(assistantMessage)
         thread.lastActiveAt = Date()
@@ -467,6 +476,7 @@ final class TransmissionActions {
                 assistantText: response.text,
                 transmissionId: response.transmissionId,
                 evidence: response.evidence,
+                outputEnvelope: response.outputEnvelope,
                 runId: runId,
                 txId: sel.txId,
                 via: "send"
@@ -644,6 +654,7 @@ final class TransmissionActions {
                 assistantText: assistantText,
                 transmissionId: serverTxId,
                 evidence: poll.evidence,
+                outputEnvelope: nil,
                 runId: runId,
                 txId: txId,
                 via: "poll"

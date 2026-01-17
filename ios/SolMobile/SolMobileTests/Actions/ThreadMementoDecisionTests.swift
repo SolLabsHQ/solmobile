@@ -72,7 +72,8 @@ final class ThreadMementoDecisionTests: SwiftDataTestBase {
                 threadMemento: nil,
                 evidenceSummary: nil,
                 evidence: nil,
-                evidenceWarnings: nil
+                evidenceWarnings: nil,
+                outputEnvelope: nil
             )
         }
     }

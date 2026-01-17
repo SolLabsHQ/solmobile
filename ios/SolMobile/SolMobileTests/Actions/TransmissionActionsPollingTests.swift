@@ -24,7 +24,8 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
                 threadMemento: nil,
                 evidenceSummary: nil,
                 evidence: nil,
-                evidenceWarnings: nil
+                evidenceWarnings: nil,
+                outputEnvelope: nil
             )
         }
 
@@ -39,7 +40,8 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
                 threadMemento: nil,
                 evidenceSummary: nil,
                 evidence: nil,
-                evidenceWarnings: nil
+                evidenceWarnings: nil,
+                outputEnvelope: nil
             )
         }
     }
@@ -57,7 +59,8 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
                 threadMemento: nil,
                 evidenceSummary: nil,
                 evidence: nil,
-                evidenceWarnings: nil
+                evidenceWarnings: nil,
+                outputEnvelope: nil
             )
         }
     }
@@ -75,7 +78,8 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
                 threadMemento: nil,
                 evidenceSummary: nil,
                 evidence: nil,
-                evidenceWarnings: nil
+                evidenceWarnings: nil,
+                outputEnvelope: nil
             )
         }
 
@@ -90,7 +94,8 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
                 threadMemento: nil,
                 evidenceSummary: nil,
                 evidence: nil,
-                evidenceWarnings: nil
+                evidenceWarnings: nil,
+                outputEnvelope: nil
             )
         }
     }
@@ -108,7 +113,8 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
                 threadMemento: nil,
                 evidenceSummary: nil,
                 evidence: nil,
-                evidenceWarnings: nil
+                evidenceWarnings: nil,
+                outputEnvelope: nil
             )
         }
 
