@@ -54,6 +54,7 @@ struct OutputEnvelopeEvidenceRefDTO: Codable {
 }
 
 extension Message {
+    // Guardrail: keep SwiftData row size + decode cost bounded; store scalars when claims blob is too large.
     static let maxClaimsJsonBytes = 32 * 1024
 
     func applyOutputEnvelopeMeta(_ envelope: OutputEnvelopeDTO?) {
