@@ -39,6 +39,7 @@ struct ContentView: View {
             Capture.self,
             ClaimSupport.self,
             ClaimMapEntry.self,
+            CapturedSuggestion.self,
             DraftRecord.self,
             Packet.self,
             Transmission.self

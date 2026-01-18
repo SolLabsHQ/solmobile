@@ -22,12 +22,28 @@ struct OutputEnvelopeMetaDTO: Codable {
     let claims: [OutputEnvelopeClaimDTO]?
     let usedEvidenceIds: [String]?
     let evidencePackId: String?
+    let captureSuggestion: CaptureSuggestion?
 
     enum CodingKeys: String, CodingKey {
         case metaVersion = "meta_version"
         case claims
         case usedEvidenceIds = "used_evidence_ids"
         case evidencePackId = "evidence_pack_id"
+        case captureSuggestion = "capture_suggestion"
+    }
+
+    init(
+        metaVersion: String?,
+        claims: [OutputEnvelopeClaimDTO]?,
+        usedEvidenceIds: [String]?,
+        evidencePackId: String?,
+        captureSuggestion: CaptureSuggestion? = nil
+    ) {
+        self.metaVersion = metaVersion
+        self.claims = claims
+        self.usedEvidenceIds = usedEvidenceIds
+        self.evidencePackId = evidencePackId
+        self.captureSuggestion = captureSuggestion
     }
 }
 
@@ -53,6 +69,30 @@ struct OutputEnvelopeEvidenceRefDTO: Codable {
     }
 }
 
+nonisolated struct CaptureSuggestion: Codable, Hashable {
+    let suggestionId: String?
+    let suggestionType: SuggestionType
+    let title: String
+    let body: String?
+    let suggestedDate: String?
+    let suggestedStartAt: String?
+
+    enum SuggestionType: String, Codable {
+        case journalEntry = "journal_entry"
+        case reminder = "reminder"
+        case calendarEvent = "calendar_event"
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case suggestionId = "suggestion_id"
+        case suggestionType = "suggestion_type"
+        case title
+        case body
+        case suggestedDate = "suggested_date"
+        case suggestedStartAt = "suggested_start_at"
+    }
+}
+
 extension Message {
     // Guardrail: keep SwiftData row size + decode cost bounded; store scalars when claims blob is too large.
     static let maxClaimsJsonBytes = 32 * 1024
@@ -64,11 +104,36 @@ extension Message {
         claimsCount = 0
         claimsJson = nil
         claimsTruncated = false
+        captureSuggestionJson = nil
+        captureSuggestionId = nil
+        captureSuggestionTypeRaw = nil
+        captureSuggestionTitle = nil
 
         guard let meta = envelope?.meta else { return }
 
         evidenceMetaVersion = meta.metaVersion
         evidencePackId = meta.evidencePackId
+
+        if let suggestion = meta.captureSuggestion {
+            let trimmedId = suggestion.suggestionId?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let resolvedId = (trimmedId?.isEmpty == false) ? trimmedId : nil
+            let fallbackId = resolvedId
+                ?? transmissionId.map { "cap_\($0)" }
+                ?? "cap_local_\(id.uuidString)"
+            let normalized = CaptureSuggestion(
+                suggestionId: fallbackId,
+                suggestionType: suggestion.suggestionType,
+                title: suggestion.title,
+                body: suggestion.body,
+                suggestedDate: suggestion.suggestedDate,
+                suggestedStartAt: suggestion.suggestedStartAt
+            )
+
+            captureSuggestionId = fallbackId
+            captureSuggestionTypeRaw = suggestion.suggestionType.rawValue
+            captureSuggestionTitle = suggestion.title
+            captureSuggestionJson = try? JSONEncoder().encode(normalized)
+        }
 
         if let ids = meta.usedEvidenceIds {
             let unique = Array(Set(ids)).sorted()
@@ -92,5 +157,10 @@ extension Message {
             claimsTruncated = true
             claimsJson = nil
         }
+    }
+
+    var captureSuggestion: CaptureSuggestion? {
+        guard let data = captureSuggestionJson else { return nil }
+        return try? JSONDecoder().decode(CaptureSuggestion.self, from: data)
     }
 }

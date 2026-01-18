@@ -578,15 +578,15 @@ private func acceptMemento(_ m: MementoViewModel) {
         viewLog.info("[processOutbox] run start")
 
         let container = modelContext.container
-        let signpostId = OSSignpostID(log: Self.perfLog)
-        os_signpost(.begin, log: Self.perfLog, name: "OutboxProcess", signpostID: signpostId)
-        Task.detached { [container] in
-            let bgContext = ModelContext(container)
-            let tx = TransmissionActions(modelContext: bgContext)
+        let perfLog = Self.perfLog
+        let signpostId = OSSignpostID(log: perfLog)
+        os_signpost(.begin, log: perfLog, name: "OutboxProcess", signpostID: signpostId)
+        Task.detached { [container, perfLog] in
+            let tx = await MainActor.run { TransmissionActions(modelContext: ModelContext(container)) }
             await tx.processQueue()
 
             viewLog.info("[processOutbox] run end")
-            os_signpost(.end, log: Self.perfLog, name: "OutboxProcess", signpostID: signpostId)
+            os_signpost(.end, log: perfLog, name: "OutboxProcess", signpostID: signpostId)
 
             await MainActor.run {
                 isProcessingOutbox = false
@@ -632,6 +632,12 @@ private struct MessageBubble: View {
                     .sheet(isPresented: $showingClaims) {
                         EvidenceClaimsSheet(message: message)
                     }
+                }
+
+                if message.creatorType == .assistant, let capture = message.captureSuggestion {
+                    CaptureSuggestionCard(message: message, suggestion: capture)
+                        .padding(.top, 6)
+                        .padding(.horizontal, 10)
                 }
                 
                 // Evidence UI (PR #8) - only show for assistant messages with evidence

@@ -217,4 +217,42 @@ final class EvidenceDTOTests: XCTestCase {
         XCTAssertEqual(response.outputEnvelope?.meta?.claims?.count, 1)
         XCTAssertEqual(response.outputEnvelope?.meta?.claims?.first?.claimId, "cl-1")
     }
+
+    func testResponseDecoding_WithCaptureSuggestion() throws {
+        let json = """
+        {
+            "ok": true,
+            "transmissionId": "tx-789",
+            "assistant": "Hello",
+            "outputEnvelope": {
+                "assistant_text": "Hello",
+                "meta": {
+                    "meta_version": "v1",
+                    "capture_suggestion": {
+                        "suggestion_id": "cap_tx-789",
+                        "suggestion_type": "journal_entry",
+                        "title": "Reflection",
+                        "body": "Remember to document this moment.",
+                        "suggested_date": "2026-01-17"
+                    }
+                }
+            },
+            "evidenceSummary": {
+                "captures": 0,
+                "supports": 0,
+                "claims": 0,
+                "warnings": 0
+            }
+        }
+        """
+
+        let data = json.data(using: .utf8)!
+        let response = try JSONDecoder().decode(Response.self, from: data)
+
+        let suggestion = response.outputEnvelope?.meta?.captureSuggestion
+        XCTAssertEqual(suggestion?.suggestionId, "cap_tx-789")
+        XCTAssertEqual(suggestion?.suggestionType, .journalEntry)
+        XCTAssertEqual(suggestion?.title, "Reflection")
+        XCTAssertEqual(suggestion?.suggestedDate, "2026-01-17")
+    }
 }
