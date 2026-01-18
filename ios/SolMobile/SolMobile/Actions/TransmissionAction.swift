@@ -403,6 +403,8 @@ final class TransmissionActions {
             }
         }
 
+        DraftStore(modelContext: modelContext).deleteDraft(threadId: threadId)
+
         outboxLog.info("processQueue run=\(runId, privacy: .public) event=assistant_appended tx=\(short(txId), privacy: .public) via=\(via, privacy: .public)")
     }
 

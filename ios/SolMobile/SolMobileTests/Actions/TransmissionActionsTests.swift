@@ -47,6 +47,9 @@ final class TransmissionActionsTests: SwiftDataTestBase {
         thread.messages.append(user)
         context.insert(user)
 
+        let draft = DraftRecord(threadId: thread.id.uuidString, content: "draft")
+        context.insert(draft)
+
         let actions = TransmissionActions(modelContext: context, transport: transport)
         actions.enqueueChat(thread: thread, userMessage: user)
 
@@ -59,6 +62,9 @@ final class TransmissionActionsTests: SwiftDataTestBase {
         XCTAssertEqual(allTx[0].status, .succeeded)
 
         XCTAssertTrue(thread.messages.contains(where: { $0.creatorType == .assistant }))
+
+        let drafts = try context.fetch(FetchDescriptor<DraftRecord>())
+        XCTAssertTrue(drafts.isEmpty)
     }
 
     func test_processQueue_http500_marksFailed_recordsAttempt_andDoesNotAppendAssistant() async throws {
@@ -73,6 +79,9 @@ final class TransmissionActionsTests: SwiftDataTestBase {
         let user = Message(thread: thread, creatorType: .user, text: "hi")
         thread.messages.append(user)
         context.insert(user)
+
+        let draft = DraftRecord(threadId: thread.id.uuidString, content: "draft")
+        context.insert(draft)
 
         let actions = TransmissionActions(modelContext: context, transport: transport)
         actions.enqueueChat(thread: thread, userMessage: user)
@@ -96,6 +105,9 @@ final class TransmissionActionsTests: SwiftDataTestBase {
 
         // No assistant message should be appended on failure.
         XCTAssertFalse(thread.messages.contains(where: { $0.creatorType == .assistant }))
+
+        let drafts = try context.fetch(FetchDescriptor<DraftRecord>())
+        XCTAssertEqual(drafts.count, 1)
     }
 
     func test_retryFailed_flipsChatFailToChat_requeues_andThenSucceeds() async throws {

@@ -8,6 +8,7 @@ struct ThreadDetailView: View {
     private static let perfLog = OSLog(subsystem: "com.sollabshq.solmobile", category: "ThreadDetailPerf")
 
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @Bindable var thread: ConversationThread
     @Query private var messages: [Message]
     @Query private var transmissions: [Transmission]
@@ -25,6 +26,11 @@ struct ThreadDetailView: View {
     // Transient toast for lightweight feedback (Accept/Decline/Undo).
     @State private var toastMessage: String? = nil
     @State private var toastToken: Int = 0
+
+    // Composer draft persistence (ADR-021).
+    @State private var composerText: String = ""
+    @State private var draftSaveTask: Task<Void, Never>? = nil
+    @State private var pendingSendClear: Bool = false
 
     // Trace UI-level outbox lifecycle (retry taps, coalesced reruns, etc.)
     private let viewLog = Logger(subsystem: "com.sollabshq.solmobile", category: "ThreadDetailView")
@@ -108,7 +114,7 @@ struct ThreadDetailView: View {
                     .padding(.top, 8)
             }
 
-            ComposerView { text in
+            ComposerView(text: $composerText) { text in
                 send(text)
             }
             .padding(10)
@@ -130,16 +136,29 @@ struct ThreadDetailView: View {
             os_signpost(.end, log: Self.perfLog, name: "KeyboardShow", signpostID: keyboardSignpostId)
             keyboardSignpostActive = false
         }
+        .onChange(of: composerText) { _, newValue in
+            handleComposerTextChange(newValue)
+        }
+        .onChange(of: scenePhase) { _, newValue in
+            if newValue == .background {
+                draftStore.forceSaveNow(threadId: thread.id, content: composerText)
+            }
+        }
         .onAppear {
             loadAcceptedMementoFromDefaults()
             updateOutboxSummary()
             processOutbox()
+            restoreDraftIfNeeded()
         }
         .navigationTitle(thread.title)
         .navigationBarTitleDisplayMode(.inline)
     }
 
     private func send(_ text: String) {
+        draftStore.forceSaveNow(threadId: thread.id, content: text)
+        pendingSendClear = true
+        composerText = ""
+
         let m = Message(thread: thread, creatorType: .user, text: text)
         thread.messages.append(m)
         thread.lastActiveAt = Date()
@@ -151,6 +170,45 @@ struct ThreadDetailView: View {
         tx.enqueueChat(thread: thread, userMessage: m)
 
         processOutbox()
+    }
+
+    private var draftStore: DraftStore {
+        DraftStore(modelContext: modelContext)
+    }
+
+    private func restoreDraftIfNeeded() {
+        guard composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        if let draft = draftStore.fetchDraft(threadId: thread.id) {
+            composerText = draft.content
+        }
+    }
+
+    private func handleComposerTextChange(_ newValue: String) {
+        let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        draftSaveTask?.cancel()
+
+        if trimmed.isEmpty {
+            if pendingSendClear {
+                return
+            }
+
+            draftStore.deleteDraft(threadId: thread.id)
+            return
+        }
+
+        pendingSendClear = false
+        scheduleDraftSave(trimmed)
+    }
+
+    private func scheduleDraftSave(_ content: String) {
+        let threadId = thread.id
+        draftSaveTask = Task { [content] in
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                draftStore.upsertDraft(threadId: threadId, content: content)
+            }
+        }
     }
 
     private var outboxBanner: AnyView? {
