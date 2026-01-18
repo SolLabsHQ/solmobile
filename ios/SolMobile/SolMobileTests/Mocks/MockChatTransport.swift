@@ -62,7 +62,8 @@ final class MockChatTransport: ChatTransportPolling, ChatTransportMementoDecisio
                 threadMemento: nil,
                 evidenceSummary: nil,
                 evidence: nil,
-                evidenceWarnings: nil
+                evidenceWarnings: nil,
+                outputEnvelope: nil
             )
         }
 
@@ -77,7 +78,8 @@ final class MockChatTransport: ChatTransportPolling, ChatTransportMementoDecisio
                 threadMemento: nil,
                 evidenceSummary: nil,
                 evidence: nil,
-                evidenceWarnings: nil
+                evidenceWarnings: nil,
+                outputEnvelope: nil
             )
         case let .pending(status, txId):
             return ChatResponse(
@@ -88,7 +90,8 @@ final class MockChatTransport: ChatTransportPolling, ChatTransportMementoDecisio
                 threadMemento: nil,
                 evidenceSummary: nil,
                 evidence: nil,
-                evidenceWarnings: nil
+                evidenceWarnings: nil,
+                outputEnvelope: nil
             )
         case let .fail(err):
             throw err
@@ -106,7 +109,8 @@ final class MockChatTransport: ChatTransportPolling, ChatTransportMementoDecisio
                 threadMemento: nil,
                 evidenceSummary: nil,
                 evidence: nil,
-                evidenceWarnings: nil
+                evidenceWarnings: nil,
+                outputEnvelope: nil
             )
         }
 
@@ -121,7 +125,8 @@ final class MockChatTransport: ChatTransportPolling, ChatTransportMementoDecisio
                 threadMemento: nil,
                 evidenceSummary: nil,
                 evidence: nil,
-                evidenceWarnings: nil
+                evidenceWarnings: nil,
+                outputEnvelope: nil
             )
         case .pending:
             return ChatPollResponse(
@@ -132,7 +137,8 @@ final class MockChatTransport: ChatTransportPolling, ChatTransportMementoDecisio
                 threadMemento: nil,
                 evidenceSummary: nil,
                 evidence: nil,
-                evidenceWarnings: nil
+                evidenceWarnings: nil,
+                outputEnvelope: nil
             )
         case let .fail(err):
             throw err

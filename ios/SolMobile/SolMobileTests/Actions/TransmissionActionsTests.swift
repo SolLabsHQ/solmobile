@@ -36,7 +36,8 @@ final class TransmissionActionsTests: SwiftDataTestBase {
                 threadMemento: nil,
                 evidenceSummary: nil,
                 evidence: nil,
-                evidenceWarnings: nil
+                evidenceWarnings: nil,
+                outputEnvelope: nil
             )
         }
 
@@ -127,7 +128,8 @@ final class TransmissionActionsTests: SwiftDataTestBase {
                 threadMemento: nil,
                 evidenceSummary: nil,
                 evidence: nil,
-                evidenceWarnings: nil
+                evidenceWarnings: nil,
+                outputEnvelope: nil
             )
         }
 

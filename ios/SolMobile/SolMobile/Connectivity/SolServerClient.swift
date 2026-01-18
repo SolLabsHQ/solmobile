@@ -42,6 +42,7 @@ struct Response: Codable {
     let transmissionId: String?
     let modeDecision: ModeDecision?
     let assistant: String?
+    let outputEnvelope: OutputEnvelopeDTO?
     let idempotentReplay: Bool?
     let pending: Bool?
     let status: String?
@@ -238,7 +239,8 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
                 threadMemento: decoded?.threadMemento,
                 evidenceSummary: decoded?.evidenceSummary,
                 evidence: decoded?.evidence,
-                evidenceWarnings: decoded?.evidenceWarnings
+                evidenceWarnings: decoded?.evidenceWarnings,
+                outputEnvelope: decoded?.outputEnvelope
             )
         }
 
@@ -255,7 +257,8 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
             threadMemento: decoded.threadMemento,
             evidenceSummary: decoded.evidenceSummary,
             evidence: decoded.evidence,
-            evidenceWarnings: decoded.evidenceWarnings
+            evidenceWarnings: decoded.evidenceWarnings,
+            outputEnvelope: decoded.outputEnvelope
         )
     }
 
@@ -281,7 +284,8 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
             threadMemento: decoded.threadMemento,
             evidenceSummary: nil,  // Poll endpoint doesn't return evidence for MVP
             evidence: nil,
-            evidenceWarnings: nil
+            evidenceWarnings: nil,
+            outputEnvelope: nil
         )
     }
 }

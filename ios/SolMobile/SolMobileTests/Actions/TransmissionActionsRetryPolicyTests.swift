@@ -102,7 +102,8 @@ final class TransmissionActionsRetryPolicyTests: XCTestCase {
                 threadMemento: nil,
                 evidenceSummary: nil,
                 evidence: nil,
-                evidenceWarnings: nil
+                evidenceWarnings: nil,
+                outputEnvelope: nil
             )
         }
 
@@ -152,7 +153,8 @@ final class TransmissionActionsRetryPolicyTests: XCTestCase {
                 threadMemento: nil,
                 evidenceSummary: nil,
                 evidence: nil,
-                evidenceWarnings: nil
+                evidenceWarnings: nil,
+                outputEnvelope: nil
             )
         }
 
@@ -209,7 +211,8 @@ final class TransmissionActionsRetryPolicyTests: XCTestCase {
                 threadMemento: nil,
                 evidenceSummary: nil,
                 evidence: nil,
-                evidenceWarnings: nil
+                evidenceWarnings: nil,
+                outputEnvelope: nil
             )
         }
 

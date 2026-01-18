@@ -175,4 +175,46 @@ final class EvidenceDTOTests: XCTestCase {
         XCTAssertEqual(response.evidence?.captures?.count, 1)
         XCTAssertEqual(response.evidence?.supports?.count, 1)
     }
+
+    func testResponseDecoding_WithOutputEnvelopeClaims() throws {
+        let json = """
+        {
+            "ok": true,
+            "transmissionId": "tx-456",
+            "assistant": "Hello",
+            "outputEnvelope": {
+                "assistant_text": "Hello",
+                "meta": {
+                    "meta_version": "v1",
+                    "evidence_pack_id": "pack-1",
+                    "used_evidence_ids": ["ev-1", "ev-2"],
+                    "claims": [{
+                        "claim_id": "cl-1",
+                        "claim_text": "A claim",
+                        "evidence_refs": [{
+                            "evidence_id": "ev-1",
+                            "span_id": "sp-1"
+                        }]
+                    }]
+                }
+            },
+            "evidenceSummary": {
+                "captures": 0,
+                "supports": 0,
+                "claims": 0,
+                "warnings": 0
+            }
+        }
+        """
+
+        let data = json.data(using: .utf8)!
+        let response = try JSONDecoder().decode(Response.self, from: data)
+
+        XCTAssertEqual(response.outputEnvelope?.assistantText, "Hello")
+        XCTAssertEqual(response.outputEnvelope?.meta?.metaVersion, "v1")
+        XCTAssertEqual(response.outputEnvelope?.meta?.evidencePackId, "pack-1")
+        XCTAssertEqual(response.outputEnvelope?.meta?.usedEvidenceIds, ["ev-1", "ev-2"])
+        XCTAssertEqual(response.outputEnvelope?.meta?.claims?.count, 1)
+        XCTAssertEqual(response.outputEnvelope?.meta?.claims?.first?.claimId, "cl-1")
+    }
 }
