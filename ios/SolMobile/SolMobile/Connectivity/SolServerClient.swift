@@ -93,10 +93,16 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
     private enum DevTelemetry {
         static let lastChatStatusCodeKey = "sol.dev.lastChatStatusCode"
         static let lastChatStatusAtKey = "sol.dev.lastChatStatusAt"
+        static let lastChatURLKey = "sol.dev.lastChatURL"
+        static let lastChatMethodKey = "sol.dev.lastChatMethod"
 
-        static func persistLastChat(statusCode: Int) {
+        static func persistLastChat(statusCode: Int, method: String, url: URL?) {
             UserDefaults.standard.set(statusCode, forKey: lastChatStatusCodeKey)
             UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: lastChatStatusAtKey)
+            if let url = url?.absoluteString {
+                UserDefaults.standard.set(url, forKey: lastChatURLKey)
+            }
+            UserDefaults.standard.set(method, forKey: lastChatMethodKey)
         }
     }
 
@@ -118,9 +124,44 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
     private func requestJSON(_ req: URLRequest) async throws -> (Data, HTTPURLResponse) {
         var authorizedReq = req
         applyAuthHeader(&authorizedReq)
-        let (data, resp) = try await session.data(for: authorizedReq)
-        guard let http = resp as? HTTPURLResponse else { throw URLError(.badServerResponse) }
-        return (data, http)
+        let hadAuthorization = authorizedReq.value(forHTTPHeaderField: "Authorization") != nil
+        let started = Date()
+
+        do {
+            let (data, resp) = try await session.data(for: authorizedReq)
+            guard let http = resp as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+
+            let latencyMs = Int(Date().timeIntervalSince(started) * 1000)
+            DiagnosticsStore.shared.record(
+                method: authorizedReq.httpMethod ?? "GET",
+                url: authorizedReq.url,
+                status: http.statusCode,
+                latencyMs: latencyMs,
+                error: nil,
+                responseData: data,
+                responseHeaders: http.allHeaderFields,
+                requestHeaders: authorizedReq.allHTTPHeaderFields,
+                requestBody: authorizedReq.httpBody,
+                hadAuthorization: hadAuthorization
+            )
+
+            return (data, http)
+        } catch {
+            let latencyMs = Int(Date().timeIntervalSince(started) * 1000)
+            DiagnosticsStore.shared.record(
+                method: authorizedReq.httpMethod ?? "GET",
+                url: authorizedReq.url,
+                status: nil,
+                latencyMs: latencyMs,
+                error: error,
+                responseData: nil,
+                responseHeaders: nil,
+                requestHeaders: authorizedReq.allHTTPHeaderFields,
+                requestBody: authorizedReq.httpBody,
+                hadAuthorization: hadAuthorization
+            )
+            throw error
+        }
     }
 
     private func applyAuthHeader(_ req: inout URLRequest) {
@@ -167,7 +208,7 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
         req.httpBody = try JSONEncoder().encode(Request(threadId: threadId, clientRequestId: clientRequestId, message: message))
 
         let (data, http) = try await requestJSON(req)
-        DevTelemetry.persistLastChat(statusCode: http.statusCode)
+        DevTelemetry.persistLastChat(statusCode: http.statusCode, method: req.httpMethod ?? "POST", url: req.url)
 
         // 200 = normal ok; 202 = pending accepted (still decodes)
         try require2xx(http, data: data)
@@ -227,7 +268,7 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
         req.httpBody = try JSONEncoder().encode(dto)
 
         let (data, http) = try await requestJSON(req)
-        DevTelemetry.persistLastChat(statusCode: http.statusCode)
+        DevTelemetry.persistLastChat(statusCode: http.statusCode, method: req.httpMethod ?? "POST", url: req.url)
 
         let headerTxId = http.value(forHTTPHeaderField: "x-sol-transmission-id")
 

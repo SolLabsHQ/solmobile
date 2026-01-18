@@ -32,9 +32,17 @@ struct SettingsView: View {
         Self.timeWithSecondsFormatter.string(from: d)
     }
 
+    private func snippet(_ text: String, limit: Int = 400) -> String {
+        guard text.count > limit else { return text }
+        let idx = text.index(text.startIndex, offsetBy: limit)
+        return String(text[..<idx])
+    }
+
     // Last chat transport status (written by TransmissionAction/Transport).
     private let lastChatStatusCodeKey = "sol.dev.lastChatStatusCode"
     private let lastChatStatusAtKey = "sol.dev.lastChatStatusAt"
+    private let lastChatURLKey = "sol.dev.lastChatURL"
+    private let lastChatMethodKey = "sol.dev.lastChatMethod"
 
     private var lastChatStatusCode: Int? {
         UserDefaults.standard.object(forKey: lastChatStatusCodeKey) as? Int
@@ -43,6 +51,14 @@ struct SettingsView: View {
     private var lastChatStatusAt: Date? {
         let t = UserDefaults.standard.double(forKey: lastChatStatusAtKey)
         return t > 0 ? Date(timeIntervalSince1970: t) : nil
+    }
+
+    private var lastChatURL: String? {
+        UserDefaults.standard.string(forKey: lastChatURLKey)
+    }
+
+    private var lastChatMethod: String? {
+        UserDefaults.standard.string(forKey: lastChatMethodKey)
     }
 
     // Connection test state (dev ergonomics)
@@ -108,15 +124,27 @@ struct SettingsView: View {
 
                     let (data, resp) = try await URLSession.shared.data(for: req)
                     let status = (resp as? HTTPURLResponse)?.statusCode ?? -1
-                    let body = String(data: data, encoding: .utf8) ?? ""
+                    let body = snippet(String(data: data, encoding: .utf8) ?? "")
 
                     let ms = Int(Date().timeIntervalSince(started) * 1000)
+                    DiagnosticsStore.shared.record(
+                        method: "GET",
+                        url: url,
+                        status: status,
+                        latencyMs: ms,
+                        error: nil,
+                        responseData: data,
+                        responseHeaders: (resp as? HTTPURLResponse)?.allHeaderFields,
+                        requestHeaders: req.allHTTPHeaderFields,
+                        requestBody: req.httpBody,
+                        hadAuthorization: false
+                    )
 
-                    if status == 200 {
+                    if HealthCheckPolicy.isSuccess(status: status) {
                         await MainActor.run {
                             isTestingConnection = false
                             lastHealthCheckError = nil
-                            lastHealthCheck = "Connected ✅ (\(ms)ms)"
+                            lastHealthCheck = "GET \(url.absoluteString) — HTTP \(status) — \(ms)ms"
                             lastHealthCheckAt = Date()
                         }
 
@@ -130,7 +158,7 @@ struct SettingsView: View {
                             await MainActor.run {
                                 isTestingConnection = false
                                 lastHealthCheck = nil
-                                lastHealthCheckError = "Health check failed (HTTP \(status)). \(body)"
+                                lastHealthCheckError = "GET \(url.absoluteString) — HTTP \(status) — \(ms)ms. \(body)"
                                 lastHealthCheckAt = Date()
                             }
                             return
@@ -140,10 +168,23 @@ struct SettingsView: View {
                     log.error("[healthz] error attempt=\(attempt, privacy: .public) err=\(String(describing: error), privacy: .public)")
 
                     if attempt == backoffsNs.count {
+                        let ms = Int(Date().timeIntervalSince(started) * 1000)
+                        DiagnosticsStore.shared.record(
+                            method: "GET",
+                            url: url,
+                            status: nil,
+                            latencyMs: ms,
+                            error: error,
+                            responseData: nil,
+                            responseHeaders: nil,
+                            requestHeaders: nil,
+                            requestBody: nil,
+                            hadAuthorization: false
+                        )
                         await MainActor.run {
                             isTestingConnection = false
                             lastHealthCheck = nil
-                            lastHealthCheckError = "Could not reach SolServer. \(String(describing: error))"
+                            lastHealthCheckError = "GET \(url.absoluteString) — error. \(String(describing: error))"
                             lastHealthCheckAt = Date()
                         }
                         return
@@ -318,14 +359,20 @@ struct SettingsView: View {
                         }
 
                         if let code = lastChatStatusCode {
+                            let method = lastChatMethod ?? "POST"
+                            let url = lastChatURL ?? "(unknown url)"
                             if let at = lastChatStatusAt {
-                                Text("Last chat: HTTP \(code) @ \(formatTimeWithSeconds(at))")
+                                Text("Last chat: \(method) \(url) — HTTP \(code) @ \(formatTimeWithSeconds(at))")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                                    .truncationMode(.middle)
                             } else {
-                                Text("Last chat: HTTP \(code)")
+                                Text("Last chat: \(method) \(url) — HTTP \(code)")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                                    .truncationMode(.middle)
                             }
                         }
 
@@ -365,6 +412,15 @@ struct SettingsView: View {
                         Text(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "-")
                             .foregroundStyle(.secondary)
                     }
+                }
+
+                Section("Diagnostics") {
+                    NavigationLink(destination: DiagnosticsView()) {
+                        Label("Diagnostics", systemImage: "waveform.path.ecg")
+                    }
+                    Text("Share redacted request/response diagnostics for the last 50 calls.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
             .navigationTitle("Settings")
