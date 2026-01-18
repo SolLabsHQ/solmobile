@@ -18,6 +18,7 @@ final class ModelWiringTests: XCTestCase {
         let schema = Schema([
             ConversationThread.self,
             Message.self,
+            DraftRecord.self,
             Packet.self,
             Transmission.self,
             DeliveryAttempt.self
@@ -68,6 +69,7 @@ final class ModelWiringTests: XCTestCase {
         let schema = Schema([
             ConversationThread.self,
             Message.self,
+            DraftRecord.self,
             Packet.self,
             Transmission.self,
             DeliveryAttempt.self
@@ -133,6 +135,7 @@ final class ModelWiringTests: XCTestCase {
         let schema = Schema([
             ConversationThread.self,
             Message.self,
+            DraftRecord.self,
             Packet.self,
             Transmission.self,
             DeliveryAttempt.self
