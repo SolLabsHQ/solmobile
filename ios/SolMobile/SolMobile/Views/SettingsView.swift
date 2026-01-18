@@ -14,6 +14,11 @@ struct SettingsView: View {
     // Light tracing for debugging (non-sensitive)
     private let log = Logger(subsystem: "com.sollabshq.solmobile", category: "Settings")
 
+    @State private var stagingApiKey: String = ""
+    @State private var stagingKeyStatus: String = "No key set"
+    @State private var stagingKeyError: String? = nil
+    @FocusState private var stagingKeyFocused: Bool
+
     // Use seconds for dev ergonomics (makes retries/latency easier to reason about).
     private static let timeWithSecondsFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -152,6 +157,40 @@ struct SettingsView: View {
         }
     }
 
+    private func loadStagingApiKey() {
+        if let key = KeychainStore.read(key: KeychainKeys.stagingApiKey), !key.isEmpty {
+            stagingApiKey = key
+            stagingKeyStatus = "Key saved"
+            stagingKeyError = nil
+        } else {
+            stagingApiKey = ""
+            stagingKeyStatus = "No key set"
+            stagingKeyError = nil
+        }
+    }
+
+    private func persistStagingApiKey(_ rawValue: String) {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            if KeychainStore.delete(key: KeychainKeys.stagingApiKey) {
+                stagingKeyStatus = "No key set"
+                stagingKeyError = nil
+            } else {
+                stagingKeyStatus = "Save failed"
+                stagingKeyError = "Unable to clear key"
+            }
+            return
+        }
+
+        if KeychainStore.write(trimmed, key: KeychainKeys.stagingApiKey) {
+            stagingKeyStatus = "Key saved"
+            stagingKeyError = nil
+        } else {
+            stagingKeyStatus = "Save failed"
+            stagingKeyError = "Unable to save key"
+        }
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -167,6 +206,41 @@ struct SettingsView: View {
                     .padding(.vertical, 4)
                 }
 
+                Section("Staging") {
+                    SecureField("Staging API Key", text: $stagingApiKey)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .focused($stagingKeyFocused)
+                        .onSubmit {
+                            persistStagingApiKey(stagingApiKey)
+                        }
+                        .onChange(of: stagingKeyFocused) { _, focused in
+                            if !focused {
+                                persistStagingApiKey(stagingApiKey)
+                            }
+                        }
+
+                    HStack {
+                        Text("Status")
+                            .foregroundStyle(.secondary)
+
+                        Spacer()
+
+                        Text(stagingKeyStatus)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if let stagingKeyError {
+                        Text(stagingKeyError)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
+
+                    Button("Clear key", role: .destructive) {
+                        stagingApiKey = ""
+                        persistStagingApiKey("")
+                    }
+                }
 
                 Section("Developer") {
                     TextField("SolServer base URL", text: $solserverBaseURL)
@@ -294,6 +368,9 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .onAppear {
+                loadStagingApiKey()
+            }
         }
     }
 

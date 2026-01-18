@@ -116,9 +116,18 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
     // MARK: - Low-level HTTP helper
 
     private func requestJSON(_ req: URLRequest) async throws -> (Data, HTTPURLResponse) {
-        let (data, resp) = try await session.data(for: req)
+        var authorizedReq = req
+        applyAuthHeader(&authorizedReq)
+        let (data, resp) = try await session.data(for: authorizedReq)
         guard let http = resp as? HTTPURLResponse else { throw URLError(.badServerResponse) }
         return (data, http)
+    }
+
+    private func applyAuthHeader(_ req: inout URLRequest) {
+        guard let token = KeychainStore.read(key: KeychainKeys.stagingApiKey), !token.isEmpty else {
+            return
+        }
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     }
 
     private func require2xx(_ http: HTTPURLResponse, data: Data) throws {
