@@ -9,6 +9,8 @@ import SwiftUI
 import SwiftData
 
 struct ContentView: View {
+    private static let sharedContainer = makeModelContainer()
+
     var body: some View {
 //        VStack {
 //            Image(systemName: "globe")
@@ -27,12 +29,25 @@ struct ContentView: View {
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape") }
         }
-        .modelContainer(for: [
+        .modelContainer(Self.sharedContainer)
+    }
+
+    private static func makeModelContainer() -> ModelContainer {
+        let schema = Schema([
             ConversationThread.self,
             Message.self,
+            Capture.self,
+            ClaimSupport.self,
+            ClaimMapEntry.self,
+            DraftRecord.self,
             Packet.self,
             Transmission.self
         ])
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
+            let config = ModelConfiguration(isStoredInMemoryOnly: true)
+            return try! ModelContainer(for: schema, configurations: [config])
+        }
+        return try! ModelContainer(for: schema)
     }
 }
 

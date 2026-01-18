@@ -8,9 +8,8 @@
 import SwiftUI
 
 struct ComposerView: View {
+    @Binding var text: String
     var onSend: (String) -> Void
-
-    @State private var text: String = ""
 
     var body: some View {
         HStack(spacing: 10) {
@@ -21,7 +20,6 @@ struct ComposerView: View {
                 let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmed.isEmpty else { return }
                 onSend(trimmed)
-                text = ""
             }
             .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }

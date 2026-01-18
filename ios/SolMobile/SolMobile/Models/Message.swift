@@ -23,11 +23,11 @@ final class Message {
     var evidenceMetaVersion: String?
     var evidencePackId: String?
     var usedEvidenceIdsCsv: String?
-    var claimsCount: Int
+    var claimsCount: Int = 0
     var claimsJson: Data?
-    var claimsTruncated: Bool
+    var claimsTruncated: Bool = false
     // Evidence flag to avoid relationship faults in list rendering.
-    var hasEvidence: Bool
+    var hasEvidence: Bool = false
 
     var thread: ConversationThread
     
