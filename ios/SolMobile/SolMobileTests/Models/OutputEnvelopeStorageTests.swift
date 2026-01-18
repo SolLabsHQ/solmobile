@@ -84,4 +84,46 @@ final class OutputEnvelopeStorageTests: XCTestCase {
         XCTAssertTrue(message.claimsTruncated)
         XCTAssertNil(message.claimsJson)
     }
+
+    @MainActor
+    func test_applyOutputEnvelopeMeta_storesCaptureSuggestion() throws {
+        let schema = Schema([ConversationThread.self, Message.self])
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: [config])
+        let ctx = ModelContext(container)
+
+        let thread = ConversationThread(title: "OutputEnvelope")
+        ctx.insert(thread)
+
+        let message = Message(thread: thread, creatorType: .assistant, text: "Hello", transmissionId: "tx-1")
+        ctx.insert(message)
+
+        let suggestion = CaptureSuggestion(
+            suggestionId: nil,
+            suggestionType: .journalEntry,
+            title: "Reflection",
+            body: "Write it down.",
+            suggestedDate: "2026-01-17",
+            suggestedStartAt: nil
+        )
+        let meta = OutputEnvelopeMetaDTO(
+            metaVersion: "v1",
+            claims: nil,
+            usedEvidenceIds: nil,
+            evidencePackId: nil,
+            captureSuggestion: suggestion
+        )
+        let envelope = OutputEnvelopeDTO(assistantText: "Hello", meta: meta)
+
+        message.applyOutputEnvelopeMeta(envelope)
+
+        XCTAssertEqual(message.captureSuggestionId, "cap_tx-1")
+        XCTAssertEqual(message.captureSuggestionTypeRaw, "journal_entry")
+        XCTAssertEqual(message.captureSuggestionTitle, "Reflection")
+        XCTAssertNotNil(message.captureSuggestionJson)
+
+        let decoded = try JSONDecoder().decode(CaptureSuggestion.self, from: message.captureSuggestionJson ?? Data())
+        XCTAssertEqual(decoded.suggestionType, .journalEntry)
+        XCTAssertEqual(decoded.suggestionId, "cap_tx-1")
+    }
 }

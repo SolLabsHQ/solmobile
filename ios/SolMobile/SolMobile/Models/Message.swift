@@ -28,6 +28,12 @@ final class Message {
     var claimsTruncated: Bool = false
     // Evidence flag to avoid relationship faults in list rendering.
     var hasEvidence: Bool = false
+    
+    // Capture suggestion storage (JSON blob + scalar indexes).
+    var captureSuggestionJson: Data?
+    var captureSuggestionId: String?
+    var captureSuggestionTypeRaw: String?
+    var captureSuggestionTitle: String?
 
     var thread: ConversationThread
     
@@ -54,6 +60,10 @@ final class Message {
         claimsCount: Int = 0,
         claimsJson: Data? = nil,
         claimsTruncated: Bool = false,
+        captureSuggestionJson: Data? = nil,
+        captureSuggestionId: String? = nil,
+        captureSuggestionTypeRaw: String? = nil,
+        captureSuggestionTitle: String? = nil,
         hasEvidence: Bool = false,
         captures: [Capture]? = nil,
         supports: [ClaimSupport]? = nil,
@@ -71,6 +81,10 @@ final class Message {
         self.claimsCount = claimsCount
         self.claimsJson = claimsJson
         self.claimsTruncated = claimsTruncated
+        self.captureSuggestionJson = captureSuggestionJson
+        self.captureSuggestionId = captureSuggestionId
+        self.captureSuggestionTypeRaw = captureSuggestionTypeRaw
+        self.captureSuggestionTitle = captureSuggestionTitle
         self.hasEvidence = hasEvidence
         self.captures = captures
         self.supports = supports
