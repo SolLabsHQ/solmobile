@@ -261,6 +261,10 @@ struct SettingsView: View {
                             }
                         }
 
+                    Text("Replace this key anytime.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
                     HStack {
                         Text("Status")
                             .foregroundStyle(.secondary)

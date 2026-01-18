@@ -178,11 +178,12 @@ final class DiagnosticsStore: ObservableObject {
     }
 
     func exportText() -> String {
+        let header = exportHeader()
         if entries.isEmpty {
-            return "SolMobile Diagnostics\n(no entries)"
+            return "\(header)\n(no entries)"
         }
 
-        return "SolMobile Diagnostics\n\n" + entries.map { $0.exportText() }.joined(separator: "\n\n")
+        return "\(header)\n\n" + entries.map { $0.exportText() }.joined(separator: "\n\n")
     }
 
     func lastFailureEntry() -> DiagnosticsEntry? {
@@ -298,6 +299,17 @@ final class DiagnosticsStore: ObservableObject {
         value.replacingOccurrences(of: "'", with: "'\"'\"'")
     }
 
+    private func exportHeader() -> String {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "-"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "-"
+        let exportedAt = DiagnosticsStore.exportTimestampFormatter.string(from: Date())
+        return [
+            "DIAGNOSTICS_EXPORT_REDACTED=true",
+            "exported_at=\(exportedAt)",
+            "app_version=\(version) (\(build))"
+        ].joined(separator: "\n")
+    }
+
     static func redactedURLString(from url: URL?) -> String {
         guard let url else { return "(unknown url)" }
         guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
@@ -328,4 +340,10 @@ final class DiagnosticsStore: ObservableObject {
         let sensitive = ["api_key", "token", "sig", "signature", "expires"]
         return sensitive.contains(where: { name.contains($0) })
     }
+
+    private static let exportTimestampFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
 }

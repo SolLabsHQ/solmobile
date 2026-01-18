@@ -95,4 +95,13 @@ final class DiagnosticsStoreTests: XCTestCase {
         XCTAssertEqual(store.entries.first?.url, "https://example.com/59")
         XCTAssertEqual(store.entries.last?.url, "https://example.com/10")
     }
+
+    func testExportIncludesRedactionMarker() {
+        let store = DiagnosticsStore.makeTestStore()
+        let export = store.exportText()
+
+        XCTAssertTrue(export.contains("DIAGNOSTICS_EXPORT_REDACTED=true"))
+        XCTAssertTrue(export.contains("exported_at="))
+        XCTAssertTrue(export.contains("app_version="))
+    }
 }
