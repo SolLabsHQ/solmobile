@@ -5,6 +5,7 @@
 //  Created by SolMobile Diagnostics.
 //
 
+import Combine
 import Foundation
 import Network
 
@@ -32,7 +33,7 @@ final class NetworkMonitor: ObservableObject {
                 type = "other"
             }
 
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 self?.connectionType = type
             }
         }

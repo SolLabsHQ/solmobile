@@ -8,6 +8,17 @@ import XCTest
 
 @MainActor
 final class DiagnosticsStoreTests: XCTestCase {
+    private static let sharedStore = DiagnosticsStore.makeTestStore()
+
+    override func setUp() async throws {
+        try await super.setUp()
+        Self.sharedStore.clear()
+    }
+
+    override func tearDown() async throws {
+        Self.sharedStore.clear()
+        try await super.tearDown()
+    }
     func testRedactedRequestHeadersDropSensitiveFields() {
         let headers = [
             "Authorization": "Bearer real",
@@ -60,8 +71,7 @@ final class DiagnosticsStoreTests: XCTestCase {
             hadAuthorization: true
         )
 
-        let store = DiagnosticsStore.makeTestStore()
-        let curl = store.curlCommand(for: entry)
+        let curl = Self.sharedStore.curlCommand(for: entry)
 
         XCTAssertTrue(curl.contains("-X POST"))
         XCTAssertTrue(curl.contains("Authorization: Bearer <API_KEY>"))
@@ -71,7 +81,7 @@ final class DiagnosticsStoreTests: XCTestCase {
     }
 
     func testRingBufferTrimsToFiftyEntries() {
-        let store = DiagnosticsStore.makeTestStore()
+        let store = Self.sharedStore
 
         for index in 0..<60 {
             let entry = DiagnosticsEntry(
@@ -97,8 +107,7 @@ final class DiagnosticsStoreTests: XCTestCase {
     }
 
     func testExportIncludesRedactionMarker() {
-        let store = DiagnosticsStore.makeTestStore()
-        let export = store.exportText()
+        let export = Self.sharedStore.exportText()
 
         XCTAssertTrue(export.contains("DIAGNOSTICS_EXPORT_REDACTED=true"))
         XCTAssertTrue(export.contains("exported_at="))

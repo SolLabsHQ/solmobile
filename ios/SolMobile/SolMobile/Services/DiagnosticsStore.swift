@@ -5,6 +5,7 @@
 //  Created by SolMobile Diagnostics.
 //
 
+import Combine
 import Foundation
 
 struct DiagnosticsEntry: Identifiable, Codable {
@@ -152,22 +153,22 @@ final class DiagnosticsStore: ObservableObject {
         let requestBodySnippet = DiagnosticsStore.bodySnippet(from: requestBody, limit: 500)
         let nsError = error as NSError?
 
-        let entry = DiagnosticsEntry(
-            method: method,
-            url: urlString,
-            status: status,
-            latencyMs: latencyMs,
-            errorDomain: nsError?.domain,
-            errorCode: nsError?.code,
-            errorDescription: nsError?.localizedDescription,
-            responseSnippet: responseSnippet,
-            safeResponseHeaders: safeHeaders,
-            requestHeaders: redactedHeaders,
-            requestBodySnippet: requestBodySnippet,
-            hadAuthorization: hadAuthorization
-        )
-
-        Task { @MainActor in
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let entry = DiagnosticsEntry(
+                method: method,
+                url: urlString,
+                status: status,
+                latencyMs: latencyMs,
+                errorDomain: nsError?.domain,
+                errorCode: nsError?.code,
+                errorDescription: nsError?.localizedDescription,
+                responseSnippet: responseSnippet,
+                safeResponseHeaders: safeHeaders,
+                requestHeaders: redactedHeaders,
+                requestBodySnippet: requestBodySnippet,
+                hadAuthorization: hadAuthorization
+            )
             self.append(entry)
         }
     }
@@ -254,12 +255,12 @@ final class DiagnosticsStore: ObservableObject {
         UserDefaults.standard.set(data, forKey: storageKey)
     }
 
-    private static func responseSnippet(from data: Data?, status: Int?) -> String? {
+    nonisolated private static func responseSnippet(from data: Data?, status: Int?) -> String? {
         guard let status, status >= 400 else { return nil }
         return bodySnippet(from: data, limit: 400)
     }
 
-    private static func bodySnippet(from data: Data?, limit: Int) -> String? {
+    nonisolated private static func bodySnippet(from data: Data?, limit: Int) -> String? {
         guard let data, !data.isEmpty else { return nil }
         let text = String(data: data, encoding: .utf8) ?? "(non-utf8 body)"
         if text.count <= limit {
@@ -269,7 +270,7 @@ final class DiagnosticsStore: ObservableObject {
         return String(text[..<idx])
     }
 
-    private static func safeResponseHeaders(from headers: [AnyHashable: Any]?) -> [String: String] {
+    nonisolated private static func safeResponseHeaders(from headers: [AnyHashable: Any]?) -> [String: String] {
         guard let headers else { return [:] }
         let allowed = ["server", "cf-ray", "fly-request-id", "content-type"]
         var result: [String: String] = [:]
@@ -283,7 +284,7 @@ final class DiagnosticsStore: ObservableObject {
         return result
     }
 
-    static func redactedRequestHeaders(_ headers: [String: String]?) -> [String: String] {
+    nonisolated static func redactedRequestHeaders(_ headers: [String: String]?) -> [String: String] {
         guard let headers else { return [:] }
         var redacted: [String: String] = [:]
         for (key, value) in headers {
@@ -295,7 +296,7 @@ final class DiagnosticsStore: ObservableObject {
         return redacted
     }
 
-    private static func shellEscape(_ value: String) -> String {
+    nonisolated private static func shellEscape(_ value: String) -> String {
         value.replacingOccurrences(of: "'", with: "'\"'\"'")
     }
 
@@ -310,7 +311,7 @@ final class DiagnosticsStore: ObservableObject {
         ].joined(separator: "\n")
     }
 
-    static func redactedURLString(from url: URL?) -> String {
+    nonisolated static func redactedURLString(from url: URL?) -> String {
         guard let url else { return "(unknown url)" }
         guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
             return url.absoluteString
@@ -328,7 +329,7 @@ final class DiagnosticsStore: ObservableObject {
         return components.string ?? url.absoluteString
     }
 
-    static func isSensitiveHeaderName(_ name: String) -> Bool {
+    nonisolated static func isSensitiveHeaderName(_ name: String) -> Bool {
         let lower = name.lowercased()
         if lower == "authorization" || lower == "cookie" {
             return true
@@ -336,7 +337,7 @@ final class DiagnosticsStore: ObservableObject {
         return lower.contains("key") || lower.contains("token") || lower.contains("secret")
     }
 
-    private static func shouldRedactQueryParam(_ name: String) -> Bool {
+    nonisolated private static func shouldRedactQueryParam(_ name: String) -> Bool {
         let sensitive = ["api_key", "token", "sig", "signature", "expires"]
         return sensitive.contains(where: { name.contains($0) })
     }
