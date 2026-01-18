@@ -23,6 +23,10 @@ class SwiftDataTestBase: XCTestCase {
         let schema = Schema([
             ConversationThread.self,
             Message.self,
+            Capture.self,
+            ClaimSupport.self,
+            ClaimMapEntry.self,
+            DraftRecord.self,
             Packet.self,
             Transmission.self,
             DeliveryAttempt.self      

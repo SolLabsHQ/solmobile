@@ -15,6 +15,7 @@ struct ThreadListView: View {
     private var threads: [ConversationThread]
 
     @Query private var transmissions: [Transmission]
+    @State private var didRunDraftCleanup = false
 
 
     var body: some View {
@@ -53,6 +54,11 @@ struct ThreadListView: View {
                     .accessibilityLabel("New Thread")
                 }
             }
+            .onAppear {
+                guard !didRunDraftCleanup else { return }
+                didRunDraftCleanup = true
+                try? DraftStore(modelContext: modelContext).cleanupExpiredDrafts()
+            }
         }
     }
 
@@ -63,6 +69,7 @@ struct ThreadListView: View {
 
     private func delete(at offsets: IndexSet) {
         for idx in offsets {
+            DraftStore(modelContext: modelContext).deleteDraft(threadId: threads[idx].id)
             modelContext.delete(threads[idx])
         }
     }

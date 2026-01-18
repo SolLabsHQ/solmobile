@@ -22,6 +22,9 @@ final class SwiftDataTestHarness {
             container = try ModelContainer(
                 for: ConversationThread.self,
                 Message.self,
+                Capture.self,
+                ClaimSupport.self,
+                ClaimMapEntry.self,
                 Packet.self,
                 Transmission.self,
                 DeliveryAttempt.self,
