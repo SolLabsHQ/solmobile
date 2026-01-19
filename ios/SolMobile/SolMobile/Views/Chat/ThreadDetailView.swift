@@ -9,6 +9,7 @@ struct ThreadDetailView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
+    @ObservedObject private var budgetStore = BudgetStore.shared
     @Bindable var thread: ConversationThread
     @Query private var messages: [Message]
     @Query private var transmissions: [Transmission]
@@ -114,7 +115,11 @@ struct ThreadDetailView: View {
                     .padding(.top, 8)
             }
 
-            ComposerView(text: $composerText) { text in
+            ComposerView(
+                text: $composerText,
+                isSendBlocked: budgetStore.isBlockedNow(),
+                blockedUntil: budgetStore.state.blockedUntil
+            ) { text in
                 send(text)
             }
             .padding(10)
@@ -149,6 +154,7 @@ struct ThreadDetailView: View {
             updateOutboxSummary()
             processOutbox()
             restoreDraftIfNeeded()
+            budgetStore.refreshIfExpired()
         }
         .navigationTitle(thread.title)
         .navigationBarTitleDisplayMode(.inline)

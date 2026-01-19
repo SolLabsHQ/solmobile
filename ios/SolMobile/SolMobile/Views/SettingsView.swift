@@ -410,6 +410,15 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Section("Cost") {
+                    NavigationLink(destination: CostMeterView()) {
+                        Label("Cost Meter", systemImage: "creditcard")
+                    }
+                    Text("Usage is unavailable until the server reports budget data.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("About") {
                     HStack {
                         Text("Version")

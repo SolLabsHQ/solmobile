@@ -162,6 +162,7 @@ struct ChatResponse {
 final class TransmissionActions {
 
     private let outboxLog = Logger(subsystem: "com.sollabshq.solmobile", category: "Outbox")
+    private let budgetStore = BudgetStore.shared
 
     private let modelContext: ModelContext
     private let transport: any ChatTransport
@@ -422,6 +423,26 @@ final class TransmissionActions {
 
         let startNs = DispatchTime.now().uptimeNanoseconds
 
+        budgetStore.refreshIfExpired()
+        if budgetStore.isBlockedNow() {
+            tx.status = .failed
+            tx.lastError = "budget_exceeded"
+
+            recordAttempt(
+                tx: tx,
+                statusCode: 422,
+                outcome: .failed,
+                errorMessage: "budget_exceeded(local)",
+                transmissionId: nil
+            )
+
+            outboxLog.info(
+                "processQueue run=\(runId, privacy: .public) event=budget_blocked tx=\(short(sel.txId), privacy: .public)"
+            )
+            try? modelContext.save()
+            return
+        }
+
         tx.status = .sending
         tx.lastError = nil
         outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(sel.txId), privacy: .public) to=sending")
@@ -495,6 +516,9 @@ final class TransmissionActions {
 
             let code = statusCode(from: error)
             let msg = errorMessage(from: error)
+            if let info = budgetExceededInfo(from: error) {
+                budgetStore.applyBudgetExceeded(blockedUntil: info.blockedUntil)
+            }
 
             recordAttempt(
                 tx: freshTx,
@@ -511,6 +535,11 @@ final class TransmissionActions {
         }
 
         try? modelContext.save()
+    }
+
+    private func budgetExceededInfo(from error: Error) -> BudgetExceededInfo? {
+        guard case let TransportError.httpStatus(code, body) = error, code == 422 else { return nil }
+        return budgetStore.parseBudgetExceeded(from: body)
     }
 
     private func enforceTerminalConditions(
