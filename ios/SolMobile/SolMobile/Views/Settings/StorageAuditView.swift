@@ -16,6 +16,7 @@ struct StorageAuditView: View {
     @State private var stats: StorageCleanupStats = StorageCleanupService.loadStats()
     @State private var isRunningCleanup: Bool = false
     @State private var cleanupError: String? = nil
+    @State private var showCleanupConfirm: Bool = false
 
     var body: some View {
         List {
@@ -33,9 +34,17 @@ struct StorageAuditView: View {
                 StatRow(label: "Deleted Threads", value: "\(stats.deletedThreads)")
 
                 Button("Run Cleanup Now", role: .destructive) {
-                    runCleanup()
+                    showCleanupConfirm = true
                 }
                 .disabled(isRunningCleanup)
+                .confirmationDialog("Run cleanup now?", isPresented: $showCleanupConfirm, titleVisibility: .visible) {
+                    Button("Run Cleanup Now", role: .destructive) {
+                        runCleanup()
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("This deletes unpinned messages older than 7 days and removes empty, unpinned threads.")
+                }
 
                 if let cleanupError {
                     Text(cleanupError)
