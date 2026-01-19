@@ -16,6 +16,7 @@ struct ThreadListView: View {
 
     @Query private var transmissions: [Transmission]
     @State private var didRunDraftCleanup = false
+    @State private var didScheduleStorageCleanup = false
 
 
     var body: some View {
@@ -58,6 +59,8 @@ struct ThreadListView: View {
                 guard !didRunDraftCleanup else { return }
                 didRunDraftCleanup = true
                 try? DraftStore(modelContext: modelContext).cleanupExpiredDrafts()
+                scheduleStorageCleanupIfDue()
+                StorageCleanupScheduler.shared.schedule()
             }
         }
     }
@@ -71,6 +74,20 @@ struct ThreadListView: View {
         for idx in offsets {
             DraftStore(modelContext: modelContext).deleteDraft(threadId: threads[idx].id)
             modelContext.delete(threads[idx])
+        }
+    }
+
+    private func scheduleStorageCleanupIfDue() {
+        guard !didScheduleStorageCleanup else { return }
+
+        let service = StorageCleanupService(modelContext: modelContext)
+        guard service.isCleanupDue() else { return }
+        didScheduleStorageCleanup = true
+
+        Task {
+            // Defer heavy work until after the list renders.
+            await Task.yield()
+            _ = try? service.runCleanup()
         }
     }
 

@@ -152,6 +152,14 @@ struct ThreadDetailView: View {
         }
         .navigationTitle(thread.title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(thread.pinned ? "Saved" : "Save to Memory") {
+                    pinThreadToMemory()
+                }
+                .disabled(thread.pinned)
+            }
+        }
     }
 
     private func send(_ text: String) {
@@ -174,6 +182,11 @@ struct ThreadDetailView: View {
 
     private var draftStore: DraftStore {
         DraftStore(modelContext: modelContext)
+    }
+
+    private func pinThreadToMemory() {
+        StoragePinningService(modelContext: modelContext)
+            .pinThreadAndMessages(thread: thread, messages: messages)
     }
 
     private func restoreDraftIfNeeded() {
