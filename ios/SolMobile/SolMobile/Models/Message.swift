@@ -14,6 +14,8 @@ final class Message {
     var createdAt: Date
     var creatorTypeRaw: String
     var text: String
+    // TTL policy uses this flag; defaults to thread's pinned state on insert.
+    var pinned: Bool = false
     
     // Server transmission ID (PR #7.1 / PR #8)
     // Only present for assistant messages that came from server
@@ -53,6 +55,7 @@ final class Message {
         creatorType: CreatorType,
         text: String,
         createdAt: Date = Date(),
+        pinned: Bool? = nil,
         transmissionId: String? = nil,
         evidenceMetaVersion: String? = nil,
         evidencePackId: String? = nil,
@@ -74,6 +77,7 @@ final class Message {
         self.creatorTypeRaw = creatorType.rawValue
         self.text = text
         self.createdAt = createdAt
+        self.pinned = pinned ?? thread.pinned
         self.transmissionId = transmissionId
         self.evidenceMetaVersion = evidenceMetaVersion
         self.evidencePackId = evidencePackId

@@ -7,6 +7,10 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.sollabshq.solmobile.cleanup</string>
+	</array>
 	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
 	<string>SolMobile needs calendar access to save events from conversations.</string>
 	<key>NSRemindersFullAccessUsageDescription</key>

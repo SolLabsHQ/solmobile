@@ -20,21 +20,8 @@ class SwiftDataTestBase: XCTestCase {
         super.setUp()
 
         // ⚠️ Replace model types with what your app actually uses.
-        let schema = Schema([
-            ConversationThread.self,
-            Message.self,
-            Capture.self,
-            ClaimSupport.self,
-            ClaimMapEntry.self,
-            CapturedSuggestion.self,
-            DraftRecord.self,
-            Packet.self,
-            Transmission.self,
-            DeliveryAttempt.self      
-        ])
-
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        container = try! ModelContainer(for: schema, configurations: [config])
+        container = try! ModelContainer(for: ModelContainerFactory.appSchema, configurations: [config])
         context = ModelContext(container)
     }
 

@@ -9,7 +9,10 @@ import SwiftUI
 import SwiftData
 
 struct ContentView: View {
-    private static let sharedContainer = makeModelContainer()
+    private static let sharedContainer = ModelContainerFactory.makeContainer(
+        isInMemoryOnly: ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    )
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
 //        VStack {
@@ -30,25 +33,23 @@ struct ContentView: View {
                 .tabItem { Label("Settings", systemImage: "gearshape") }
         }
         .modelContainer(Self.sharedContainer)
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active else { return }
+            let context = ModelContext(Self.sharedContainer)
+            let service = StorageCleanupService(modelContext: context)
+            guard service.isCleanupDue() else { return }
+            Task {
+                await Task.yield()
+                _ = try? service.runCleanup()
+            }
+            StorageCleanupScheduler.shared.schedule()
+        }
     }
 
     private static func makeModelContainer() -> ModelContainer {
-        let schema = Schema([
-            ConversationThread.self,
-            Message.self,
-            Capture.self,
-            ClaimSupport.self,
-            ClaimMapEntry.self,
-            CapturedSuggestion.self,
-            DraftRecord.self,
-            Packet.self,
-            Transmission.self
-        ])
-        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
-            let config = ModelConfiguration(isStoredInMemoryOnly: true)
-            return try! ModelContainer(for: schema, configurations: [config])
-        }
-        return try! ModelContainer(for: schema)
+        ModelContainerFactory.makeContainer(
+            isInMemoryOnly: ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        )
     }
 }
 

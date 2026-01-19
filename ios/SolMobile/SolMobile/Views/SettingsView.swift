@@ -401,6 +401,14 @@ struct SettingsView: View {
                     lastHealthCheckAt = nil
                 }
 
+                Section("Data Management") {
+                    NavigationLink(destination: StorageAuditView()) {
+                        Label("Storage Audit", systemImage: "tray.full")
+                    }
+                    Text("Review local storage counts and run TTL cleanup.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
                 Section("About") {
                     HStack {
