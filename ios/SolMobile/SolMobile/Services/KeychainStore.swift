@@ -9,7 +9,7 @@ import Foundation
 import Security
 
 enum KeychainKeys {
-    static let stagingApiKey = "staging_api_key"
+    static let stagingApiKey = "api_key.staging"
 }
 
 enum KeychainStore {
