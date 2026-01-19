@@ -24,6 +24,11 @@ final class TransmissionActionsTests: SwiftDataTestBase {
         }
     }
 
+    override func setUp() {
+        super.setUp()
+        BudgetStore.shared.resetForTests()
+    }
+
     func test_processQueue_success_marksSucceeded_andAppendsAssistant() async throws {
         // Arrange
         let transport = FakeTransport()
@@ -173,5 +178,97 @@ final class TransmissionActionsTests: SwiftDataTestBase {
         allTx = try context.fetch(FetchDescriptor<Transmission>())
         XCTAssertEqual(allTx[0].status, .succeeded)
         XCTAssertTrue(thread.messages.contains(where: { $0.creatorType == .assistant && $0.text.contains("ok after retry") }))
+    }
+
+    func test_budgetExceeded_blocksAndPersists() async throws {
+        // Arrange
+        let transport = TestTransport { _ in
+            throw TransportError.httpStatus(code: 422, body: "{\"error\":\"budget_exceeded\"}")
+        }
+
+        let thread = ConversationThread(title: "T1")
+        context.insert(thread)
+
+        let user = Message(thread: thread, creatorType: .user, text: "hi")
+        thread.messages.append(user)
+        context.insert(user)
+
+        let actions = TransmissionActions(modelContext: context, transport: transport)
+        actions.enqueueChat(thread: thread, userMessage: user)
+
+        // Act
+        await actions.processQueue()
+
+        // Assert
+        XCTAssertTrue(BudgetStore.shared.state.isBlocked)
+        XCTAssertNotNil(BudgetStore.shared.state.lastUpdatedAt)
+        XCTAssertTrue(UserDefaults.standard.bool(forKey: "solserver.budget.isBlocked"))
+
+        let allTx = try context.fetch(FetchDescriptor<Transmission>())
+        XCTAssertEqual(allTx.count, 1)
+        XCTAssertEqual(allTx[0].status, .failed)
+        XCTAssertTrue((allTx[0].lastError ?? "").contains("budget_exceeded"))
+    }
+
+    func test_blockedState_preventsSend() async throws {
+        // Arrange
+        BudgetStore.shared.applyBudgetExceeded(blockedUntil: nil)
+        var didSend = false
+        let transport = TestTransport { _ in
+            didSend = true
+            return ChatResponse(
+                text: "should not send",
+                statusCode: 200,
+                transmissionId: "tx",
+                pending: false,
+                threadMemento: nil,
+                evidenceSummary: nil,
+                evidence: nil,
+                evidenceWarnings: nil,
+                outputEnvelope: nil
+            )
+        }
+
+        let thread = ConversationThread(title: "T1")
+        context.insert(thread)
+
+        let user = Message(thread: thread, creatorType: .user, text: "hi")
+        thread.messages.append(user)
+        context.insert(user)
+
+        let actions = TransmissionActions(modelContext: context, transport: transport)
+        actions.enqueueChat(thread: thread, userMessage: user)
+
+        // Act
+        await actions.processQueue()
+
+        // Assert
+        XCTAssertFalse(didSend)
+        let allTx = try context.fetch(FetchDescriptor<Transmission>())
+        XCTAssertEqual(allTx.count, 1)
+        XCTAssertEqual(allTx[0].status, .failed)
+    }
+
+    func test_blockedUntil_past_unblocks() {
+        // Arrange
+        BudgetStore.shared.applyBudgetExceeded(blockedUntil: Date().addingTimeInterval(-60))
+
+        // Act
+        let isBlocked = BudgetStore.shared.isBlockedNow()
+
+        // Assert
+        XCTAssertFalse(isBlocked)
+        XCTAssertFalse(UserDefaults.standard.bool(forKey: "solserver.budget.isBlocked"))
+    }
+
+    func test_budgetState_persistsAcrossReload() {
+        // Arrange
+        BudgetStore.shared.applyBudgetExceeded(blockedUntil: nil)
+
+        // Act
+        BudgetStore.shared.reload()
+
+        // Assert
+        XCTAssertTrue(BudgetStore.shared.state.isBlocked)
     }
 }
