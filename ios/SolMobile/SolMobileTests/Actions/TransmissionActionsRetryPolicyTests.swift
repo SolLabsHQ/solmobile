@@ -228,7 +228,7 @@ final class TransmissionActionsRetryPolicyTests: XCTestCase {
         tx.deliveryAttempts.append(pendingAttempt)
         context.insert(pendingAttempt)
 
-        tx.status = .queued
+        tx.status = .pending
         try context.save()
 
         // Act

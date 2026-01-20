@@ -140,30 +140,17 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
 
         SeedFactory.enqueueChat(actions, thread: thread, userMessage: user)
 
-        // First pass: send -> 202 => queued + pending attempt with server tx id.
+        // Send -> 202 => immediate poll => succeeds + appends assistant message.
         await actions.processQueue()
 
-        guard let tx1 = SeedFactory.fetchFirstQueuedTransmission(context) ?? TestFetch.fetchOne(Transmission.self, context) else {
-            XCTFail("Expected a Transmission to exist")
-            return
-        }
-
-        TestAssert.transmissionStatus(.queued, tx1)
-        XCTAssertTrue(tx1.deliveryAttempts.count >= 1)
-        XCTAssertEqual(tx1.deliveryAttempts.last?.outcome, .pending)
-        XCTAssertEqual(tx1.deliveryAttempts.last?.transmissionId, transport.txId)
-
-        // Second pass: sees pending+serverTxId => polls => succeeds + appends assistant message.
-        await actions.processQueue()
-
-        guard let tx2 = TestFetch.fetchOne(Transmission.self, context),
+        guard let tx = TestFetch.fetchOne(Transmission.self, context),
               let t2 = TestFetch.fetchOne(ConversationThread.self, context) else {
             XCTFail("Expected Transmission + Thread after polling")
             return
         }
 
-        TestAssert.transmissionStatus(.succeeded, tx2)
-        XCTAssertEqual(tx2.deliveryAttempts.last?.outcome, .succeeded)
+        TestAssert.transmissionStatus(.succeeded, tx)
+        XCTAssertEqual(tx.deliveryAttempts.last?.outcome, .succeeded)
         XCTAssertTrue(t2.messages.contains(where: { $0.creatorType == .assistant && $0.text == "done" }))
         XCTAssertEqual(t2.messages.count, 2) // user + assistant
     }
@@ -178,7 +165,7 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
 
         SeedFactory.enqueueChat(actions, thread: thread, userMessage: user)
 
-        // First pass: send -> 202 => queued + pending attempt with server tx id.
+        // Send -> 202 => immediate poll attempt, but transport cannot poll => failed.
         await actions.processQueue()
 
         guard let tx1 = TestFetch.fetchOne(Transmission.self, context) else {
@@ -186,20 +173,8 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
             return
         }
 
-        TestAssert.transmissionStatus(.queued, tx1)
-        XCTAssertEqual(tx1.deliveryAttempts.last?.outcome, .pending)
-        XCTAssertEqual(tx1.deliveryAttempts.last?.transmissionId, transport.txId)
-
-        // Second pass: queue sees pending+serverTxId but transport cannot poll => failed.
-        await actions.processQueue()
-
-        guard let tx2 = TestFetch.fetchOne(Transmission.self, context) else {
-            XCTFail("Expected a Transmission after second pass")
-            return
-        }
-
-        TestAssert.transmissionStatus(.failed, tx2)
-        XCTAssertTrue((tx2.lastError ?? "").contains("poll"))
+        TestAssert.transmissionStatus(.failed, tx1)
+        XCTAssertTrue((tx1.lastError ?? "").contains("poll"))
     }
 
     @MainActor
@@ -212,29 +187,17 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
 
         SeedFactory.enqueueChat(actions, thread: thread, userMessage: user)
 
-        // Pass 1: 202 pending.
+        // Pass 1: send -> 202 => poll returns pending again.
         await actions.processQueue()
 
-        guard let tx1 = TestFetch.fetchOne(Transmission.self, context) else {
-            XCTFail("Expected a Transmission to exist")
-            return
-        }
-
-        TestAssert.transmissionStatus(.queued, tx1)
-        XCTAssertEqual(tx1.deliveryAttempts.last?.outcome, .pending)
-        XCTAssertEqual(tx1.deliveryAttempts.last?.transmissionId, transport.txId)
-
-        // Pass 2: poll returns pending again => stays queued and no assistant appended.
-        await actions.processQueue()
-
-        guard let tx2 = TestFetch.fetchOne(Transmission.self, context),
+        guard let tx1 = TestFetch.fetchOne(Transmission.self, context),
               let t2 = TestFetch.fetchOne(ConversationThread.self, context) else {
             XCTFail("Expected Transmission + Thread after poll")
             return
         }
 
-        TestAssert.transmissionStatus(.queued, tx2)
-        XCTAssertEqual(tx2.deliveryAttempts.last?.outcome, .pending)
+        TestAssert.transmissionStatus(.pending, tx1)
+        XCTAssertEqual(tx1.deliveryAttempts.last?.outcome, .pending)
         XCTAssertEqual(t2.messages.count, 1) // user only
     }
 
@@ -248,10 +211,7 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
 
         SeedFactory.enqueueChat(actions, thread: thread, userMessage: user)
 
-        // Pass 1: 202 pending.
-        await actions.processQueue()
-
-        // Pass 2: poll throws => tx requeued (retryable).
+        // Pass 1: send -> 202 => poll throws => tx stays pending (retryable).
         await actions.processQueue()
 
         guard let tx = TestFetch.fetchOne(Transmission.self, context) else {
@@ -259,14 +219,14 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
             return
         }
 
-        TestAssert.transmissionStatus(.queued, tx)
+        TestAssert.transmissionStatus(.pending, tx)
         XCTAssertEqual(tx.deliveryAttempts.last?.outcome, .failed)
         XCTAssertTrue((tx.lastError ?? "").count > 0)
     }
 
     @MainActor
     func test_pendingTTL_exceeded_marks_failed_without_calling_transport() async {
-        // Arrange a queued Transmission with an old pending attempt that has no server transmissionId.
+        // Arrange a pending Transmission with an old pending attempt that has no server transmissionId.
         let transport = MockPendingNoPollingTransport()
         let actions = TransmissionActions(modelContext: context, transport: transport)
 
@@ -293,7 +253,7 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
 
         tx.deliveryAttempts.append(pending)
         context.insert(pending)
-        tx.status = .queued
+        tx.status = .pending
 
         // Act: processQueue should terminal-fail on TTL without attempting send.
         await actions.processQueue()

@@ -20,6 +20,7 @@ final class ModelWiringTests: XCTestCase {
             Message.self,
             CapturedSuggestion.self,
             DraftRecord.self,
+            ThreadReadState.self,
             Packet.self,
             Transmission.self,
             DeliveryAttempt.self
@@ -72,6 +73,7 @@ final class ModelWiringTests: XCTestCase {
             Message.self,
             CapturedSuggestion.self,
             DraftRecord.self,
+            ThreadReadState.self,
             Packet.self,
             Transmission.self,
             DeliveryAttempt.self
@@ -138,6 +140,7 @@ final class ModelWiringTests: XCTestCase {
             ConversationThread.self,
             Message.self,
             DraftRecord.self,
+            ThreadReadState.self,
             Packet.self,
             Transmission.self,
             DeliveryAttempt.self

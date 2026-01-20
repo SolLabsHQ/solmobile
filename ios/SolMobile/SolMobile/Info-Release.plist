@@ -5,6 +5,7 @@
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>com.sollabshq.solmobile.cleanup</string>
+		<string>com.sollabshq.solmobile.outboxRefresh</string>
 	</array>
 	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
 	<string>SolMobile needs calendar access to save events from conversations.</string>

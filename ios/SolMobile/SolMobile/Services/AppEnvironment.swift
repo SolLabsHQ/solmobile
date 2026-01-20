@@ -62,7 +62,11 @@ enum SolServerBaseURL {
     static func effectiveURLString() -> String {
         let raw = UserDefaults.standard.string(forKey: storageKey) ?? defaultBaseURLString
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if URL(string: trimmed) != nil {
+        if let url = URL(string: trimmed) {
+            if AppEnvironment.current.requiresHTTPS,
+               url.scheme?.lowercased() != "https" {
+                return defaultBaseURLString
+            }
             return trimmed
         }
         return defaultBaseURLString

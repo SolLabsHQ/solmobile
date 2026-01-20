@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Security
 
 struct Request: Codable {
     let threadId: String
@@ -114,8 +115,12 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
     ) {
         self.baseURL = baseURL
         self.redirectTracker = redirectTracker
+        var resolvedConfig = configuration
+        if #available(iOS 13.0, *) {
+            resolvedConfig.tlsMinimumSupportedProtocolVersion = .TLSv12
+        }
         self.session = URLSession(
-            configuration: configuration,
+            configuration: resolvedConfig,
             delegate: redirectTracker,
             delegateQueue: nil
         )
@@ -419,7 +424,7 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
 
         let dto = Request(
             threadId: envelope.threadId.uuidString,
-            clientRequestId: envelope.packetId.uuidString,
+            clientRequestId: envelope.requestId,
             message: envelope.messageText
         )
         req.httpBody = try JSONEncoder().encode(dto)

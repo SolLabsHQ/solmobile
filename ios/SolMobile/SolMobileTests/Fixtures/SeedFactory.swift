@@ -38,4 +38,10 @@ enum SeedFactory {
         let d = FetchDescriptor<Transmission>(predicate: #Predicate { $0.statusRaw == queuedRaw })
         return (try? context.fetch(d))?.first
     }
+
+    static func fetchFirstPendingTransmission(_ context: ModelContext) -> Transmission? {
+        let pendingRaw = TransmissionStatus.pending.rawValue
+        let d = FetchDescriptor<Transmission>(predicate: #Predicate { $0.statusRaw == pendingRaw })
+        return (try? context.fetch(d))?.first
+    }
 }
