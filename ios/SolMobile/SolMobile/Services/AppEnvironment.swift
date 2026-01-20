@@ -43,11 +43,11 @@ enum AppEnvironment: String, CaseIterable {
         case .staging:
             return Bundle.main.infoDictionary?["SOLSERVER_BASE_URL_STAGING"] as? String
                 ?? Bundle.main.infoDictionary?["SOLSERVER_BASE_URL"] as? String
-                ?? "https://solserver-staging.fly.dev"
+                ?? "https://solserver-staging.sollabshq.com"
         case .prod:
             return Bundle.main.infoDictionary?["SOLSERVER_BASE_URL_PROD"] as? String
                 ?? Bundle.main.infoDictionary?["SOLSERVER_BASE_URL"] as? String
-                ?? "https://solserver-prod.example.com"
+                ?? "https://api.sollabshq.com"
         }
     }
 }

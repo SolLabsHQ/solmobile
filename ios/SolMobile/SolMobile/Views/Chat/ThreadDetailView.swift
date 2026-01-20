@@ -6,7 +6,7 @@ import UIKit
 
 struct ThreadDetailView: View {
     private static let perfLog = OSLog(subsystem: "com.sollabshq.solmobile", category: "ThreadDetailPerf")
-    private static let pendingSlowThresholdSeconds: TimeInterval = 60
+    private static let pendingSlowThresholdSeconds: TimeInterval = 20
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
