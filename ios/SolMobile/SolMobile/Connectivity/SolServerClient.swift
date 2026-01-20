@@ -91,7 +91,8 @@ private final class TaskIdBox {
 }
 
 final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision {
-    let baseURL: URL
+    private let baseURLProvider: () -> URL
+    var baseURL: URL { baseURLProvider() }
     private let session: URLSession
     private let redirectTracker: RedirectTracker
 
@@ -117,7 +118,25 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
         configuration: URLSessionConfiguration = .default,
         redirectTracker: RedirectTracker = RedirectTracker()
     ) {
-        self.baseURL = baseURL
+        self.baseURLProvider = { baseURL }
+        self.redirectTracker = redirectTracker
+        let resolvedConfig = configuration
+        if #available(iOS 13.0, *) {
+            resolvedConfig.tlsMinimumSupportedProtocolVersion = .TLSv12
+        }
+        self.session = URLSession(
+            configuration: resolvedConfig,
+            delegate: redirectTracker,
+            delegateQueue: nil
+        )
+    }
+
+    init(
+        baseURLProvider: @escaping () -> URL,
+        configuration: URLSessionConfiguration = .default,
+        redirectTracker: RedirectTracker = RedirectTracker()
+    ) {
+        self.baseURLProvider = baseURLProvider
         self.redirectTracker = redirectTracker
         let resolvedConfig = configuration
         if #available(iOS 13.0, *) {
@@ -132,7 +151,7 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
 
     /// Convenience init for app runtime where Settings controls the base URL.
     convenience init(configuration: URLSessionConfiguration = .default) {
-        self.init(baseURL: SolServerBaseURL.effectiveURL(), configuration: configuration)
+        self.init(baseURLProvider: { SolServerBaseURL.effectiveURL() }, configuration: configuration)
     }
 
     // MARK: - Low-level HTTP helper
