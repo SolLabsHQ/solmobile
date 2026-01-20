@@ -19,7 +19,7 @@ final class TransmissionActionsTests: SwiftDataTestBase {
             self.handler = handler
         }
 
-        func send(envelope: PacketEnvelope) async throws -> ChatResponse {
+        func send(envelope: PacketEnvelope, diagnostics: DiagnosticsContext? = nil) async throws -> ChatResponse {
             try await handler(envelope)
         }
     }
@@ -38,6 +38,7 @@ final class TransmissionActionsTests: SwiftDataTestBase {
                 statusCode: 200,
                 transmissionId: "tx123",
                 pending: false,
+                responseInfo: nil,
                 threadMemento: nil,
                 evidenceSummary: nil,
                 evidence: nil,
@@ -73,10 +74,10 @@ final class TransmissionActionsTests: SwiftDataTestBase {
         XCTAssertTrue(drafts.isEmpty)
     }
 
-    func test_processQueue_http500_marksFailed_recordsAttempt_andDoesNotAppendAssistant() async throws {
+    func test_processQueue_http500_requeues_recordsAttempt_andDoesNotAppendAssistant() async throws {
         // Arrange
         let transport = TestTransport { _ in
-            throw TransportError.httpStatus(code: 500, body: "boom")
+            throw TransportError.httpStatus(HTTPErrorInfo(code: 500, body: "boom"))
         }
 
         let thread = ConversationThread(title: "T1")
@@ -100,7 +101,7 @@ final class TransmissionActionsTests: SwiftDataTestBase {
         XCTAssertEqual(allTx.count, 1)
 
         let tx = allTx[0]
-        XCTAssertEqual(tx.status, .failed)
+        XCTAssertEqual(tx.status, .queued)
         XCTAssertTrue((tx.lastError ?? "").contains("boom"))
 
         // Attempt ledger should record the failure.
@@ -116,12 +117,64 @@ final class TransmissionActionsTests: SwiftDataTestBase {
         XCTAssertEqual(drafts.count, 1)
     }
 
+    func test_terminalFailure_doesNotBlockLaterQueued_transmission() async throws {
+        let transport = TestTransport { _ in
+            return ChatResponse(
+                text: "ok",
+                statusCode: 200,
+                transmissionId: "tx-ok",
+                pending: false,
+                responseInfo: nil,
+                threadMemento: nil,
+                evidenceSummary: nil,
+                evidence: nil,
+                evidenceWarnings: nil,
+                outputEnvelope: nil
+            )
+        }
+
+        let thread = ConversationThread(title: "T1")
+        context.insert(thread)
+
+        let user1 = Message(thread: thread, creatorType: .user, text: "first")
+        let user2 = Message(thread: thread, creatorType: .user, text: "second")
+        thread.messages.append(user1)
+        thread.messages.append(user2)
+        context.insert(user1)
+        context.insert(user2)
+
+        let actions = TransmissionActions(modelContext: context, transport: transport)
+        actions.enqueueChat(thread: thread, userMessage: user1)
+        actions.enqueueChat(thread: thread, userMessage: user2)
+
+        let allTx = try context.fetch(FetchDescriptor<Transmission>())
+        XCTAssertEqual(allTx.count, 2)
+
+        let sorted = allTx.sorted { $0.createdAt < $1.createdAt }
+        let first = sorted[0]
+        let second = sorted[1]
+
+        first.status = .failed
+        first.lastError = "terminal_error"
+        second.status = .queued
+
+        try context.save()
+
+        await actions.processQueue()
+
+        let updated = try context.fetch(FetchDescriptor<Transmission>()).sorted { $0.createdAt < $1.createdAt }
+        XCTAssertEqual(updated[0].status, .failed)
+        XCTAssertEqual(updated[1].status, .succeeded)
+    }
+
     func test_retryFailed_flipsChatFailToChat_requeues_andThenSucceeds() async throws {
         // Arrange
         let transport = TestTransport { envelope in
             // First pass should be chat_fail and throw.
             if envelope.packetType == "chat_fail" {
-                throw TransportError.simulatedFailure
+                throw TransportError.httpStatus(
+                    HTTPErrorInfo(code: 422, body: "{\"error\":\"driver_block_enforcement_failed\"}")
+                )
             }
 
             // After retryFailed(), packetType should be flipped to chat and succeed.
@@ -130,6 +183,7 @@ final class TransmissionActionsTests: SwiftDataTestBase {
                 statusCode: 200,
                 transmissionId: "tx-retry",
                 pending: false,
+                responseInfo: nil,
                 threadMemento: nil,
                 evidenceSummary: nil,
                 evidence: nil,
@@ -183,7 +237,7 @@ final class TransmissionActionsTests: SwiftDataTestBase {
     func test_budgetExceeded_blocksAndPersists() async throws {
         // Arrange
         let transport = TestTransport { _ in
-            throw TransportError.httpStatus(code: 422, body: "{\"error\":\"budget_exceeded\"}")
+            throw TransportError.httpStatus(HTTPErrorInfo(code: 422, body: "{\"error\":\"budget_exceeded\"}"))
         }
 
         let thread = ConversationThread(title: "T1")
@@ -221,6 +275,7 @@ final class TransmissionActionsTests: SwiftDataTestBase {
                 statusCode: 200,
                 transmissionId: "tx",
                 pending: false,
+                responseInfo: nil,
                 threadMemento: nil,
                 evidenceSummary: nil,
                 evidence: nil,

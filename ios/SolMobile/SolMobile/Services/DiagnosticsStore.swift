@@ -8,13 +8,30 @@
 import Combine
 import Foundation
 
+struct DiagnosticsRedirectHop: Codable {
+    let from: String
+    let to: String
+    let statusCode: Int
+    let method: String?
+}
+
 struct DiagnosticsEntry: Identifiable, Codable {
     let id: UUID
     let timestamp: Date
+    let attemptId: String?
+    let threadId: String?
+    let localTransmissionId: String?
+    let transmissionId: String?
     let method: String
     let url: String
+    let responseURL: String?
+    let redirectChain: [DiagnosticsRedirectHop]
     let status: Int?
     let latencyMs: Int?
+    let retryableInferred: Bool?
+    let retryableSource: String?
+    let parsedErrorCode: String?
+    let traceRunId: String?
     let errorDomain: String?
     let errorCode: Int?
     let errorDescription: String?
@@ -29,8 +46,18 @@ struct DiagnosticsEntry: Identifiable, Codable {
         timestamp: Date = Date(),
         method: String,
         url: String,
+        responseURL: String?,
+        redirectChain: [DiagnosticsRedirectHop],
         status: Int?,
         latencyMs: Int?,
+        retryableInferred: Bool?,
+        retryableSource: String?,
+        parsedErrorCode: String?,
+        traceRunId: String?,
+        attemptId: String? = nil,
+        threadId: String? = nil,
+        localTransmissionId: String? = nil,
+        transmissionId: String? = nil,
         errorDomain: String?,
         errorCode: Int?,
         errorDescription: String?,
@@ -42,10 +69,20 @@ struct DiagnosticsEntry: Identifiable, Codable {
     ) {
         self.id = id
         self.timestamp = timestamp
+        self.attemptId = attemptId
+        self.threadId = threadId
+        self.localTransmissionId = localTransmissionId
+        self.transmissionId = transmissionId
         self.method = method
         self.url = url
+        self.responseURL = responseURL
+        self.redirectChain = redirectChain
         self.status = status
         self.latencyMs = latencyMs
+        self.retryableInferred = retryableInferred
+        self.retryableSource = retryableSource
+        self.parsedErrorCode = parsedErrorCode
+        self.traceRunId = traceRunId
         self.errorDomain = errorDomain
         self.errorCode = errorCode
         self.errorDescription = errorDescription
@@ -61,6 +98,19 @@ struct DiagnosticsEntry: Identifiable, Codable {
         lines.append("Time: \(DiagnosticsEntry.isoFormatter.string(from: timestamp))")
         lines.append("Request: \(method) \(url)")
 
+        if let attemptId {
+            lines.append("Attempt: \(attemptId)")
+        }
+        if let threadId {
+            lines.append("Thread: \(threadId)")
+        }
+        if let localTransmissionId {
+            lines.append("Local transmission: \(localTransmissionId)")
+        }
+        if let transmissionId {
+            lines.append("Transmission: \(transmissionId)")
+        }
+
         if let status {
             lines.append("Status: HTTP \(status)")
         } else {
@@ -69,6 +119,31 @@ struct DiagnosticsEntry: Identifiable, Codable {
 
         if let latencyMs {
             lines.append("Latency: \(latencyMs)ms")
+        }
+
+        if let responseURL {
+            lines.append("Final URL: \(responseURL)")
+        }
+
+        if !redirectChain.isEmpty {
+            lines.append("Redirects: \(redirectChain.count)")
+            for (idx, hop) in redirectChain.enumerated() {
+                let method = hop.method ?? "-"
+                lines.append("Redirect \(idx + 1): \(method) \(hop.from) -> \(hop.to) [HTTP \(hop.statusCode)]")
+            }
+        }
+
+        if let retryableInferred {
+            let source = retryableSource ?? "-"
+            lines.append("Retryable: \(retryableInferred) (\(source))")
+        }
+
+        if let parsedErrorCode {
+            lines.append("Error code: \(parsedErrorCode)")
+        }
+
+        if let traceRunId {
+            lines.append("Trace run: \(traceRunId)")
         }
 
         if let errorDescription {
@@ -137,8 +212,18 @@ final class DiagnosticsStore: ObservableObject {
     nonisolated func record(
         method: String,
         url: URL?,
+        responseURL: URL?,
+        redirectChain: [RedirectHop],
         status: Int?,
         latencyMs: Int?,
+        retryableInferred: Bool?,
+        retryableSource: String?,
+        parsedErrorCode: String?,
+        traceRunId: String?,
+        attemptId: String?,
+        threadId: String?,
+        localTransmissionId: String?,
+        transmissionId: String?,
         error: Error?,
         responseData: Data?,
         responseHeaders: [AnyHashable: Any]?,
@@ -147,6 +232,15 @@ final class DiagnosticsStore: ObservableObject {
         hadAuthorization: Bool
     ) {
         let urlString = DiagnosticsStore.redactedURLString(from: url)
+        let responseURLString = responseURL.map { DiagnosticsStore.redactedURLString(from: $0) }
+        let redirectEntries = redirectChain.map {
+            DiagnosticsRedirectHop(
+                from: DiagnosticsStore.redactedURLString(from: $0.from),
+                to: DiagnosticsStore.redactedURLString(from: $0.to),
+                statusCode: $0.statusCode,
+                method: $0.method
+            )
+        }
         let safeHeaders = DiagnosticsStore.safeResponseHeaders(from: responseHeaders)
         let redactedHeaders = DiagnosticsStore.redactedRequestHeaders(requestHeaders)
         let responseSnippet = DiagnosticsStore.responseSnippet(from: responseData, status: status)
@@ -158,8 +252,18 @@ final class DiagnosticsStore: ObservableObject {
             let entry = DiagnosticsEntry(
                 method: method,
                 url: urlString,
+                responseURL: responseURLString,
+                redirectChain: redirectEntries,
                 status: status,
                 latencyMs: latencyMs,
+                retryableInferred: retryableInferred,
+                retryableSource: retryableSource,
+                parsedErrorCode: parsedErrorCode,
+                traceRunId: traceRunId,
+                attemptId: attemptId,
+                threadId: threadId,
+                localTransmissionId: localTransmissionId,
+                transmissionId: transmissionId,
                 errorDomain: nsError?.domain,
                 errorCode: nsError?.code,
                 errorDescription: nsError?.localizedDescription,
@@ -272,7 +376,15 @@ final class DiagnosticsStore: ObservableObject {
 
     nonisolated private static func safeResponseHeaders(from headers: [AnyHashable: Any]?) -> [String: String] {
         guard let headers else { return [:] }
-        let allowed = ["server", "cf-ray", "fly-request-id", "content-type"]
+        let allowed = [
+            "server",
+            "cf-ray",
+            "fly-request-id",
+            "content-type",
+            "x-sol-trace-run-id",
+            "x-sol-transmission-id",
+            "retry-after",
+        ]
         var result: [String: String] = [:]
 
         for (key, value) in headers {

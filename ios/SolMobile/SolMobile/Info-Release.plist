@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.sollabshq.solmobile.cleanup</string>
+	</array>
+	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
+	<string>SolMobile needs calendar access to save events from conversations.</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>SolMobile needs reminders access to save tasks from conversations.</string>
+	<key>SOL_ENV</key>
+	<string>staging</string>
+	<key>SOLSERVER_BASE_URL_STAGING</key>
+	<string>https://solserver-staging.fly.dev</string>
+	<key>SOLSERVER_BASE_URL_PROD</key>
+	<string>https://solserver-prod.example.com</string>
+</dict>
+</plist>

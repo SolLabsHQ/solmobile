@@ -75,13 +75,19 @@ struct PacketEnvelope: Sendable {
     let payloadJson: String?
 }
 
+struct DiagnosticsContext: Sendable {
+    let attemptId: UUID
+    let threadId: UUID?
+    let localTransmissionId: UUID?
+}
+
 protocol ChatTransport {
-    func send(envelope: PacketEnvelope) async throws -> ChatResponse
+    func send(envelope: PacketEnvelope, diagnostics: DiagnosticsContext?) async throws -> ChatResponse
 }
 
 /// Optional capability: some transports can poll server-side delivery for pending (202) transmissions.
 protocol ChatTransportPolling: ChatTransport {
-    func poll(transmissionId: String) async throws -> ChatPollResponse
+    func poll(transmissionId: String, diagnostics: DiagnosticsContext?) async throws -> ChatPollResponse
 }
 
 // ThreadMemento decisions are user-controlled. In v0 they are applied server-side.
@@ -117,6 +123,7 @@ struct ChatPollResponse {
     let assistant: String?
     let serverStatus: String?
     let statusCode: Int
+    let responseInfo: ResponseInfo?
 
     let threadMemento: ThreadMementoDTO?
     
@@ -131,10 +138,33 @@ struct ChatPollResponse {
 
 enum TransportError: Error {
     case simulatedFailure
-    case httpStatus(code: Int, body: String)
+    case httpStatus(HTTPErrorInfo)
+    case insecureBaseURL(reason: String)
 
     /// The configured transport does not support a required optional capability.
     case unsupportedTransport(capability: String)
+}
+
+struct HTTPErrorInfo {
+    let code: Int
+    let body: String
+    let headers: [String: String]
+    let finalURL: URL?
+    let redirectChain: [RedirectHop]
+
+    init(
+        code: Int,
+        body: String,
+        headers: [String: String] = [:],
+        finalURL: URL? = nil,
+        redirectChain: [RedirectHop] = []
+    ) {
+        self.code = code
+        self.body = body
+        self.headers = headers
+        self.finalURL = finalURL
+        self.redirectChain = redirectChain
+    }
 }
 
 struct ChatResponse {
@@ -142,6 +172,7 @@ struct ChatResponse {
     let statusCode: Int
     let transmissionId: String?
     let pending: Bool
+    let responseInfo: ResponseInfo?
 
     let threadMemento: ThreadMementoDTO?
     
@@ -314,16 +345,24 @@ final class TransmissionActions {
 
     private func recordAttempt(
         tx: Transmission,
+        attemptId: UUID,
         statusCode: Int,
         outcome: DeliveryOutcome,
         errorMessage: String?,
-        transmissionId: String?
+        transmissionId: String?,
+        retryableInferred: Bool?,
+        retryAfterSeconds: Double?,
+        finalURL: String?
     ) {
         let attempt = DeliveryAttempt(
+            id: attemptId,
             statusCode: statusCode,
             outcome: outcome,
             errorMessage: errorMessage,
             transmissionId: transmissionId,
+            retryableInferred: retryableInferred,
+            retryAfterSeconds: retryAfterSeconds,
+            finalURL: finalURL,
             transmission: tx
         )
         tx.deliveryAttempts.append(attempt)
@@ -334,8 +373,10 @@ final class TransmissionActions {
         switch error {
         case TransportError.simulatedFailure:
             return 500
-        case let TransportError.httpStatus(code, _):
-            return code
+        case let TransportError.httpStatus(info):
+            return info.code
+        case TransportError.insecureBaseURL:
+            return -1
         default:
             return -1
         }
@@ -343,11 +384,43 @@ final class TransmissionActions {
 
     private func errorMessage(from error: Error) -> String {
         switch error {
-        case let TransportError.httpStatus(_, body):
-            return body.isEmpty ? String(describing: error) : body
+        case let TransportError.httpStatus(info):
+            return info.body.isEmpty ? String(describing: error) : info.body
+        case let TransportError.insecureBaseURL(reason):
+            return reason
         default:
             return String(describing: error)
         }
+    }
+
+    private func httpErrorInfo(from error: Error) -> HTTPErrorInfo? {
+        if case let TransportError.httpStatus(info) = error {
+            return info
+        }
+        return nil
+    }
+
+    private func retryDecision(for error: Error) -> RetryDecision {
+        if case TransportError.insecureBaseURL = error {
+            return RetryDecision(
+                retryable: false,
+                source: .parseFailedDefault,
+                retryAfterSeconds: nil,
+                errorCode: "insecure_base_url",
+                traceRunId: nil,
+                transmissionId: nil
+            )
+        }
+
+        if case TransportError.simulatedFailure = error {
+            return RetryPolicy.classify(statusCode: nil, body: nil, headers: nil, error: error)
+        }
+
+        if let info = httpErrorInfo(from: error) {
+            return RetryPolicy.classify(statusCode: info.code, body: info.body, headers: info.headers, error: error)
+        }
+
+        return RetryPolicy.classify(statusCode: nil, body: nil, headers: nil, error: error)
     }
 
     private func appendAssistantMessageIfPossible(
@@ -427,13 +500,18 @@ final class TransmissionActions {
         if budgetStore.isBlockedNow() {
             tx.status = .failed
             tx.lastError = "budget_exceeded"
+            let attemptId = UUID()
 
             recordAttempt(
                 tx: tx,
+                attemptId: attemptId,
                 statusCode: 422,
                 outcome: .failed,
                 errorMessage: "budget_exceeded(local)",
-                transmissionId: nil
+                transmissionId: nil,
+                retryableInferred: false,
+                retryAfterSeconds: nil,
+                finalURL: nil
             )
 
             outboxLog.info(
@@ -446,6 +524,13 @@ final class TransmissionActions {
         tx.status = .sending
         tx.lastError = nil
         outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(sel.txId), privacy: .public) to=sending")
+
+        let attemptId = UUID()
+        let diagnostics = DiagnosticsContext(
+            attemptId: attemptId,
+            threadId: sel.threadId,
+            localTransmissionId: sel.txId
+        )
 
         do {
             let userText = (sel.firstMessageId.flatMap { try? fetchMessage(id: $0)?.text }) ?? ""
@@ -464,7 +549,7 @@ final class TransmissionActions {
 
             outboxLog.info("processQueue run=\(runId, privacy: .public) event=send tx=\(short(sel.txId), privacy: .public)")
 
-            let response = try await transport.send(envelope: envelope)
+            let response = try await transport.send(envelope: envelope, diagnostics: diagnostics)
 
             outboxLog.info(
                 "processQueue run=\(runId, privacy: .public) event=transport_ok tx=\(short(sel.txId), privacy: .public) http=\(response.statusCode, privacy: .public) pending=\(response.pending, privacy: .public) ms=\(msSince(startNs), format: .fixed(precision: 1))"
@@ -478,10 +563,14 @@ final class TransmissionActions {
 
             recordAttempt(
                 tx: freshTx,
+                attemptId: attemptId,
                 statusCode: response.statusCode,
                 outcome: outcome,
                 errorMessage: nil,
-                transmissionId: response.transmissionId
+                transmissionId: response.transmissionId,
+                retryableInferred: nil,
+                retryAfterSeconds: nil,
+                finalURL: response.responseInfo?.finalURL?.absoluteString
             )
 
             if let m = response.threadMemento {
@@ -514,32 +603,40 @@ final class TransmissionActions {
 
             guard let freshTx = try? fetchTransmission(id: sel.txId) else { return }
 
+            let decision = retryDecision(for: error)
             let code = statusCode(from: error)
             let msg = errorMessage(from: error)
             if let info = budgetExceededInfo(from: error) {
                 budgetStore.applyBudgetExceeded(blockedUntil: info.blockedUntil)
             }
 
+            let errorInfo = httpErrorInfo(from: error)
+
             recordAttempt(
                 tx: freshTx,
+                attemptId: attemptId,
                 statusCode: code,
                 outcome: .failed,
                 errorMessage: msg,
-                transmissionId: nil
+                transmissionId: decision.transmissionId,
+                retryableInferred: decision.retryable,
+                retryAfterSeconds: decision.retryAfterSeconds,
+                finalURL: errorInfo?.finalURL?.absoluteString
             )
 
-            freshTx.status = .failed
+            freshTx.status = decision.retryable ? .queued : .failed
             freshTx.lastError = msg
 
-            outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(sel.txId), privacy: .public) to=failed http=\(code, privacy: .public)")
+            let outcome = decision.retryable ? "queued" : "failed"
+            outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(sel.txId), privacy: .public) to=\(outcome, privacy: .public) http=\(code, privacy: .public)")
         }
 
         try? modelContext.save()
     }
 
     private func budgetExceededInfo(from error: Error) -> BudgetExceededInfo? {
-        guard case let TransportError.httpStatus(code, body) = error, code == 422 else { return nil }
-        return budgetStore.parseBudgetExceeded(from: body)
+        guard case let TransportError.httpStatus(info) = error, info.code == 422 else { return nil }
+        return budgetStore.parseBudgetExceeded(from: info.body)
     }
 
     private func enforceTerminalConditions(
@@ -602,9 +699,11 @@ final class TransmissionActions {
         attemptCount: Int,
         now: Date
     ) -> Bool {
-        if let lastAt = attempts.last?.createdAt {
-            let wait = backoffSeconds(forAttemptCount: attemptCount)
-            let nextAt = lastAt.addingTimeInterval(wait)
+        if let last = attempts.last {
+            let backoff = backoffSeconds(forAttemptCount: attemptCount)
+            let retryAfter = last.retryAfterSeconds ?? 0
+            let wait = max(backoff, retryAfter)
+            let nextAt = last.createdAt.addingTimeInterval(wait)
 
             if now < nextAt {
                 // Respect backoff: keep queued and exit quietly.
@@ -646,6 +745,13 @@ final class TransmissionActions {
         tx.lastError = nil
         outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(txId), privacy: .public) to=sending reason=poll")
 
+        let attemptId = UUID()
+        let diagnostics = DiagnosticsContext(
+            attemptId: attemptId,
+            threadId: threadId,
+            localTransmissionId: txId
+        )
+
         do {
             guard let polling = transport as? any ChatTransportPolling else {
                 outboxLog.error("processQueue run=\(runId, privacy: .public) event=poll_unavailable tx=\(short(txId), privacy: .public)")
@@ -655,17 +761,21 @@ final class TransmissionActions {
                 return true
             }
 
-            let poll = try await polling.poll(transmissionId: serverTxId)
+            let poll = try await polling.poll(transmissionId: serverTxId, diagnostics: diagnostics)
 
             guard let freshTx = try? fetchTransmission(id: txId) else { return true }
 
             // Record a poll attempt so backoff/TTL derivation stays honest.
             recordAttempt(
                 tx: freshTx,
+                attemptId: attemptId,
                 statusCode: poll.statusCode,
                 outcome: poll.pending ? .pending : .succeeded,
                 errorMessage: nil,
-                transmissionId: serverTxId
+                transmissionId: serverTxId,
+                retryableInferred: nil,
+                retryAfterSeconds: nil,
+                finalURL: poll.responseInfo?.finalURL?.absoluteString
             )
 
             if let m = poll.threadMemento {
@@ -699,18 +809,25 @@ final class TransmissionActions {
 
             guard let freshTx = try? fetchTransmission(id: txId) else { return true }
 
+            let decision = retryDecision(for: error)
+            let errorInfo = httpErrorInfo(from: error)
             recordAttempt(
                 tx: freshTx,
-                statusCode: -1,
+                attemptId: attemptId,
+                statusCode: statusCode(from: error),
                 outcome: .failed,
-                errorMessage: String(describing: error),
-                transmissionId: serverTxId
+                errorMessage: errorMessage(from: error),
+                transmissionId: decision.transmissionId ?? serverTxId,
+                retryableInferred: decision.retryable,
+                retryAfterSeconds: decision.retryAfterSeconds,
+                finalURL: errorInfo?.finalURL?.absoluteString
             )
 
-            freshTx.status = .failed
-            freshTx.lastError = String(describing: error)
+            freshTx.status = decision.retryable ? .queued : .failed
+            freshTx.lastError = errorMessage(from: error)
 
-            outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(txId), privacy: .public) to=failed reason=poll_failed")
+            let outcome = decision.retryable ? "queued" : "failed"
+            outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(txId), privacy: .public) to=\(outcome, privacy: .public) reason=poll_failed")
             return true
         }
     }

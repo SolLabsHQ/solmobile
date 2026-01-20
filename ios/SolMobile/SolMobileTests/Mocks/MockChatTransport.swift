@@ -51,7 +51,7 @@ final class MockChatTransport: ChatTransportPolling, ChatTransportMementoDecisio
 
     private(set) var decideCalls: [(threadId: String, mementoId: String, decision: SolMobile.ThreadMementoDecision)] = []
 
-    func send(envelope: PacketEnvelope) async throws -> ChatResponse {
+    func send(envelope: PacketEnvelope, diagnostics: DiagnosticsContext? = nil) async throws -> ChatResponse {
         sendCalls.append(envelope)
         guard !sendModes.isEmpty else {
             return ChatResponse(
@@ -59,6 +59,7 @@ final class MockChatTransport: ChatTransportPolling, ChatTransportMementoDecisio
                 statusCode: 200,
                 transmissionId: "tx-default",
                 pending: false,
+                responseInfo: nil,
                 threadMemento: nil,
                 evidenceSummary: nil,
                 evidence: nil,
@@ -75,6 +76,7 @@ final class MockChatTransport: ChatTransportPolling, ChatTransportMementoDecisio
                 statusCode: status,
                 transmissionId: txId,
                 pending: pending,
+                responseInfo: nil,
                 threadMemento: nil,
                 evidenceSummary: nil,
                 evidence: nil,
@@ -87,6 +89,7 @@ final class MockChatTransport: ChatTransportPolling, ChatTransportMementoDecisio
                 statusCode: status,
                 transmissionId: txId,
                 pending: true,
+                responseInfo: nil,
                 threadMemento: nil,
                 evidenceSummary: nil,
                 evidence: nil,
@@ -98,7 +101,7 @@ final class MockChatTransport: ChatTransportPolling, ChatTransportMementoDecisio
         }
     }
 
-    func poll(transmissionId: String) async throws -> ChatPollResponse {
+    func poll(transmissionId: String, diagnostics: DiagnosticsContext? = nil) async throws -> ChatPollResponse {
         pollCalls.append(transmissionId)
         guard !pollModes.isEmpty else {
             return ChatPollResponse(
@@ -106,6 +109,7 @@ final class MockChatTransport: ChatTransportPolling, ChatTransportMementoDecisio
                 assistant: "(default poll)",
                 serverStatus: "completed",
                 statusCode: 200,
+                responseInfo: nil,
                 threadMemento: nil,
                 evidenceSummary: nil,
                 evidence: nil,
@@ -122,6 +126,7 @@ final class MockChatTransport: ChatTransportPolling, ChatTransportMementoDecisio
                 assistant: text,
                 serverStatus: "completed",
                 statusCode: status,
+                responseInfo: nil,
                 threadMemento: nil,
                 evidenceSummary: nil,
                 evidence: nil,
@@ -134,6 +139,7 @@ final class MockChatTransport: ChatTransportPolling, ChatTransportMementoDecisio
                 assistant: nil,
                 serverStatus: "created",
                 statusCode: 200,
+                responseInfo: nil,
                 threadMemento: nil,
                 evidenceSummary: nil,
                 evidence: nil,
