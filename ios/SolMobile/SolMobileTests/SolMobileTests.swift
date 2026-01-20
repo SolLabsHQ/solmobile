@@ -23,5 +23,6 @@ final class SolMobileSmokeTests: XCTestCase {
         _ = Packet.self
         _ = Transmission.self
         _ = DeliveryAttempt.self
+        _ = ThreadReadState.self
     }
 }

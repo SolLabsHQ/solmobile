@@ -15,36 +15,32 @@ import os
 
 // MARK: - Small helpers
 
-private func msSince(_ startNs: UInt64) -> Double {
+nonisolated private func msSince(_ startNs: UInt64) -> Double {
     let endNs = DispatchTime.now().uptimeNanoseconds
     return Double(endNs &- startNs) / 1_000_000.0
 }
 
-private func short(_ id: UUID) -> String {
+nonisolated private func short(_ id: UUID) -> String {
     String(id.uuidString.prefix(8))
 }
 
-private func shortOrDash(_ s: String?) -> String {
+nonisolated private func shortOrDash(_ s: String?) -> String {
     (s?.isEmpty == false) ? s! : "-"
 }
 
-private let timeWithSecondsFormatter: DateFormatter = {
+nonisolated private func timeWithSeconds(_ d: Date) -> String {
     let f = DateFormatter()
     f.locale = .autoupdatingCurrent
     f.timeZone = .autoupdatingCurrent
     f.dateFormat = "h:mm:ss a"
-    return f
-}()
-
-private func timeWithSeconds(_ d: Date) -> String {
-    timeWithSecondsFormatter.string(from: d)
+    return f.string(from: d)
 }
 
 // MARK: - ThreadMemento formatting
 
 /// ThreadMemento is a navigation artifact returned by SolServer.
 /// It is not durable knowledge; the client may choose to Accept / Decline / Revoke.
-private enum ThreadMementoFormatter {
+nonisolated private enum ThreadMementoFormatter {
     static func format(_ m: ThreadMementoDTO) -> String {
         func join(_ xs: [String]) -> String {
             guard !xs.isEmpty else { return "(none)" }
@@ -71,6 +67,7 @@ struct PacketEnvelope: Sendable {
     let threadId: UUID
     let messageIds: [UUID]
     let messageText: String
+    let requestId: String
     let contextRefsJson: String?
     let payloadJson: String?
 }
@@ -189,23 +186,38 @@ struct ChatResponse {
 
 // MARK: - Outbox processor
 
-@MainActor
-final class TransmissionActions {
+nonisolated final class TransmissionActions {
 
     private let outboxLog = Logger(subsystem: "com.sollabshq.solmobile", category: "Outbox")
-    private let budgetStore = BudgetStore.shared
 
     private let modelContext: ModelContext
     private let transport: any ChatTransport
+    private let statusWatcher: TransmissionStatusWatcher?
 
     // v0 retry derivation (local-first): derived from DeliveryAttempt ledger.
-    private let pendingTTLSeconds: TimeInterval = 30
-    private let maxAttempts: Int = 6
+    private let maxSendAttempts: Int = 6
     private let backoffCapSeconds: TimeInterval = 10
+    private let pendingFastIntervalSeconds: TimeInterval = 2
+    private let pendingLinearStartSeconds: TimeInterval = 10
+    private let pendingLinearStepSeconds: TimeInterval = 2
+    private let pendingSlowThresholdSeconds: TimeInterval = 60
+    private let pendingSlowIntervalSeconds: TimeInterval = 20
+    private let sendingStaleThresholdSeconds: TimeInterval = 60
 
-    init(modelContext: ModelContext, transport: (any ChatTransport)? = nil) {
+    init(
+        modelContext: ModelContext,
+        transport: any ChatTransport,
+        statusWatcher: TransmissionStatusWatcher? = nil
+    ) {
         self.modelContext = modelContext
-        self.transport = transport ?? SolServerClient()
+        self.transport = transport
+        if let statusWatcher {
+            self.statusWatcher = statusWatcher
+        } else if let polling = transport as? any ChatTransportPolling {
+            self.statusWatcher = PollingTransmissionStatusWatcher(transport: polling)
+        } else {
+            self.statusWatcher = nil
+        }
     }
 
     private func backoffSeconds(forAttemptCount attemptCount: Int) -> TimeInterval {
@@ -217,19 +229,44 @@ final class TransmissionActions {
     }
 
     private func pendingSinceIfActive(_ attempts: [DeliveryAttempt]) -> Date? {
-        // Pending is "active" only if the last attempt outcome is pending.
-        guard let last = attempts.last, last.outcome == .pending else { return nil }
+        guard let last = attempts.last else { return nil }
 
-        // Find the start of the trailing contiguous pending streak.
-        var since = last.createdAt
-        for a in attempts.reversed() {
-            if a.outcome == .pending {
-                since = a.createdAt
-            } else {
-                break
+        if last.outcome == .pending {
+            // Find the start of the trailing contiguous pending streak.
+            var since = last.createdAt
+            for a in attempts.reversed() {
+                if a.outcome == .pending {
+                    since = a.createdAt
+                } else {
+                    break
+                }
             }
+            return since
         }
-        return since
+
+        if last.source == .poll,
+           last.outcome == .failed,
+           last.retryableInferred == true {
+            if let lastPending = attempts.reversed().first(where: { $0.outcome == .pending }) {
+                return lastPending.createdAt
+            }
+            return last.createdAt
+        }
+
+        return nil
+    }
+
+    private func activePollAttempt(_ attempts: [DeliveryAttempt]) -> DeliveryAttempt? {
+        guard let last = attempts.last else { return nil }
+        if last.outcome == .pending {
+            return last
+        }
+        if last.source == .poll,
+           last.outcome == .failed,
+           last.retryableInferred == true {
+            return last
+        }
+        return nil
     }
 
     func enqueueChat(thread: ConversationThread, userMessage: Message) {
@@ -238,9 +275,22 @@ final class TransmissionActions {
             .lowercased()
             .hasPrefix("/fail")
 
-        outboxLog.info("enqueueChat thread=\(short(thread.id), privacy: .public) msg=\(short(userMessage.id), privacy: .public) shouldFail=\(shouldFail, privacy: .public)")
+        enqueueChat(
+            threadId: thread.id,
+            messageId: userMessage.id,
+            messageText: userMessage.text,
+            shouldFail: shouldFail
+        )
+    }
 
-        let packet = Packet(threadId: thread.id, messageIds: [userMessage.id])
+    func enqueueChat(threadId: UUID, messageId: UUID, messageText: String?, shouldFail: Bool) {
+        outboxLog.info("enqueueChat thread=\(short(threadId), privacy: .public) msg=\(short(messageId), privacy: .public) shouldFail=\(shouldFail, privacy: .public)")
+
+        let packet = Packet(
+            threadId: threadId,
+            messageIds: [messageId],
+            messageText: messageText
+        )
         packet.packetType = shouldFail ? "chat_fail" : "chat"
 
         outboxLog.info("enqueueChat packet=\(short(packet.id), privacy: .public) type=\(packet.packetType, privacy: .public)")
@@ -255,7 +305,7 @@ final class TransmissionActions {
         try? modelContext.save()
     }
 
-    func processQueue() async {
+    func processQueue(pollLimit: Int = 1, pollFirst: Bool = true) async {
         let runId = String(UUID().uuidString.prefix(8))
         outboxLog.info("processQueue run=\(runId, privacy: .public) event=start")
 
@@ -263,6 +313,49 @@ final class TransmissionActions {
             outboxLog.info("processQueue run=\(runId, privacy: .public) event=end")
         }
 
+        recoverStaleSending(runId: runId, now: Date())
+
+        if pollFirst {
+            await pollPending(runId: runId, limit: pollLimit)
+        }
+        await sendNextQueued(runId: runId)
+        let trailingPollLimit = pollFirst ? 1 : pollLimit
+        await pollPending(runId: runId, limit: trailingPollLimit)
+    }
+
+    // Poll up to N pending transmissions (does not block sending).
+    private func pollPending(runId: String, limit: Int) async {
+        guard let pending = fetchPendingSelections(runId: runId, limit: limit), !pending.isEmpty else {
+            return
+        }
+
+        for sel in pending {
+            guard let tx = try? fetchTransmission(id: sel.txId) else { continue }
+            let now = Date()
+            let attempts = sortedAttempts(tx.deliveryAttempts)
+
+            guard let pendingSince = pendingSinceIfActive(attempts) else {
+                recoverPendingWithoutActiveAttempt(runId: runId, tx: tx, attemptCount: attempts.count)
+                continue
+            }
+
+            if shouldRespectPollBackoffAndExit(
+                runId: runId,
+                txId: sel.txId,
+                attempts: attempts,
+                pendingSince: pendingSince,
+                now: now
+            ) {
+                continue
+            }
+
+            await pollOnce(runId: runId, sel: sel, attempts: attempts)
+        }
+
+        try? modelContext.save()
+    }
+
+    private func sendNextQueued(runId: String) async {
         guard let sel = fetchNextQueuedSelection(runId: runId) else {
             return
         }
@@ -278,20 +371,16 @@ final class TransmissionActions {
 
         let now = Date()
         let attempts = sortedAttempts(tx.deliveryAttempts)
-        let attemptCount = attempts.count
-
-        // If the last attempt is pending and we have a server transmissionId, poll instead of re-sending.
-        if await handlePendingPollIfNeeded(runId: runId, txId: sel.txId, threadId: sel.threadId, attempts: attempts) {
-            return
-        }
+        let sendAttempts = attempts.filter { $0.source == .send }
+        let sendAttemptCount = sendAttempts.count
 
         // Client-side terminal conditions.
-        if enforceTerminalConditions(runId: runId, tx: tx, txId: sel.txId, attempts: attempts, attemptCount: attemptCount, now: now) {
+        if enforceSendAttemptLimit(runId: runId, tx: tx, txId: sel.txId, sendAttemptCount: sendAttemptCount) {
             return
         }
 
         // Respect backoff (quiet exit, remain queued).
-        if shouldRespectBackoffAndExit(runId: runId, txId: sel.txId, attempts: attempts, attemptCount: attemptCount, now: now) {
+        if shouldRespectSendBackoffAndExit(runId: runId, txId: sel.txId, sendAttempts: sendAttempts, sendAttemptCount: sendAttemptCount, now: now) {
             return
         }
 
@@ -307,6 +396,13 @@ final class TransmissionActions {
         let threadId: UUID
         let messageIds: [UUID]
         let firstMessageId: UUID?
+        let messageText: String?
+    }
+
+    private struct PendingSelection {
+        let txId: UUID
+        let packetId: UUID
+        let threadId: UUID
     }
 
     private func fetchNextQueuedSelection(runId: String) -> QueueSelection? {
@@ -316,6 +412,11 @@ final class TransmissionActions {
             sortBy: [SortDescriptor(\Transmission.createdAt, order: .forward)]
         )
 
+        let sendingRaw = TransmissionStatus.sending.rawValue
+        let sendingDescriptor = FetchDescriptor<Transmission>(
+            predicate: #Predicate { $0.statusRaw == sendingRaw }
+        )
+
         guard let queued = try? modelContext.fetch(descriptor) else {
             outboxLog.error("processQueue run=\(runId, privacy: .public) event=fetch_failed scope=queued")
             return nil
@@ -323,10 +424,17 @@ final class TransmissionActions {
 
         outboxLog.info("processQueue run=\(runId, privacy: .public) event=queued_count count=\(queued.count, privacy: .public)")
 
-        guard let tx = queued.first else {
+        guard let sending = try? modelContext.fetch(sendingDescriptor) else {
+            outboxLog.error("processQueue run=\(runId, privacy: .public) event=fetch_failed scope=sending")
+            return nil
+        }
+
+        let sendingThreadIds = Set(sending.map { $0.packet.threadId })
+
+        guard let tx = queued.first(where: { !sendingThreadIds.contains($0.packet.threadId) }) else {
             outboxLog.info("processQueue run=\(runId, privacy: .public) event=empty")
             return nil
-        } // v0: one in-flight at a time
+        } // v0: one in-flight send per thread
 
         let packet = tx.packet
         return QueueSelection(
@@ -335,12 +443,69 @@ final class TransmissionActions {
             packetType: packet.packetType,
             threadId: packet.threadId,
             messageIds: packet.messageIds,
-            firstMessageId: packet.messageIds.first
+            firstMessageId: packet.messageIds.first,
+            messageText: packet.messageText
         )
+    }
+
+    private func fetchPendingSelections(runId: String, limit: Int) -> [PendingSelection]? {
+        guard limit > 0 else { return [] }
+
+        let pendingRaw = TransmissionStatus.pending.rawValue
+        let descriptor = FetchDescriptor<Transmission>(
+            predicate: #Predicate { $0.statusRaw == pendingRaw },
+            sortBy: [SortDescriptor(\Transmission.createdAt, order: .forward)]
+        )
+
+        guard let pending = try? modelContext.fetch(descriptor) else {
+            outboxLog.error("processQueue run=\(runId, privacy: .public) event=fetch_failed scope=pending")
+            return nil
+        }
+
+        if pending.isEmpty {
+            return []
+        }
+
+        return pending.prefix(limit).map { tx in
+            PendingSelection(txId: tx.id, packetId: tx.packet.id, threadId: tx.packet.threadId)
+        }
+    }
+
+    private func recoverStaleSending(runId: String, now: Date) {
+        let sendingRaw = TransmissionStatus.sending.rawValue
+        let descriptor = FetchDescriptor<Transmission>(
+            predicate: #Predicate { $0.statusRaw == sendingRaw },
+            sortBy: [SortDescriptor(\Transmission.createdAt, order: .forward)]
+        )
+
+        guard let sending = try? modelContext.fetch(descriptor) else {
+            outboxLog.error("processQueue run=\(runId, privacy: .public) event=fetch_failed scope=sending")
+            return
+        }
+
+        let stale = sending.filter { now.timeIntervalSince($0.createdAt) >= sendingStaleThresholdSeconds }
+        guard !stale.isEmpty else { return }
+
+        for tx in stale {
+            tx.status = .queued
+            tx.lastError = "Recovered stale sending transmission"
+            outboxLog.info("processQueue run=\(runId, privacy: .public) event=sending_recovered tx=\(short(tx.id), privacy: .public)")
+        }
+
+        try? modelContext.save()
     }
 
     private func sortedAttempts(_ attempts: [DeliveryAttempt]) -> [DeliveryAttempt] {
         attempts.sorted { $0.createdAt < $1.createdAt }
+    }
+
+    private func ensureRequestId(for tx: Transmission) -> (String, Bool) {
+        let trimmed = tx.requestId.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            tx.requestId = tx.packet.id.uuidString
+            return (tx.requestId, true)
+        }
+        return (tx.requestId, false)
     }
 
     private func recordAttempt(
@@ -348,6 +513,7 @@ final class TransmissionActions {
         attemptId: UUID,
         statusCode: Int,
         outcome: DeliveryOutcome,
+        source: DeliveryAttemptSource,
         errorMessage: String?,
         transmissionId: String?,
         retryableInferred: Bool?,
@@ -358,6 +524,7 @@ final class TransmissionActions {
             id: attemptId,
             statusCode: statusCode,
             outcome: outcome,
+            source: source,
             errorMessage: errorMessage,
             transmissionId: transmissionId,
             retryableInferred: retryableInferred,
@@ -366,6 +533,12 @@ final class TransmissionActions {
             transmission: tx
         )
         tx.deliveryAttempts.append(attempt)
+        tx.deliveryAttempts.sort { lhs, rhs in
+            if lhs.createdAt == rhs.createdAt {
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
+            return lhs.createdAt < rhs.createdAt
+        }
         modelContext.insert(attempt)
     }
 
@@ -496,8 +669,7 @@ final class TransmissionActions {
 
         let startNs = DispatchTime.now().uptimeNanoseconds
 
-        budgetStore.refreshIfExpired()
-        if budgetStore.isBlockedNow() {
+        if await isBudgetBlockedNow() {
             tx.status = .failed
             tx.lastError = "budget_exceeded"
             let attemptId = UUID()
@@ -507,6 +679,7 @@ final class TransmissionActions {
                 attemptId: attemptId,
                 statusCode: 422,
                 outcome: .failed,
+                source: .send,
                 errorMessage: "budget_exceeded(local)",
                 transmissionId: nil,
                 retryableInferred: false,
@@ -533,16 +706,47 @@ final class TransmissionActions {
         )
 
         do {
-            let userText = (sel.firstMessageId.flatMap { try? fetchMessage(id: $0)?.text }) ?? ""
+            let rawText = sel.messageText
+                ?? (sel.firstMessageId.flatMap { try? fetchMessage(id: $0)?.text })
+                ?? ""
+            let trimmedText = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmedText.isEmpty {
+                tx.status = .failed
+                tx.lastError = "Missing message text for send"
+
+                recordAttempt(
+                    tx: tx,
+                    attemptId: attemptId,
+                    statusCode: -1,
+                    outcome: .failed,
+                    source: .send,
+                    errorMessage: tx.lastError,
+                    transmissionId: nil,
+                    retryableInferred: false,
+                    retryAfterSeconds: nil,
+                    finalURL: nil
+                )
+
+                outboxLog.error("processQueue run=\(runId, privacy: .public) event=missing_text tx=\(short(sel.txId), privacy: .public)")
+                try? modelContext.save()
+                return
+            }
+
+            let userText = rawText
 
             outboxLog.debug("processQueue run=\(runId, privacy: .public) event=context tx=\(short(sel.txId), privacy: .public) userTextLen=\(userText.count, privacy: .public)")
 
+            let (requestId, didBackfill) = ensureRequestId(for: tx)
+            if didBackfill {
+                try? modelContext.save()
+            }
             let envelope = PacketEnvelope(
                 packetId: sel.packetId,
                 packetType: sel.packetType,
                 threadId: sel.threadId,
                 messageIds: sel.messageIds,
                 messageText: userText,
+                requestId: requestId,
                 contextRefsJson: nil,
                 payloadJson: nil
             )
@@ -566,6 +770,7 @@ final class TransmissionActions {
                 attemptId: attemptId,
                 statusCode: response.statusCode,
                 outcome: outcome,
+                source: .send,
                 errorMessage: nil,
                 transmissionId: response.transmissionId,
                 retryableInferred: nil,
@@ -578,8 +783,18 @@ final class TransmissionActions {
             }
 
             if response.pending || response.statusCode == 202 {
-                freshTx.status = .queued
-                outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(sel.txId), privacy: .public) to=queued reason=pending")
+                freshTx.status = .pending
+                outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(sel.txId), privacy: .public) to=pending reason=pending")
+                try? modelContext.save()
+
+                let pendingSelection = PendingSelection(
+                    txId: sel.txId,
+                    packetId: sel.packetId,
+                    threadId: sel.threadId
+                )
+                let pendingAttempts = sortedAttempts(freshTx.deliveryAttempts)
+                await pollOnce(runId: runId, sel: pendingSelection, attempts: pendingAttempts)
+                try? modelContext.save()
                 return
             }
 
@@ -606,8 +821,8 @@ final class TransmissionActions {
             let decision = retryDecision(for: error)
             let code = statusCode(from: error)
             let msg = errorMessage(from: error)
-            if let info = budgetExceededInfo(from: error) {
-                budgetStore.applyBudgetExceeded(blockedUntil: info.blockedUntil)
+            if let info = await budgetExceededInfo(from: error) {
+                await applyBudgetExceeded(info)
             }
 
             let errorInfo = httpErrorInfo(from: error)
@@ -617,6 +832,7 @@ final class TransmissionActions {
                 attemptId: attemptId,
                 statusCode: code,
                 outcome: .failed,
+                source: .send,
                 errorMessage: msg,
                 transmissionId: decision.transmissionId,
                 retryableInferred: decision.retryable,
@@ -634,82 +850,110 @@ final class TransmissionActions {
         try? modelContext.save()
     }
 
-    private func budgetExceededInfo(from error: Error) -> BudgetExceededInfo? {
+    private func budgetExceededInfo(from error: Error) async -> BudgetExceededInfo? {
         guard case let TransportError.httpStatus(info) = error, info.code == 422 else { return nil }
-        return budgetStore.parseBudgetExceeded(from: info.body)
+        return await MainActor.run {
+            BudgetStore.shared.parseBudgetExceeded(from: info.body)
+        }
     }
 
-    private func enforceTerminalConditions(
+    private func isBudgetBlockedNow() async -> Bool {
+        await MainActor.run {
+            BudgetStore.shared.isBlockedNow()
+        }
+    }
+
+    private func applyBudgetExceeded(_ info: BudgetExceededInfo) async {
+        await MainActor.run {
+            BudgetStore.shared.applyBudgetExceeded(blockedUntil: info.blockedUntil)
+        }
+    }
+
+    private func enforceSendAttemptLimit(
         runId: String,
         tx: Transmission,
         txId: UUID,
-        attempts: [DeliveryAttempt],
-        attemptCount: Int,
-        now: Date
+        sendAttemptCount: Int
     ) -> Bool {
-        if attemptCount >= maxAttempts {
-            // Client-side terminal: too many attempts.
+        if sendAttemptCount >= maxSendAttempts {
+            // Client-side terminal: too many send attempts.
             tx.status = .failed
-            tx.lastError = "Max retry attempts exceeded (\(maxAttempts))"
+            tx.lastError = "Max retry attempts exceeded (\(maxSendAttempts))"
 
-            let attempt = DeliveryAttempt(
+            recordAttempt(
+                tx: tx,
+                attemptId: UUID(),
                 statusCode: -1,
                 outcome: .failed,
+                source: .terminal,
                 errorMessage: tx.lastError,
                 transmissionId: nil,
-                transmission: tx
+                retryableInferred: false,
+                retryAfterSeconds: nil,
+                finalURL: nil
             )
-            tx.deliveryAttempts.append(attempt)
-            modelContext.insert(attempt)
 
-            outboxLog.error("processQueue run=\(runId, privacy: .public) event=terminal_max_attempts tx=\(short(txId), privacy: .public) attempts=\(attemptCount, privacy: .public)")
+            outboxLog.error("processQueue run=\(runId, privacy: .public) event=terminal_max_attempts tx=\(short(txId), privacy: .public) attempts=\(sendAttemptCount, privacy: .public)")
             return true
-        }
-
-        if let pendingSince = pendingSinceIfActive(attempts) {
-            let age = now.timeIntervalSince(pendingSince)
-
-            if age > pendingTTLSeconds {
-                // Client-side terminal: pending too long.
-                tx.status = .failed
-                tx.lastError = "Timed out waiting for delivery (pending > \(Int(pendingTTLSeconds))s)"
-
-                let attempt = DeliveryAttempt(
-                    statusCode: 408,
-                    outcome: .failed,
-                    errorMessage: tx.lastError,
-                    transmissionId: nil,
-                    transmission: tx
-                )
-                tx.deliveryAttempts.append(attempt)
-                modelContext.insert(attempt)
-
-                outboxLog.error("processQueue run=\(runId, privacy: .public) event=terminal_pending_ttl tx=\(short(txId), privacy: .public) ageSec=\(age, privacy: .public) ttlSec=\(self.pendingTTLSeconds, privacy: .public)")
-                return true
-            }
         }
 
         return false
     }
 
-    private func shouldRespectBackoffAndExit(
+    private func shouldRespectSendBackoffAndExit(
+        runId: String,
+        txId: UUID,
+        sendAttempts: [DeliveryAttempt],
+        sendAttemptCount: Int,
+        now: Date
+    ) -> Bool {
+        guard let last = sendAttempts.last else { return false }
+
+        let backoff = backoffSeconds(forAttemptCount: sendAttemptCount)
+        let retryAfter = last.retryAfterSeconds ?? 0
+        let wait = max(backoff, retryAfter)
+        let nextAt = last.createdAt.addingTimeInterval(wait)
+
+        if now < nextAt {
+            // Respect backoff: keep queued and exit quietly.
+            outboxLog.info("processQueue run=\(runId, privacy: .public) event=backoff tx=\(short(txId), privacy: .public) waitSec=\(wait, privacy: .public) nextAt=\(timeWithSeconds(nextAt), privacy: .public)")
+            return true
+        }
+
+        return false
+    }
+
+    private func pollIntervalSeconds(pendingAge: TimeInterval, pollAttemptCount: Int) -> TimeInterval {
+        if pendingAge <= pendingLinearStartSeconds {
+            return pendingFastIntervalSeconds
+        }
+
+        if pendingAge <= pendingSlowThresholdSeconds {
+            let steps = max(0, pollAttemptCount - 1)
+            let interval = pendingFastIntervalSeconds + (TimeInterval(steps) * pendingLinearStepSeconds)
+            return min(interval, pendingSlowIntervalSeconds)
+        }
+
+        return pendingSlowIntervalSeconds
+    }
+
+    private func shouldRespectPollBackoffAndExit(
         runId: String,
         txId: UUID,
         attempts: [DeliveryAttempt],
-        attemptCount: Int,
+        pendingSince: Date,
         now: Date
     ) -> Bool {
-        if let last = attempts.last {
-            let backoff = backoffSeconds(forAttemptCount: attemptCount)
-            let retryAfter = last.retryAfterSeconds ?? 0
-            let wait = max(backoff, retryAfter)
-            let nextAt = last.createdAt.addingTimeInterval(wait)
+        let pollAttempts = attempts.filter { $0.source == .poll }
+        guard let lastPoll = pollAttempts.last else { return false }
 
-            if now < nextAt {
-                // Respect backoff: keep queued and exit quietly.
-                outboxLog.info("processQueue run=\(runId, privacy: .public) event=backoff tx=\(short(txId), privacy: .public) waitSec=\(wait, privacy: .public) nextAt=\(timeWithSeconds(nextAt), privacy: .public)")
-                return true
-            }
+        let pendingAge = now.timeIntervalSince(pendingSince)
+        let wait = pollIntervalSeconds(pendingAge: pendingAge, pollAttemptCount: pollAttempts.count)
+        let nextAt = lastPoll.createdAt.addingTimeInterval(wait)
+
+        if now < nextAt {
+            outboxLog.info("processQueue run=\(runId, privacy: .public) event=poll_backoff tx=\(short(txId), privacy: .public) waitSec=\(wait, privacy: .public) nextAt=\(timeWithSeconds(nextAt), privacy: .public)")
+            return true
         }
 
         return false
@@ -723,54 +967,51 @@ final class TransmissionActions {
         outboxLog.info("processQueue run=\(runId, privacy: .public) event=memento_draft_saved tx=\(short(txId), privacy: .public) memento=\(m.id, privacy: .public) via=\(via, privacy: .public)")
     }
 
-    private func handlePendingPollIfNeeded(
+    private func pollOnce(
         runId: String,
-        txId: UUID,
-        threadId: UUID,
+        sel: PendingSelection,
         attempts: [DeliveryAttempt]
-    ) async -> Bool {
-        guard let last = attempts.last,
-              last.outcome == .pending,
+    ) async {
+        guard let last = activePollAttempt(attempts),
               let serverTxId = last.transmissionId,
               !serverTxId.isEmpty else {
-            return false
+            if let tx = try? fetchTransmission(id: sel.txId) {
+                tx.status = .failed
+                tx.lastError = "Missing server transmission id for pending poll"
+                outboxLog.error("processQueue run=\(runId, privacy: .public) event=poll_missing_id tx=\(short(sel.txId), privacy: .public)")
+            }
+            return
         }
 
-        outboxLog.info("processQueue run=\(runId, privacy: .public) event=poll_ready tx=\(short(txId), privacy: .public) serverTx=\(shortOrDash(serverTxId), privacy: .public)")
+        outboxLog.info("processQueue run=\(runId, privacy: .public) event=poll_ready tx=\(short(sel.txId), privacy: .public) serverTx=\(shortOrDash(serverTxId), privacy: .public)")
 
-        guard let tx = try? fetchTransmission(id: txId) else { return true }
-
-        // Mark as sending during poll for consistent UI semantics.
-        tx.status = .sending
-        tx.lastError = nil
-        outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(txId), privacy: .public) to=sending reason=poll")
+        guard let tx = try? fetchTransmission(id: sel.txId) else { return }
 
         let attemptId = UUID()
         let diagnostics = DiagnosticsContext(
             attemptId: attemptId,
-            threadId: threadId,
-            localTransmissionId: txId
+            threadId: sel.threadId,
+            localTransmissionId: sel.txId
         )
 
         do {
-            guard let polling = transport as? any ChatTransportPolling else {
-                outboxLog.error("processQueue run=\(runId, privacy: .public) event=poll_unavailable tx=\(short(txId), privacy: .public)")
-
+            guard let watcher = statusWatcher else {
+                outboxLog.error("processQueue run=\(runId, privacy: .public) event=poll_unavailable tx=\(short(sel.txId), privacy: .public)")
                 tx.status = .failed
                 tx.lastError = "Transport does not support polling"
-                return true
+                return
             }
 
-            let poll = try await polling.poll(transmissionId: serverTxId, diagnostics: diagnostics)
+            let poll = try await watcher.poll(transmissionId: serverTxId, diagnostics: diagnostics)
 
-            guard let freshTx = try? fetchTransmission(id: txId) else { return true }
+            guard let freshTx = try? fetchTransmission(id: sel.txId) else { return }
 
-            // Record a poll attempt so backoff/TTL derivation stays honest.
             recordAttempt(
                 tx: freshTx,
                 attemptId: attemptId,
                 statusCode: poll.statusCode,
                 outcome: poll.pending ? .pending : .succeeded,
+                source: .poll,
                 errorMessage: nil,
                 transmissionId: serverTxId,
                 retryableInferred: nil,
@@ -779,35 +1020,34 @@ final class TransmissionActions {
             )
 
             if let m = poll.threadMemento {
-                applyDraftMemento(runId: runId, freshTx: freshTx, txId: txId, m: m, via: "poll")
+                applyDraftMemento(runId: runId, freshTx: freshTx, txId: sel.txId, m: m, via: "poll")
             }
 
             if poll.pending {
-                freshTx.status = .queued
-                outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(txId), privacy: .public) to=queued reason=pending_poll")
-                return true
+                freshTx.status = .pending
+                outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(sel.txId), privacy: .public) to=pending reason=pending_poll")
+                return
             }
 
             let assistantText = (poll.assistant?.isEmpty == false) ? poll.assistant! : "(no assistant text)"
 
             appendAssistantMessageIfPossible(
-                threadId: threadId,
+                threadId: sel.threadId,
                 assistantText: assistantText,
                 transmissionId: serverTxId,
                 evidence: poll.evidence,
                 outputEnvelope: nil,
                 runId: runId,
-                txId: txId,
+                txId: sel.txId,
                 via: "poll"
             )
 
             freshTx.status = .succeeded
-            outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(txId), privacy: .public) to=succeeded reason=poll_complete")
-            return true
+            outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(sel.txId), privacy: .public) to=succeeded reason=poll_complete")
         } catch {
-            outboxLog.error("processQueue run=\(runId, privacy: .public) event=poll_failed tx=\(short(txId), privacy: .public) err=\(String(describing: error), privacy: .public)")
+            outboxLog.error("processQueue run=\(runId, privacy: .public) event=poll_failed tx=\(short(sel.txId), privacy: .public) err=\(String(describing: error), privacy: .public)")
 
-            guard let freshTx = try? fetchTransmission(id: txId) else { return true }
+            guard let freshTx = try? fetchTransmission(id: sel.txId) else { return }
 
             let decision = retryDecision(for: error)
             let errorInfo = httpErrorInfo(from: error)
@@ -816,6 +1056,7 @@ final class TransmissionActions {
                 attemptId: attemptId,
                 statusCode: statusCode(from: error),
                 outcome: .failed,
+                source: .poll,
                 errorMessage: errorMessage(from: error),
                 transmissionId: decision.transmissionId ?? serverTxId,
                 retryableInferred: decision.retryable,
@@ -823,12 +1064,11 @@ final class TransmissionActions {
                 finalURL: errorInfo?.finalURL?.absoluteString
             )
 
-            freshTx.status = decision.retryable ? .queued : .failed
+            freshTx.status = decision.retryable ? .pending : .failed
             freshTx.lastError = errorMessage(from: error)
 
-            let outcome = decision.retryable ? "queued" : "failed"
-            outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(txId), privacy: .public) to=\(outcome, privacy: .public) reason=poll_failed")
-            return true
+            let outcome = decision.retryable ? "pending" : "failed"
+            outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(sel.txId), privacy: .public) to=\(outcome, privacy: .public) reason=poll_failed")
         }
     }
 
@@ -909,7 +1149,17 @@ final class TransmissionActions {
             outboxLog.info("retryFailed event=status tx=\(short(tx.id), privacy: .public) to=queued")
         }
 
+        try? modelContext.save()
         outboxLog.info("retryFailed event=end")
+    }
+
+    private func recoverPendingWithoutActiveAttempt(runId: String, tx: Transmission, attemptCount: Int) {
+        guard tx.status == .pending else { return }
+        tx.status = .queued
+        tx.lastError = "Recovered pending transmission without active attempt"
+        outboxLog.info(
+            "processQueue run=\(runId, privacy: .public) event=pending_recovered tx=\(short(tx.id), privacy: .public) attempts=\(attemptCount, privacy: .public)"
+        )
     }
 
     // MARK: - SwiftData fetch helpers

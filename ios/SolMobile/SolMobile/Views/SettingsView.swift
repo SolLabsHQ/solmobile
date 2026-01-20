@@ -77,8 +77,12 @@ struct SettingsView: View {
         URL(string: trimmedBaseURL) != nil
     }
 
+    private var overrideBaseURL: String {
+        trimmedBaseURL.isEmpty ? "(none)" : trimmedBaseURL
+    }
+
     private var effectiveBaseURL: String {
-        isValidBaseURL ? trimmedBaseURL : SolServerBaseURL.defaultBaseURLString
+        SolServerBaseURL.effectiveURLString()
     }
 
     private var healthzURL: URL? {
@@ -313,6 +317,18 @@ struct SettingsView: View {
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
 
+                    HStack {
+                        Text("Override")
+                            .foregroundStyle(.secondary)
+
+                        Spacer()
+
+                        Text(overrideBaseURL)
+                            .font(.footnote)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+
                     // Show what the app will actually use (helps when the field is invalid)
                     HStack {
                         Text("Effective")
@@ -328,6 +344,20 @@ struct SettingsView: View {
 
                     // Presets: vertical to avoid Form/HStack hit-target weirdness
                     VStack(alignment: .leading, spacing: 10) {
+                        Button {
+                            solserverBaseURL = "https://solserver-staging.sollabshq.com"
+                        } label: {
+                            Label("Staging", systemImage: "network")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+
+                        Button {
+                            solserverBaseURL = "https://api.sollabshq.com"
+                        } label: {
+                            Label("Production", systemImage: "globe")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+
                         Button {
                             solserverBaseURL = "http://127.0.0.1:3333"
                         } label: {

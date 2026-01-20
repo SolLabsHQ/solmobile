@@ -17,6 +17,7 @@ struct BudgetExceededInfo {
     let blockedUntil: Date?
 }
 
+@MainActor
 final class BudgetStore: ObservableObject {
     static let shared = BudgetStore()
 

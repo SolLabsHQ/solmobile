@@ -6,18 +6,27 @@ import UIKit
 
 struct ThreadDetailView: View {
     private static let perfLog = OSLog(subsystem: "com.sollabshq.solmobile", category: "ThreadDetailPerf")
+    private static let pendingSlowThresholdSeconds: TimeInterval = 20
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.outboxService) private var outboxService
+    @Environment(\.unreadTracker) private var unreadTracker
     @ObservedObject private var budgetStore = BudgetStore.shared
     @Bindable var thread: ConversationThread
     @Query private var messages: [Message]
     @Query private var transmissions: [Transmission]
-    @State private var isProcessingOutbox: Bool = false
-    @State private var outboxNeedsRerun: Bool = false
-    @State private var cachedOutboxSummary = OutboxSummary(queued: 0, sending: 0, failed: 0)
+    @State private var cachedOutboxSummary = OutboxSummary(queued: 0, sending: 0, pending: 0, failed: 0)
     @State private var keyboardSignpostId = OSSignpostID(log: ThreadDetailView.perfLog)
     @State private var keyboardSignpostActive = false
+    @State private var autoScrollToLatest: Bool = true
+    @State private var initialScrollDone: Bool = false
+    @State private var showJumpToLatest: Bool = false
+    @State private var showNewMessagesPill: Bool = false
+    @State private var newMessagesTargetId: UUID? = nil
+    @State private var newMessagesCount: Int? = nil
+    @State private var scrollViewportHeight: CGFloat = 0
+    @State private var lastVisibleAnchorId: UUID? = nil
 
     // ThreadMemento (navigation artifact): model-proposed snapshot returned by SolServer.
     // We store acceptance state locally (UserDefaults) so it survives view reloads.
@@ -90,19 +99,80 @@ struct ThreadDetailView: View {
             }
 
             ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 10) {
-                        ForEach(messages) { msg in
-                            MessageBubble(message: msg)
-                                .id(msg.id)
+                VStack(spacing: 0) {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 10) {
+                            ForEach(messages) { msg in
+                                MessageBubble(message: msg)
+                                    .id(msg.id)
+                                    .background(GeometryReader { geo in
+                                        Color.clear.preference(
+                                            key: MessageFramePreferenceKey.self,
+                                            value: [msg.id: geo.frame(in: .named("threadScroll"))]
+                                        )
+                                    })
+                            }
+                        }
+                        .padding(.vertical, 12)
+                        .padding(.horizontal, 12)
+                    }
+                    .coordinateSpace(name: "threadScroll")
+                    .background(
+                        GeometryReader { geo in
+                            Color.clear
+                                .onAppear { scrollViewportHeight = geo.size.height }
+                                .onChange(of: geo.size.height) { _, newValue in
+                                    scrollViewportHeight = newValue
+                                }
+                        }
+                    )
+                    .onPreferenceChange(MessageFramePreferenceKey.self) { frames in
+                        updateVisibleAnchor(frames: frames)
+                        updateAutoScroll(frames: frames)
+                    }
+                    .onAppear {
+                        applyInitialScroll(proxy: proxy)
+                    }
+                    .onChange(of: messages.count) { _, _ in
+                        applyInitialScroll(proxy: proxy)
+                        guard let last = messages.last else { return }
+                        if autoScrollToLatest {
+                            proxy.scrollTo(last.id, anchor: .bottom)
+                        } else {
+                            showJumpToLatest = true
+                            refreshNewMessagesPill()
                         }
                     }
-                    .padding(.vertical, 12)
-                    .padding(.horizontal, 12)
-                }
-                .onChange(of: messages.count) { _, _ in
-                    guard let last = messages.last else { return }
-                    proxy.scrollTo(last.id, anchor: .bottom)
+
+                    if showNewMessagesPill, let targetId = newMessagesTargetId {
+                        Button(newMessagesLabel) {
+                            autoScrollToLatest = false
+                            showJumpToLatest = true
+                            proxy.scrollTo(targetId, anchor: .top)
+                        }
+                        .font(.footnote)
+                        .padding(.vertical, 6)
+                        .padding(.horizontal, 12)
+                        .background(.thinMaterial)
+                        .clipShape(Capsule())
+                        .padding(.bottom, 6)
+                    }
+
+                    if showJumpToLatest {
+                        Button("Jump to latest") {
+                            guard let last = messages.last else { return }
+                            autoScrollToLatest = true
+                            showJumpToLatest = false
+                            showNewMessagesPill = false
+                            proxy.scrollTo(last.id, anchor: .bottom)
+                        }
+                        .font(.footnote)
+                        .padding(.vertical, 6)
+                        .padding(.horizontal, 12)
+                        .background(.thinMaterial)
+                        .clipShape(Capsule())
+                        .padding(.bottom, 6)
+                    }
                 }
             }
 
@@ -124,7 +194,7 @@ struct ThreadDetailView: View {
             }
             .padding(10)
         }
-        .onChange(of: outboxSummary.failed + outboxSummary.queued + outboxSummary.sending) { _, newValue in
+        .onChange(of: outboxSummary.failed + outboxSummary.queued + outboxSummary.sending + outboxSummary.pending) { _, newValue in
             viewLog.debug("[outboxBanner] refresh total=\(newValue, privacy: .public)")
         }
         .onChange(of: outboxStatusSignature) { _, _ in
@@ -147,14 +217,21 @@ struct ThreadDetailView: View {
         .onChange(of: scenePhase) { _, newValue in
             if newValue == .background {
                 draftStore.forceSaveNow(threadId: thread.id, content: composerText)
+                if let unreadTracker {
+                    Task { await unreadTracker.flush(threadId: thread.id) }
+                }
             }
         }
         .onAppear {
             loadAcceptedMementoFromDefaults()
             updateOutboxSummary()
-            processOutbox()
             restoreDraftIfNeeded()
             budgetStore.refreshIfExpired()
+        }
+        .onDisappear {
+            if let unreadTracker {
+                Task { await unreadTracker.flush(threadId: thread.id) }
+            }
         }
         .navigationTitle(thread.title)
         .navigationBarTitleDisplayMode(.inline)
@@ -179,11 +256,7 @@ struct ThreadDetailView: View {
         modelContext.insert(m)
 
         viewLog.info("[send] thread=\(thread.id.uuidString.prefix(8), privacy: .public) msg=\(m.id.uuidString.prefix(8), privacy: .public) len=\(text.count, privacy: .public)")
-
-        let tx = TransmissionActions(modelContext: modelContext)
-        tx.enqueueChat(thread: thread, userMessage: m)
-
-        processOutbox()
+        outboxService?.enqueueChat(thread: thread, userMessage: m)
     }
 
     private var draftStore: DraftStore {
@@ -245,14 +318,10 @@ struct ThreadDetailView: View {
 
                         let before = outboxSummary
                         viewLog.info("[retry] before failed=\(before.failed, privacy: .public) queued=\(before.queued, privacy: .public) sending=\(before.sending, privacy: .public)")
-
-                        let tx = TransmissionActions(modelContext: modelContext)
-                        tx.retryFailed()
+                        outboxService?.retryFailed()
 
                         let after = outboxSummary
                         viewLog.info("[retry] after failed=\(after.failed, privacy: .public) queued=\(after.queued, privacy: .public) sending=\(after.sending, privacy: .public)")
-
-                        processOutbox()
                     }
                     .font(.footnote)
                 }
@@ -262,11 +331,17 @@ struct ThreadDetailView: View {
             )
         }
 
-        if s.queued + s.sending > 0 {
+        if s.queued + s.sending + s.pending > 0 {
+            let statusText: String
+            if hasLongPending {
+                statusText = "Still processing… pending \(s.pending), queued \(s.queued), sending \(s.sending)"
+            } else {
+                statusText = "Outbox: queued \(s.queued), pending \(s.pending), sending \(s.sending)"
+            }
             return AnyView(
                 HStack(spacing: 10) {
                     ProgressView()
-                    Text("Sending…")
+                    Text(statusText)
                         .font(.footnote)
                     Spacer()
                 }
@@ -282,6 +357,7 @@ struct ThreadDetailView: View {
     private struct OutboxSummary {
         var queued: Int
         var sending: Int
+        var pending: Int
         var failed: Int
     }
 
@@ -418,8 +494,9 @@ private func acceptMemento(_ m: MementoViewModel) {
     acceptedMemento = m
 
     // Submit to SolServer (throws on transport issues). We still keep the optimistic UI.
+    let transport = SolServerClient()
     Task {
-        let actions = TransmissionActions(modelContext: modelContext)
+        let actions = TransmissionActions(modelContext: modelContext, transport: transport)
 
         do {
             let result = try await actions.decideThreadMemento(
@@ -464,8 +541,9 @@ private func acceptMemento(_ m: MementoViewModel) {
         UserDefaults.standard.set(m.id, forKey: mementoDefaultsKeyDismissed)
 
         // Submit to SolServer and clear the local draft fields so the banner disappears immediately.
+        let transport = SolServerClient()
         Task {
-            let actions = TransmissionActions(modelContext: modelContext)
+            let actions = TransmissionActions(modelContext: modelContext, transport: transport)
             do {
                 let result = try await actions.decideThreadMemento(threadId: thread.id, mementoId: m.id, decision: .decline)
 
@@ -500,8 +578,9 @@ private func acceptMemento(_ m: MementoViewModel) {
             let id = current["id"] as? String ?? ""
 
             // Submit to SolServer and clear the local draft fields so the banner disappears immediately.
+            let transport = SolServerClient()
             Task {
-                let actions = TransmissionActions(modelContext: modelContext)
+                let actions = TransmissionActions(modelContext: modelContext, transport: transport)
                 do {
                     let result = try await actions.decideThreadMemento(threadId: thread.id, mementoId: id, decision: .revoke)
 
@@ -574,49 +653,168 @@ private func acceptMemento(_ m: MementoViewModel) {
         transmissions.map { $0.statusRaw }.joined(separator: "|")
     }
 
+    private var newMessagesLabel: String {
+        guard let count = newMessagesCount, count > 0 else { return "New messages" }
+        return "\(count) new message\(count == 1 ? "" : "s")"
+    }
+
     private func updateOutboxSummary() {
         // Derived state from SwiftData query; cache to avoid repeated filters during renders.
         let queued = transmissions.filter { $0.status == .queued }.count
         let sending = transmissions.filter { $0.status == .sending }.count
+        let pending = transmissions.filter { $0.status == .pending }.count
         let failed = transmissions.filter { $0.status == .failed }.count
-        cachedOutboxSummary = OutboxSummary(queued: queued, sending: sending, failed: failed)
+        cachedOutboxSummary = OutboxSummary(queued: queued, sending: sending, pending: pending, failed: failed)
     }
 
-    private func processOutbox() {
-        viewLog.info("[processOutbox] called isProcessing=\(isProcessingOutbox, privacy: .public)")
+    private func pendingSince(_ tx: Transmission) -> Date? {
+        let attempts = tx.deliveryAttempts.sorted { $0.createdAt < $1.createdAt }
+        guard let last = attempts.last, last.outcome == .pending else { return nil }
 
-        // Coalesce calls: if we're already processing, request another pass and exit.
-        guard !isProcessingOutbox else {
-            outboxNeedsRerun = true
-            viewLog.info("[processOutbox] coalesce: needsRerun=true")
+        var since = last.createdAt
+        for attempt in attempts.reversed() {
+            if attempt.outcome == .pending {
+                since = attempt.createdAt
+            } else {
+                break
+            }
+        }
+        return since
+    }
+
+    private var hasLongPending: Bool {
+        guard outboxSummary.pending > 0 else { return false }
+        let now = Date()
+        return transmissions.contains { tx in
+            guard tx.status == .pending,
+                  let since = pendingSince(tx) else { return false }
+            return now.timeIntervalSince(since) >= Self.pendingSlowThresholdSeconds
+        }
+    }
+
+    private func applyInitialScroll(proxy: ScrollViewProxy) {
+        guard !initialScrollDone else { return }
+        guard !messages.isEmpty else { return }
+        initialScrollDone = true
+
+        if let state = fetchReadState() {
+            if let lastViewedId = state.lastViewedMessageId,
+               messages.contains(where: { $0.id == lastViewedId }) {
+                autoScrollToLatest = false
+                showJumpToLatest = true
+                proxy.scrollTo(lastViewedId, anchor: .top)
+                refreshNewMessagesPill(forceShow: true, state: state)
+                return
+            }
+
+            if state.lastViewedMessageId != nil,
+               let fallbackUnread = computeFirstUnreadMessageId(readUpToId: state.readUpToMessageId) {
+                autoScrollToLatest = false
+                showJumpToLatest = true
+                proxy.scrollTo(fallbackUnread, anchor: .top)
+                refreshNewMessagesPill(forceShow: true, state: state)
+                return
+            }
+        }
+
+        if let last = messages.last {
+            autoScrollToLatest = true
+            showNewMessagesPill = false
+            proxy.scrollTo(last.id, anchor: .bottom)
+        }
+    }
+
+    private func computeFirstUnreadMessageId(readUpToId: UUID?) -> UUID? {
+        guard let readUpToId,
+              let idx = messages.firstIndex(where: { $0.id == readUpToId }) else {
+            return nil
+        }
+
+        let nextIndex = messages.index(after: idx)
+        guard nextIndex < messages.endIndex else { return nil }
+        return messages[nextIndex].id
+    }
+
+    private func fetchReadState() -> ThreadReadState? {
+        let threadId = thread.id
+        let d = FetchDescriptor<ThreadReadState>(predicate: #Predicate { $0.threadId == threadId })
+        return try? modelContext.fetch(d).first
+    }
+
+    private func unreadCount(readUpToId: UUID?) -> Int? {
+        guard let readUpToId,
+              let idx = messages.firstIndex(where: { $0.id == readUpToId }) else {
+            return nil
+        }
+
+        let nextIndex = messages.index(after: idx)
+        guard nextIndex < messages.endIndex else { return nil }
+        return messages.distance(from: nextIndex, to: messages.endIndex)
+    }
+
+    private func refreshNewMessagesPill(forceShow: Bool = false, state: ThreadReadState? = nil) {
+        let readState = state ?? fetchReadState()
+        guard let readState,
+              let readUpToId = readState.readUpToMessageId,
+              let firstUnread = computeFirstUnreadMessageId(readUpToId: readUpToId) else {
+            showNewMessagesPill = false
+            newMessagesTargetId = nil
+            newMessagesCount = nil
             return
         }
 
-        isProcessingOutbox = true
+        newMessagesTargetId = firstUnread
+        newMessagesCount = unreadCount(readUpToId: readUpToId)
+        showNewMessagesPill = forceShow || !autoScrollToLatest
+    }
 
-        viewLog.info("[processOutbox] run start")
+    private func updateVisibleAnchor(frames: [UUID: CGRect]) {
+        guard scrollViewportHeight > 0 else { return }
 
-        let container = modelContext.container
-        let perfLog = Self.perfLog
-        let signpostId = OSSignpostID(log: perfLog)
-        os_signpost(.begin, log: perfLog, name: "OutboxProcess", signpostID: signpostId)
-        Task.detached { [container, perfLog] in
-            let tx = await MainActor.run { TransmissionActions(modelContext: ModelContext(container)) }
-            await tx.processQueue()
-
-            viewLog.info("[processOutbox] run end")
-            os_signpost(.end, log: perfLog, name: "OutboxProcess", signpostID: signpostId)
-
-            await MainActor.run {
-                isProcessingOutbox = false
-
-                if outboxNeedsRerun {
-                    outboxNeedsRerun = false
-                    viewLog.info("[processOutbox] rerun requested -> kicking")
-                    processOutbox()
-                }
-            }
+        let visible = frames.filter { frame in
+            frame.value.maxY >= 0 && frame.value.minY <= scrollViewportHeight
         }
+
+        guard let newest = visible.max(by: { $0.value.maxY < $1.value.maxY })?.key else { return }
+
+        guard newest != lastVisibleAnchorId else { return }
+        lastVisibleAnchorId = newest
+
+        if let unreadTracker {
+            Task { await unreadTracker.markViewed(threadId: thread.id, messageId: newest) }
+        }
+
+        if !autoScrollToLatest {
+            refreshNewMessagesPill()
+        }
+    }
+
+    private func updateAutoScroll(frames: [UUID: CGRect]) {
+        guard let last = messages.last,
+              let frame = frames[last.id],
+              scrollViewportHeight > 0 else { return }
+
+        let isAtBottom = frame.maxY <= scrollViewportHeight + 4
+        if isAtBottom {
+            if !autoScrollToLatest {
+                autoScrollToLatest = true
+                showJumpToLatest = false
+                showNewMessagesPill = false
+            }
+        } else if autoScrollToLatest {
+            autoScrollToLatest = false
+            showJumpToLatest = true
+            refreshNewMessagesPill()
+        }
+    }
+
+}
+
+private struct MessageFramePreferenceKey: PreferenceKey {
+    static var defaultValue: [UUID: CGRect] = [:]
+
+    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+        value.merge(nextValue()) { $1 }
     }
 }
 

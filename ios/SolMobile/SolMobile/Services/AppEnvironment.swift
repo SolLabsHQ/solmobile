@@ -43,11 +43,11 @@ enum AppEnvironment: String, CaseIterable {
         case .staging:
             return Bundle.main.infoDictionary?["SOLSERVER_BASE_URL_STAGING"] as? String
                 ?? Bundle.main.infoDictionary?["SOLSERVER_BASE_URL"] as? String
-                ?? "https://solserver-staging.fly.dev"
+                ?? "https://solserver-staging.sollabshq.com"
         case .prod:
             return Bundle.main.infoDictionary?["SOLSERVER_BASE_URL_PROD"] as? String
                 ?? Bundle.main.infoDictionary?["SOLSERVER_BASE_URL"] as? String
-                ?? "https://solserver-prod.example.com"
+                ?? "https://api.sollabshq.com"
         }
     }
 }
@@ -62,7 +62,11 @@ enum SolServerBaseURL {
     static func effectiveURLString() -> String {
         let raw = UserDefaults.standard.string(forKey: storageKey) ?? defaultBaseURLString
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if URL(string: trimmed) != nil {
+        if let url = URL(string: trimmed) {
+            if AppEnvironment.current.requiresHTTPS,
+               url.scheme?.lowercased() != "https" {
+                return defaultBaseURLString
+            }
             return trimmed
         }
         return defaultBaseURLString

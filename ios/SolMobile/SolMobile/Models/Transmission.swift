@@ -11,6 +11,7 @@ import SwiftData
 enum TransmissionStatus: String, Codable {
     case queued
     case sending
+    case pending
     case succeeded
     case failed
 }

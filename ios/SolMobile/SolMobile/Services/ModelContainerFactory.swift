@@ -15,6 +15,7 @@ enum ModelContainerFactory {
             ClaimMapEntry.self,
             CapturedSuggestion.self,
             DraftRecord.self,
+            ThreadReadState.self,
             Packet.self,
             Transmission.self,
             DeliveryAttempt.self

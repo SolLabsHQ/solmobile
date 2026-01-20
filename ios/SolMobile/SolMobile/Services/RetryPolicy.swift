@@ -7,21 +7,21 @@
 
 import Foundation
 
-enum RetryableSource: String, Codable {
+nonisolated enum RetryableSource: String, Codable {
     case explicitField = "explicit_field"
     case httpStatus = "http_status"
     case networkError = "network_error"
     case parseFailedDefault = "parse_failed_default"
 }
 
-struct ParsedErrorEnvelope {
+nonisolated struct ParsedErrorEnvelope {
     let errorCode: String?
     let retryable: Bool?
     let traceRunId: String?
     let transmissionId: String?
 }
 
-struct RetryDecision {
+nonisolated struct RetryDecision {
     let retryable: Bool
     let source: RetryableSource
     let retryAfterSeconds: TimeInterval?
@@ -30,7 +30,7 @@ struct RetryDecision {
     let transmissionId: String?
 }
 
-enum RetryPolicy {
+nonisolated enum RetryPolicy {
     static func classify(
         statusCode: Int?,
         body: String?,

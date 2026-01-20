@@ -8,14 +8,14 @@
 import Combine
 import Foundation
 
-struct DiagnosticsRedirectHop: Codable {
+nonisolated struct DiagnosticsRedirectHop: Codable {
     let from: String
     let to: String
     let statusCode: Int
     let method: String?
 }
 
-struct DiagnosticsEntry: Identifiable, Codable {
+nonisolated struct DiagnosticsEntry: Identifiable, Codable {
     let id: UUID
     let timestamp: Date
     let attemptId: String?
@@ -209,7 +209,8 @@ final class DiagnosticsStore: ObservableObject {
         DiagnosticsStore(storageKey: "sol.dev.diagnostics.entries.test.\(UUID().uuidString)", persistEnabled: false)
     }
 
-    nonisolated func record(
+    @MainActor
+    func record(
         method: String,
         url: URL?,
         responseURL: URL?,
@@ -231,50 +232,84 @@ final class DiagnosticsStore: ObservableObject {
         requestBody: Data?,
         hadAuthorization: Bool
     ) {
-        let urlString = DiagnosticsStore.redactedURLString(from: url)
-        let responseURLString = responseURL.map { DiagnosticsStore.redactedURLString(from: $0) }
-        let redirectEntries = redirectChain.map {
-            DiagnosticsRedirectHop(
-                from: DiagnosticsStore.redactedURLString(from: $0.from),
-                to: DiagnosticsStore.redactedURLString(from: $0.to),
-                statusCode: $0.statusCode,
-                method: $0.method
-            )
-        }
-        let safeHeaders = DiagnosticsStore.safeResponseHeaders(from: responseHeaders)
-        let redactedHeaders = DiagnosticsStore.redactedRequestHeaders(requestHeaders)
-        let responseSnippet = DiagnosticsStore.responseSnippet(from: responseData, status: status)
-        let requestBodySnippet = DiagnosticsStore.bodySnippet(from: requestBody, limit: 500)
-        let nsError = error as NSError?
+        let entry = DiagnosticsStore.makeEntry(
+            method: method,
+            url: url,
+            responseURL: responseURL,
+            redirectChain: redirectChain,
+            status: status,
+            latencyMs: latencyMs,
+            retryableInferred: retryableInferred,
+            retryableSource: retryableSource,
+            parsedErrorCode: parsedErrorCode,
+            traceRunId: traceRunId,
+            attemptId: attemptId,
+            threadId: threadId,
+            localTransmissionId: localTransmissionId,
+            transmissionId: transmissionId,
+            error: error,
+            responseData: responseData,
+            responseHeaders: responseHeaders,
+            requestHeaders: requestHeaders,
+            requestBody: requestBody,
+            hadAuthorization: hadAuthorization
+        )
+        append(entry)
+    }
 
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            let entry = DiagnosticsEntry(
-                method: method,
-                url: urlString,
-                responseURL: responseURLString,
-                redirectChain: redirectEntries,
-                status: status,
-                latencyMs: latencyMs,
-                retryableInferred: retryableInferred,
-                retryableSource: retryableSource,
-                parsedErrorCode: parsedErrorCode,
-                traceRunId: traceRunId,
-                attemptId: attemptId,
-                threadId: threadId,
-                localTransmissionId: localTransmissionId,
-                transmissionId: transmissionId,
-                errorDomain: nsError?.domain,
-                errorCode: nsError?.code,
-                errorDescription: nsError?.localizedDescription,
-                responseSnippet: responseSnippet,
-                safeResponseHeaders: safeHeaders,
-                requestHeaders: redactedHeaders,
-                requestBodySnippet: requestBodySnippet,
-                hadAuthorization: hadAuthorization
-            )
-            self.append(entry)
+    nonisolated static func recordAsync(
+        method: String,
+        url: URL?,
+        responseURL: URL?,
+        redirectChain: [RedirectHop],
+        status: Int?,
+        latencyMs: Int?,
+        retryableInferred: Bool?,
+        retryableSource: String?,
+        parsedErrorCode: String?,
+        traceRunId: String?,
+        attemptId: String?,
+        threadId: String?,
+        localTransmissionId: String?,
+        transmissionId: String?,
+        error: Error?,
+        responseData: Data?,
+        responseHeaders: [AnyHashable: Any]?,
+        requestHeaders: [String: String]?,
+        requestBody: Data?,
+        hadAuthorization: Bool
+    ) {
+        let entry = DiagnosticsStore.makeEntry(
+            method: method,
+            url: url,
+            responseURL: responseURL,
+            redirectChain: redirectChain,
+            status: status,
+            latencyMs: latencyMs,
+            retryableInferred: retryableInferred,
+            retryableSource: retryableSource,
+            parsedErrorCode: parsedErrorCode,
+            traceRunId: traceRunId,
+            attemptId: attemptId,
+            threadId: threadId,
+            localTransmissionId: localTransmissionId,
+            transmissionId: transmissionId,
+            error: error,
+            responseData: responseData,
+            responseHeaders: responseHeaders,
+            requestHeaders: requestHeaders,
+            requestBody: requestBody,
+            hadAuthorization: hadAuthorization
+        )
+
+        Task { @MainActor in
+            DiagnosticsStore.shared.appendEntry(entry)
         }
+    }
+
+    @MainActor
+    func appendEntry(_ entry: DiagnosticsEntry) {
+        append(entry)
     }
 
     func clear() {
@@ -452,6 +487,70 @@ final class DiagnosticsStore: ObservableObject {
     nonisolated private static func shouldRedactQueryParam(_ name: String) -> Bool {
         let sensitive = ["api_key", "token", "sig", "signature", "expires"]
         return sensitive.contains(where: { name.contains($0) })
+    }
+
+    nonisolated private static func makeEntry(
+        method: String,
+        url: URL?,
+        responseURL: URL?,
+        redirectChain: [RedirectHop],
+        status: Int?,
+        latencyMs: Int?,
+        retryableInferred: Bool?,
+        retryableSource: String?,
+        parsedErrorCode: String?,
+        traceRunId: String?,
+        attemptId: String?,
+        threadId: String?,
+        localTransmissionId: String?,
+        transmissionId: String?,
+        error: Error?,
+        responseData: Data?,
+        responseHeaders: [AnyHashable: Any]?,
+        requestHeaders: [String: String]?,
+        requestBody: Data?,
+        hadAuthorization: Bool
+    ) -> DiagnosticsEntry {
+        let urlString = DiagnosticsStore.redactedURLString(from: url)
+        let responseURLString = responseURL.map { DiagnosticsStore.redactedURLString(from: $0) }
+        let redirectEntries = redirectChain.map {
+            DiagnosticsRedirectHop(
+                from: DiagnosticsStore.redactedURLString(from: $0.from),
+                to: DiagnosticsStore.redactedURLString(from: $0.to),
+                statusCode: $0.statusCode,
+                method: $0.method
+            )
+        }
+        let safeHeaders = DiagnosticsStore.safeResponseHeaders(from: responseHeaders)
+        let redactedHeaders = DiagnosticsStore.redactedRequestHeaders(requestHeaders)
+        let responseSnippet = DiagnosticsStore.responseSnippet(from: responseData, status: status)
+        let requestBodySnippet = DiagnosticsStore.bodySnippet(from: requestBody, limit: 500)
+        let nsError = error as NSError?
+
+        return DiagnosticsEntry(
+            method: method,
+            url: urlString,
+            responseURL: responseURLString,
+            redirectChain: redirectEntries,
+            status: status,
+            latencyMs: latencyMs,
+            retryableInferred: retryableInferred,
+            retryableSource: retryableSource,
+            parsedErrorCode: parsedErrorCode,
+            traceRunId: traceRunId,
+            attemptId: attemptId,
+            threadId: threadId,
+            localTransmissionId: localTransmissionId,
+            transmissionId: transmissionId,
+            errorDomain: nsError?.domain,
+            errorCode: nsError?.code,
+            errorDescription: nsError?.localizedDescription,
+            responseSnippet: responseSnippet,
+            safeResponseHeaders: safeHeaders,
+            requestHeaders: redactedHeaders,
+            requestBodySnippet: requestBodySnippet,
+            hadAuthorization: hadAuthorization
+        )
     }
 
     private static let exportTimestampFormatter: ISO8601DateFormatter = {

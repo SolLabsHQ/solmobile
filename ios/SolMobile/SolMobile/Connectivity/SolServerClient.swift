@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Security
 
 struct Request: Codable {
     let threadId: String
@@ -85,8 +86,13 @@ private struct MementoDecisionResponse: Codable {
     let memento: ThreadMementoDTO?
 }
 
+private final class TaskIdBox {
+    var value: Int = 0
+}
+
 final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision {
-    let baseURL: URL
+    private let baseURLProvider: () -> URL
+    var baseURL: URL { baseURLProvider() }
     private let session: URLSession
     private let redirectTracker: RedirectTracker
 
@@ -112,10 +118,32 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
         configuration: URLSessionConfiguration = .default,
         redirectTracker: RedirectTracker = RedirectTracker()
     ) {
-        self.baseURL = baseURL
+        self.baseURLProvider = { baseURL }
         self.redirectTracker = redirectTracker
+        let resolvedConfig = configuration
+        if #available(iOS 13.0, *) {
+            resolvedConfig.tlsMinimumSupportedProtocolVersion = .TLSv12
+        }
         self.session = URLSession(
-            configuration: configuration,
+            configuration: resolvedConfig,
+            delegate: redirectTracker,
+            delegateQueue: nil
+        )
+    }
+
+    init(
+        baseURLProvider: @escaping () -> URL,
+        configuration: URLSessionConfiguration = .default,
+        redirectTracker: RedirectTracker = RedirectTracker()
+    ) {
+        self.baseURLProvider = baseURLProvider
+        self.redirectTracker = redirectTracker
+        let resolvedConfig = configuration
+        if #available(iOS 13.0, *) {
+            resolvedConfig.tlsMinimumSupportedProtocolVersion = .TLSv12
+        }
+        self.session = URLSession(
+            configuration: resolvedConfig,
             delegate: redirectTracker,
             delegateQueue: nil
         )
@@ -123,7 +151,7 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
 
     /// Convenience init for app runtime where Settings controls the base URL.
     convenience init(configuration: URLSessionConfiguration = .default) {
-        self.init(baseURL: SolServerBaseURL.effectiveURL(), configuration: configuration)
+        self.init(baseURLProvider: { SolServerBaseURL.effectiveURL() }, configuration: configuration)
     }
 
     // MARK: - Low-level HTTP helper
@@ -139,7 +167,7 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
            let url = authorizedReq.url,
            url.scheme?.lowercased() != "https" {
             let error = TransportError.insecureBaseURL(reason: "HTTPS required in \(AppEnvironment.current.rawValue)")
-            DiagnosticsStore.shared.record(
+            DiagnosticsStore.recordAsync(
                 method: authorizedReq.httpMethod ?? "GET",
                 url: authorizedReq.url,
                 responseURL: nil,
@@ -168,14 +196,14 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
         let started = Date()
 
         return try await withCheckedThrowingContinuation { continuation in
-            var taskId = 0
+            let taskIdBox = TaskIdBox()
             let task = session.dataTask(with: authorizedReq) { data, response, error in
                 let latencyMs = Int(Date().timeIntervalSince(started) * 1000)
-                let redirectChain = self.redirectTracker.consumeChain(taskId: taskId)
+                let redirectChain = self.redirectTracker.consumeChain(taskId: taskIdBox.value)
 
                 if let error {
                     let decision = RetryPolicy.classify(statusCode: nil, body: nil, headers: nil, error: error)
-                    DiagnosticsStore.shared.record(
+                    DiagnosticsStore.recordAsync(
                         method: authorizedReq.httpMethod ?? "GET",
                         url: authorizedReq.url,
                         responseURL: response?.url,
@@ -203,7 +231,7 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
 
                 guard let data, let http = response as? HTTPURLResponse else {
                     let error = URLError(.badServerResponse)
-                    DiagnosticsStore.shared.record(
+                    DiagnosticsStore.recordAsync(
                         method: authorizedReq.httpMethod ?? "GET",
                         url: authorizedReq.url,
                         responseURL: response?.url,
@@ -247,7 +275,7 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
                 let traceRunId = self.extractTraceRunId(headers: headers, body: bodyString)
                 let transmissionId = self.extractTransmissionId(headers: headers, body: bodyString)
 
-                DiagnosticsStore.shared.record(
+                DiagnosticsStore.recordAsync(
                     method: authorizedReq.httpMethod ?? "GET",
                     url: authorizedReq.url,
                     responseURL: responseInfo.finalURL,
@@ -272,7 +300,7 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
 
                 continuation.resume(returning: (data, http, responseInfo))
             }
-            taskId = task.taskIdentifier
+            taskIdBox.value = task.taskIdentifier
             task.resume()
         }
     }
@@ -419,7 +447,7 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
 
         let dto = Request(
             threadId: envelope.threadId.uuidString,
-            clientRequestId: envelope.packetId.uuidString,
+            clientRequestId: envelope.requestId,
             message: envelope.messageText
         )
         req.httpBody = try JSONEncoder().encode(dto)

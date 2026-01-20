@@ -21,10 +21,7 @@ import SwiftData
 ///
 /// Covered:
 /// - backoff (don’t resend too soon)
-/// - pending TTL expiry (pending too long -> fail w/ 408 attempt)
 /// - max attempts terminal (too many attempts -> fail)
-///
-/// Note: `TransmissionActions` is `@MainActor`, so these tests run on MainActor.
 @MainActor
 final class TransmissionActionsRetryPolicyTests: XCTestCase {
 
@@ -68,6 +65,29 @@ final class TransmissionActionsRetryPolicyTests: XCTestCase {
         func send(envelope: PacketEnvelope, diagnostics: DiagnosticsContext? = nil) async throws -> ChatResponse {
             sendCallCount += 1
             return try await handler(envelope)
+        }
+    }
+
+    private final class RecordingTransport: ChatTransport {
+        private(set) var requestIds: [String] = []
+        private var callIndex: Int = 0
+        private let responses: [Result<ChatResponse, Error>]
+
+        init(responses: [Result<ChatResponse, Error>]) {
+            self.responses = responses
+        }
+
+        func send(envelope: PacketEnvelope, diagnostics: DiagnosticsContext? = nil) async throws -> ChatResponse {
+            requestIds.append(envelope.requestId)
+            let idx = min(callIndex, responses.count - 1)
+            callIndex += 1
+
+            switch responses[idx] {
+            case let .success(response):
+                return response
+            case let .failure(error):
+                throw error
+            }
         }
     }
 
@@ -191,10 +211,9 @@ final class TransmissionActionsRetryPolicyTests: XCTestCase {
         XCTAssertEqual(fresh.status, .queued)
     }
 
-    func test_processQueue_pendingTTL_expires_marksFailed_records408Attempt() async throws {
+    func test_processQueue_ignores_poll_attempts_for_send_limits() async throws {
         // Arrange
         let transport = CountingTransport { _ in
-            // TTL expiry should short-circuit before send.
             return ChatResponse(
                 text: "ok",
                 statusCode: 200,
@@ -215,18 +234,34 @@ final class TransmissionActionsRetryPolicyTests: XCTestCase {
 
         let tx = try fetchSingleTransmission()
 
-        // Pending for longer than pendingTTLSeconds (= 30s in `TransmissionActions`).
-        let old = Date().addingTimeInterval(-31)
-        let pendingAttempt = DeliveryAttempt(
-            createdAt: old,
-            statusCode: 202,
-            outcome: .pending,
-            errorMessage: nil,
-            transmissionId: nil,
-            transmission: tx
-        )
-        tx.deliveryAttempts.append(pendingAttempt)
-        context.insert(pendingAttempt)
+        // Seed 5 send attempts (below max), plus newer poll attempts that should not block sending.
+        for i in 0..<5 {
+            let a = DeliveryAttempt(
+                createdAt: Date().addingTimeInterval(TimeInterval(-120 - i)),
+                statusCode: 500,
+                outcome: .failed,
+                source: .send,
+                errorMessage: "fail \(i)",
+                transmissionId: nil,
+                transmission: tx
+            )
+            tx.deliveryAttempts.append(a)
+            context.insert(a)
+        }
+
+        for i in 0..<3 {
+            let a = DeliveryAttempt(
+                createdAt: Date().addingTimeInterval(TimeInterval(-i)),
+                statusCode: 200,
+                outcome: .pending,
+                source: .poll,
+                errorMessage: nil,
+                transmissionId: "tx-poll",
+                transmission: tx
+            )
+            tx.deliveryAttempts.append(a)
+            context.insert(a)
+        }
 
         tx.status = .queued
         try context.save()
@@ -235,19 +270,10 @@ final class TransmissionActionsRetryPolicyTests: XCTestCase {
         await actions.processQueue()
 
         // Assert
-        XCTAssertEqual(transport.sendCallCount, 0)
+        XCTAssertEqual(transport.sendCallCount, 1)
 
         let fresh = try fetchSingleTransmission()
-        XCTAssertEqual(fresh.status, .failed)
-        XCTAssertNotNil(fresh.lastError)
-        XCTAssertTrue(fresh.lastError?.lowercased().contains("timed out") == true)
-
-        // Original pending + terminal 408 attempt.
-        XCTAssertEqual(fresh.deliveryAttempts.count, 2)
-
-        let last = fresh.deliveryAttempts.sorted(by: { $0.createdAt < $1.createdAt }).last
-        XCTAssertEqual(last?.statusCode, 408)
-        XCTAssertEqual(last?.outcome, .failed)
+        XCTAssertEqual(fresh.status, .succeeded)
     }
 
     func test_processQueue_maxAttempts_marksFailed_terminal() async throws {
@@ -274,7 +300,7 @@ final class TransmissionActionsRetryPolicyTests: XCTestCase {
 
         let tx = try fetchSingleTransmission()
 
-        // Seed attempts >= maxAttempts (= 6 in `TransmissionActions`).
+        // Seed attempts >= maxSendAttempts (= 6 in `TransmissionActions`).
         // Use older createdAt values so we don’t hit backoff logic first.
         for i in 0..<6 {
             let a = DeliveryAttempt(
@@ -309,5 +335,84 @@ final class TransmissionActionsRetryPolicyTests: XCTestCase {
         let last = fresh.deliveryAttempts.sorted(by: { $0.createdAt < $1.createdAt }).last
         XCTAssertEqual(last?.statusCode, -1)
         XCTAssertEqual(last?.outcome, .failed)
+    }
+
+    func test_retryFailed_persists_changes_on_reload() async throws {
+        let transport = CountingTransport { _ in
+            return ChatResponse(
+                text: "ok",
+                statusCode: 200,
+                transmissionId: "tx-1",
+                pending: false,
+                responseInfo: nil,
+                threadMemento: nil,
+                evidenceSummary: nil,
+                evidence: nil,
+                evidenceWarnings: nil,
+                outputEnvelope: nil
+            )
+        }
+
+        let (thread, user) = makeThreadAndUserMessage(text: "hello")
+        let actions = TransmissionActions(modelContext: context, transport: transport)
+        actions.enqueueChat(thread: thread, userMessage: user)
+
+        let tx = try fetchSingleTransmission()
+        tx.status = .failed
+        tx.lastError = "boom"
+        try context.save()
+
+        actions.retryFailed()
+
+        let reloadContext = ModelContext(container)
+        guard let reloaded = try reloadContext.fetch(FetchDescriptor<Transmission>()).first else {
+            XCTFail("Expected to reload a Transmission")
+            return
+        }
+
+        XCTAssertEqual(reloaded.status, .queued)
+        XCTAssertNil(reloaded.lastError)
+    }
+
+    func test_requestId_stays_stable_across_retries() async throws {
+        let transport = RecordingTransport(
+            responses: [
+                .failure(TransportError.httpStatus(HTTPErrorInfo(code: 500, body: "boom"))),
+                .success(
+                    ChatResponse(
+                        text: "ok",
+                        statusCode: 200,
+                        transmissionId: "tx-1",
+                        pending: false,
+                        responseInfo: nil,
+                        threadMemento: nil,
+                        evidenceSummary: nil,
+                        evidence: nil,
+                        evidenceWarnings: nil,
+                        outputEnvelope: nil
+                    )
+                )
+            ]
+        )
+
+        let (thread, user) = makeThreadAndUserMessage(text: "hello")
+        let actions = TransmissionActions(modelContext: context, transport: transport)
+        actions.enqueueChat(thread: thread, userMessage: user)
+
+        await actions.processQueue()
+
+        let tx = try fetchSingleTransmission()
+        if let lastAttempt = tx.deliveryAttempts.sorted(by: { $0.createdAt < $1.createdAt }).last {
+            lastAttempt.createdAt = Date().addingTimeInterval(-5)
+            try context.save()
+        }
+
+        await actions.processQueue()
+
+        XCTAssertEqual(transport.requestIds.count, 2)
+        XCTAssertEqual(transport.requestIds[0], transport.requestIds[1])
+
+        let refreshed = try fetchSingleTransmission()
+        XCTAssertEqual(refreshed.requestId, transport.requestIds[0])
     }
 }

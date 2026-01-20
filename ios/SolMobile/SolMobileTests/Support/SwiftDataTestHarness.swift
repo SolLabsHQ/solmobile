@@ -25,6 +25,7 @@ final class SwiftDataTestHarness {
                 Capture.self,
                 ClaimSupport.self,
                 ClaimMapEntry.self,
+                ThreadReadState.self,
                 Packet.self,
                 Transmission.self,
                 DeliveryAttempt.self,

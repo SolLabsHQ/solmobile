@@ -5,6 +5,7 @@
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>com.sollabshq.solmobile.cleanup</string>
+		<string>com.sollabshq.solmobile.outboxRefresh</string>
 	</array>
 	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
 	<string>SolMobile needs calendar access to save events from conversations.</string>
@@ -13,8 +14,8 @@
 	<key>SOL_ENV</key>
 	<string>staging</string>
 	<key>SOLSERVER_BASE_URL_STAGING</key>
-	<string>https://solserver-staging.fly.dev</string>
+	<string>https://solserver-staging.sollabshq.com</string>
 	<key>SOLSERVER_BASE_URL_PROD</key>
-	<string>https://solserver-prod.example.com</string>
+	<string>https://api.sollabshq.com</string>
 </dict>
 </plist>

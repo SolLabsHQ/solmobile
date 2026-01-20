@@ -9,9 +9,7 @@ import SwiftUI
 import SwiftData
 
 struct ContentView: View {
-    private static let sharedContainer = ModelContainerFactory.makeContainer(
-        isInMemoryOnly: ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
-    )
+    @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -32,10 +30,9 @@ struct ContentView: View {
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape") }
         }
-        .modelContainer(Self.sharedContainer)
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
-            let context = ModelContext(Self.sharedContainer)
+            let context = ModelContext(modelContext.container)
             let service = StorageCleanupService(modelContext: context)
             guard service.isCleanupDue() else { return }
             Task {
@@ -44,12 +41,6 @@ struct ContentView: View {
             }
             StorageCleanupScheduler.shared.schedule()
         }
-    }
-
-    private static func makeModelContainer() -> ModelContainer {
-        ModelContainerFactory.makeContainer(
-            isInMemoryOnly: ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
-        )
     }
 }
 
