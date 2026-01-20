@@ -144,7 +144,7 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
            let url = authorizedReq.url,
            url.scheme?.lowercased() != "https" {
             let error = TransportError.insecureBaseURL(reason: "HTTPS required in \(AppEnvironment.current.rawValue)")
-            DiagnosticsStore.shared.record(
+            DiagnosticsStore.recordAsync(
                 method: authorizedReq.httpMethod ?? "GET",
                 url: authorizedReq.url,
                 responseURL: nil,
@@ -180,7 +180,7 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
 
                 if let error {
                     let decision = RetryPolicy.classify(statusCode: nil, body: nil, headers: nil, error: error)
-                    DiagnosticsStore.shared.record(
+                    DiagnosticsStore.recordAsync(
                         method: authorizedReq.httpMethod ?? "GET",
                         url: authorizedReq.url,
                         responseURL: response?.url,
@@ -208,7 +208,7 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
 
                 guard let data, let http = response as? HTTPURLResponse else {
                     let error = URLError(.badServerResponse)
-                    DiagnosticsStore.shared.record(
+                    DiagnosticsStore.recordAsync(
                         method: authorizedReq.httpMethod ?? "GET",
                         url: authorizedReq.url,
                         responseURL: response?.url,
@@ -252,7 +252,7 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
                 let traceRunId = self.extractTraceRunId(headers: headers, body: bodyString)
                 let transmissionId = self.extractTransmissionId(headers: headers, body: bodyString)
 
-                DiagnosticsStore.shared.record(
+                DiagnosticsStore.recordAsync(
                     method: authorizedReq.httpMethod ?? "GET",
                     url: authorizedReq.url,
                     responseURL: responseInfo.finalURL,

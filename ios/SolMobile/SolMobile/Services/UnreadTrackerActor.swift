@@ -10,7 +10,7 @@ import SwiftData
 
 actor UnreadTrackerActor {
     private let context: ModelContext
-    private var pendingUpdates: [UUID: UUID] = [:]
+    private var pendingViewedUpdates: [UUID: UUID] = [:]
     private var flushTask: Task<Void, Never>?
     private let debounceNanos: UInt64 = 300_000_000
 
@@ -18,23 +18,23 @@ actor UnreadTrackerActor {
         self.context = ModelContext(container)
     }
 
-    func markSeen(threadId: UUID, messageId: UUID) {
-        if pendingUpdates[threadId] == messageId {
+    func markViewed(threadId: UUID, messageId: UUID) {
+        if pendingViewedUpdates[threadId] == messageId {
             return
         }
 
-        pendingUpdates[threadId] = messageId
+        pendingViewedUpdates[threadId] = messageId
         scheduleFlush()
     }
 
     func flush(threadId: UUID? = nil) async {
         let updates: [UUID: UUID]
-        if let threadId, let messageId = pendingUpdates[threadId] {
+        if let threadId, let messageId = pendingViewedUpdates[threadId] {
             updates = [threadId: messageId]
-            pendingUpdates[threadId] = nil
+            pendingViewedUpdates[threadId] = nil
         } else {
-            updates = pendingUpdates
-            pendingUpdates.removeAll()
+            updates = pendingViewedUpdates
+            pendingViewedUpdates.removeAll()
         }
 
         guard !updates.isEmpty else { return }
@@ -60,12 +60,39 @@ actor UnreadTrackerActor {
         )
 
         if let existing = try? context.fetch(descriptor).first {
-            existing.lastSeenMessageId = messageId
-            existing.lastSeenAt = Date()
+            existing.lastViewedMessageId = messageId
+            existing.lastViewedAt = Date()
+            if shouldAdvanceReadUpTo(currentId: existing.readUpToMessageId, candidateId: messageId) {
+                existing.readUpToMessageId = messageId
+                existing.readUpToAt = Date()
+            }
             return
         }
 
-        let state = ThreadReadState(threadId: threadId, lastSeenMessageId: messageId, lastSeenAt: Date())
+        let state = ThreadReadState(
+            threadId: threadId,
+            lastViewedMessageId: messageId,
+            readUpToMessageId: messageId,
+            lastViewedAt: Date(),
+            readUpToAt: Date()
+        )
         context.insert(state)
+    }
+
+    private func shouldAdvanceReadUpTo(currentId: UUID?, candidateId: UUID) -> Bool {
+        guard let candidate = fetchMessage(id: candidateId) else { return false }
+        guard let currentId else { return true }
+        guard let current = fetchMessage(id: currentId) else { return true }
+
+        if candidate.createdAt == current.createdAt {
+            return candidate.id.uuidString > current.id.uuidString
+        }
+        return candidate.createdAt > current.createdAt
+    }
+
+    private func fetchMessage(id: UUID) -> Message? {
+        let msgId = id
+        let descriptor = FetchDescriptor<Message>(predicate: #Predicate { $0.id == msgId })
+        return try? context.fetch(descriptor).first
     }
 }

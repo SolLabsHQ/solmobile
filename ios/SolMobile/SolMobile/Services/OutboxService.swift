@@ -18,6 +18,7 @@ final class OutboxService {
     private let container: ModelContainer
     private let transport: any ChatTransport
     private let statusWatcher: TransmissionStatusWatcher?
+    private let worker: OutboxWorkerActor
 
     private var isProcessing: Bool = false
     private var needsRerun: Bool = false
@@ -44,6 +45,11 @@ final class OutboxService {
         } else {
             self.statusWatcher = nil
         }
+        self.worker = OutboxWorkerActor(
+            container: container,
+            transport: resolvedTransport,
+            statusWatcher: self.statusWatcher
+        )
     }
 
     func start() {
@@ -68,13 +74,13 @@ final class OutboxService {
     }
 
     func retryFailed() {
-        let engine = TransmissionActions(
-            modelContext: ModelContext(container),
-            transport: transport,
-            statusWatcher: statusWatcher
-        )
-        engine.retryFailed()
-        kick(reason: "retry", useBackgroundTask: true)
+        Task { [weak self] in
+            guard let self else { return }
+            await self.worker.retryFailed()
+            await MainActor.run {
+                self.kick(reason: "retry", useBackgroundTask: true)
+            }
+        }
     }
 
     func runBackgroundRefresh() async {
@@ -156,12 +162,7 @@ final class OutboxService {
         outboxLog.info("run_once reason=\(reason, privacy: .public)")
 
         let work: () async -> Void = {
-            let engine = TransmissionActions(
-                modelContext: ModelContext(self.container),
-                transport: self.transport,
-                statusWatcher: self.statusWatcher
-            )
-            await engine.processQueue(pollLimit: self.pollLimit)
+            await self.worker.processQueue(pollLimit: self.pollLimit)
         }
 
         if useBackgroundTask {

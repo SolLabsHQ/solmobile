@@ -6,6 +6,7 @@ import UIKit
 
 struct ThreadDetailView: View {
     private static let perfLog = OSLog(subsystem: "com.sollabshq.solmobile", category: "ThreadDetailPerf")
+    private static let pendingSlowThresholdSeconds: TimeInterval = 60
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
@@ -21,6 +22,9 @@ struct ThreadDetailView: View {
     @State private var autoScrollToLatest: Bool = true
     @State private var initialScrollDone: Bool = false
     @State private var showJumpToLatest: Bool = false
+    @State private var showNewMessagesPill: Bool = false
+    @State private var newMessagesTargetId: UUID? = nil
+    @State private var newMessagesCount: Int? = nil
     @State private var scrollViewportHeight: CGFloat = 0
     @State private var lastVisibleAnchorId: UUID? = nil
 
@@ -136,7 +140,22 @@ struct ThreadDetailView: View {
                             proxy.scrollTo(last.id, anchor: .bottom)
                         } else {
                             showJumpToLatest = true
+                            refreshNewMessagesPill()
                         }
+                    }
+
+                    if showNewMessagesPill, let targetId = newMessagesTargetId {
+                        Button(newMessagesLabel) {
+                            autoScrollToLatest = false
+                            showJumpToLatest = true
+                            proxy.scrollTo(targetId, anchor: .top)
+                        }
+                        .font(.footnote)
+                        .padding(.vertical, 6)
+                        .padding(.horizontal, 12)
+                        .background(.thinMaterial)
+                        .clipShape(Capsule())
+                        .padding(.bottom, 6)
                     }
 
                     if showJumpToLatest {
@@ -144,6 +163,7 @@ struct ThreadDetailView: View {
                             guard let last = messages.last else { return }
                             autoScrollToLatest = true
                             showJumpToLatest = false
+                            showNewMessagesPill = false
                             proxy.scrollTo(last.id, anchor: .bottom)
                         }
                         .font(.footnote)
@@ -312,10 +332,16 @@ struct ThreadDetailView: View {
         }
 
         if s.queued + s.sending + s.pending > 0 {
+            let statusText: String
+            if hasLongPending {
+                statusText = "Still processing… pending \(s.pending), queued \(s.queued), sending \(s.sending)"
+            } else {
+                statusText = "Outbox: queued \(s.queued), pending \(s.pending), sending \(s.sending)"
+            }
             return AnyView(
                 HStack(spacing: 10) {
                     ProgressView()
-                    Text("Outbox: queued \(s.queued), pending \(s.pending), sending \(s.sending)")
+                    Text(statusText)
                         .font(.footnote)
                     Spacer()
                 }
@@ -624,6 +650,11 @@ private func acceptMemento(_ m: MementoViewModel) {
         transmissions.map { $0.statusRaw }.joined(separator: "|")
     }
 
+    private var newMessagesLabel: String {
+        guard let count = newMessagesCount, count > 0 else { return "New messages" }
+        return "\(count) new message\(count == 1 ? "" : "s")"
+    }
+
     private func updateOutboxSummary() {
         // Derived state from SwiftData query; cache to avoid repeated filters during renders.
         let queued = transmissions.filter { $0.status == .queued }.count
@@ -633,28 +664,66 @@ private func acceptMemento(_ m: MementoViewModel) {
         cachedOutboxSummary = OutboxSummary(queued: queued, sending: sending, pending: pending, failed: failed)
     }
 
+    private func pendingSince(_ tx: Transmission) -> Date? {
+        let attempts = tx.deliveryAttempts.sorted { $0.createdAt < $1.createdAt }
+        guard let last = attempts.last, last.outcome == .pending else { return nil }
+
+        var since = last.createdAt
+        for attempt in attempts.reversed() {
+            if attempt.outcome == .pending {
+                since = attempt.createdAt
+            } else {
+                break
+            }
+        }
+        return since
+    }
+
+    private var hasLongPending: Bool {
+        guard outboxSummary.pending > 0 else { return false }
+        let now = Date()
+        return transmissions.contains { tx in
+            guard tx.status == .pending,
+                  let since = pendingSince(tx) else { return false }
+            return now.timeIntervalSince(since) >= Self.pendingSlowThresholdSeconds
+        }
+    }
+
     private func applyInitialScroll(proxy: ScrollViewProxy) {
         guard !initialScrollDone else { return }
         guard !messages.isEmpty else { return }
         initialScrollDone = true
 
-        if let unreadId = computeFirstUnreadMessageId() {
-            autoScrollToLatest = false
-            showJumpToLatest = true
-            proxy.scrollTo(unreadId, anchor: .top)
-            return
+        if let state = fetchReadState() {
+            if let lastViewedId = state.lastViewedMessageId,
+               messages.contains(where: { $0.id == lastViewedId }) {
+                autoScrollToLatest = false
+                showJumpToLatest = true
+                proxy.scrollTo(lastViewedId, anchor: .top)
+                refreshNewMessagesPill(forceShow: true, state: state)
+                return
+            }
+
+            if state.lastViewedMessageId != nil,
+               let fallbackUnread = computeFirstUnreadMessageId(readUpToId: state.readUpToMessageId) {
+                autoScrollToLatest = false
+                showJumpToLatest = true
+                proxy.scrollTo(fallbackUnread, anchor: .top)
+                refreshNewMessagesPill(forceShow: true, state: state)
+                return
+            }
         }
 
         if let last = messages.last {
             autoScrollToLatest = true
+            showNewMessagesPill = false
             proxy.scrollTo(last.id, anchor: .bottom)
         }
     }
 
-    private func computeFirstUnreadMessageId() -> UUID? {
-        guard let state = fetchReadState(),
-              let lastSeenId = state.lastSeenMessageId,
-              let idx = messages.firstIndex(where: { $0.id == lastSeenId }) else {
+    private func computeFirstUnreadMessageId(readUpToId: UUID?) -> UUID? {
+        guard let readUpToId,
+              let idx = messages.firstIndex(where: { $0.id == readUpToId }) else {
             return nil
         }
 
@@ -667,6 +736,33 @@ private func acceptMemento(_ m: MementoViewModel) {
         let threadId = thread.id
         let d = FetchDescriptor<ThreadReadState>(predicate: #Predicate { $0.threadId == threadId })
         return try? modelContext.fetch(d).first
+    }
+
+    private func unreadCount(readUpToId: UUID?) -> Int? {
+        guard let readUpToId,
+              let idx = messages.firstIndex(where: { $0.id == readUpToId }) else {
+            return nil
+        }
+
+        let nextIndex = messages.index(after: idx)
+        guard nextIndex < messages.endIndex else { return nil }
+        return messages.distance(from: nextIndex, to: messages.endIndex)
+    }
+
+    private func refreshNewMessagesPill(forceShow: Bool = false, state: ThreadReadState? = nil) {
+        let readState = state ?? fetchReadState()
+        guard let readState,
+              let readUpToId = readState.readUpToMessageId,
+              let firstUnread = computeFirstUnreadMessageId(readUpToId: readUpToId) else {
+            showNewMessagesPill = false
+            newMessagesTargetId = nil
+            newMessagesCount = nil
+            return
+        }
+
+        newMessagesTargetId = firstUnread
+        newMessagesCount = unreadCount(readUpToId: readUpToId)
+        showNewMessagesPill = forceShow || !autoScrollToLatest
     }
 
     private func updateVisibleAnchor(frames: [UUID: CGRect]) {
@@ -682,7 +778,11 @@ private func acceptMemento(_ m: MementoViewModel) {
         lastVisibleAnchorId = newest
 
         if let unreadTracker {
-            Task { await unreadTracker.markSeen(threadId: thread.id, messageId: newest) }
+            Task { await unreadTracker.markViewed(threadId: thread.id, messageId: newest) }
+        }
+
+        if !autoScrollToLatest {
+            refreshNewMessagesPill()
         }
     }
 
@@ -696,10 +796,12 @@ private func acceptMemento(_ m: MementoViewModel) {
             if !autoScrollToLatest {
                 autoScrollToLatest = true
                 showJumpToLatest = false
+                showNewMessagesPill = false
             }
         } else if autoScrollToLatest {
             autoScrollToLatest = false
             showJumpToLatest = true
+            refreshNewMessagesPill()
         }
     }
 

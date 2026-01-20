@@ -16,6 +16,12 @@ enum DeliveryOutcome: String, Codable {
     case pending
 }
 
+enum DeliveryAttemptSource: String, Codable {
+    case send
+    case poll
+    case terminal
+}
+
 @Model
 final class DeliveryAttempt {
     @Attribute(.unique) var id: UUID
@@ -29,6 +35,9 @@ final class DeliveryAttempt {
 
     /// Outcome derived from statusCode and client logic.
     var outcome: DeliveryOutcome
+
+    /// Whether this was a send attempt, poll attempt, or local terminal record.
+    var source: DeliveryAttemptSource
 
     /// Optional short error string (network error, decode error, etc.).
     var errorMessage: String?
@@ -53,6 +62,7 @@ final class DeliveryAttempt {
         createdAt: Date = Date(),
         statusCode: Int,
         outcome: DeliveryOutcome,
+        source: DeliveryAttemptSource = .send,
         errorMessage: String? = nil,
         transmissionId: String? = nil,
         retryableInferred: Bool? = nil,
@@ -64,6 +74,7 @@ final class DeliveryAttempt {
         self.createdAt = createdAt
         self.statusCode = statusCode
         self.outcome = outcome
+        self.source = source
         self.errorMessage = errorMessage
         self.transmissionId = transmissionId
         self.retryableInferred = retryableInferred

@@ -12,18 +12,24 @@ import SwiftData
 final class ThreadReadState {
     @Attribute(.unique) var id: UUID
     @Attribute(.unique) var threadId: UUID
-    var lastSeenMessageId: UUID?
-    var lastSeenAt: Date
+    var lastViewedMessageId: UUID?
+    var readUpToMessageId: UUID?
+    var lastViewedAt: Date
+    var readUpToAt: Date?
 
     init(
         id: UUID = UUID(),
         threadId: UUID,
-        lastSeenMessageId: UUID? = nil,
-        lastSeenAt: Date = Date()
+        lastViewedMessageId: UUID? = nil,
+        readUpToMessageId: UUID? = nil,
+        lastViewedAt: Date = Date(),
+        readUpToAt: Date? = nil
     ) {
         self.id = id
         self.threadId = threadId
-        self.lastSeenMessageId = lastSeenMessageId
-        self.lastSeenAt = lastSeenAt
+        self.lastViewedMessageId = lastViewedMessageId
+        self.readUpToMessageId = readUpToMessageId
+        self.lastViewedAt = lastViewedAt
+        self.readUpToAt = readUpToAt
     }
 }

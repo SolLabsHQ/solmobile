@@ -225,12 +225,12 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
     }
 
     @MainActor
-    func test_pendingTTL_exceeded_marks_failed_without_calling_transport() async {
-        // Arrange a pending Transmission with an old pending attempt that has no server transmissionId.
-        let transport = MockPendingNoPollingTransport()
+    func test_pendingLong_does_not_fail_terminally() async {
+        // Arrange a pending Transmission with an old pending attempt that still has a server id.
+        let transport = MockPendingThenPollStillPendingTransport()
         let actions = TransmissionActions(modelContext: context, transport: transport)
 
-        let thread = SeedFactory.makeThread(context, title: "ttl-thread")
+        let thread = SeedFactory.makeThread(context, title: "pending-long-thread")
         let user = SeedFactory.makeUserMessage(context, thread: thread, text: "hello")
 
         SeedFactory.enqueueChat(actions, thread: thread, userMessage: user)
@@ -240,14 +240,14 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
             return
         }
 
-        // Force an old pending streak with no server transmission id so we hit the TTL path.
-        let old = Date().addingTimeInterval(-60)
+        let old = Date().addingTimeInterval(-120)
         let pending = DeliveryAttempt(
             createdAt: old,
             statusCode: 202,
             outcome: .pending,
+            source: .send,
             errorMessage: nil,
-            transmissionId: nil,
+            transmissionId: "tx-pending-still",
             transmission: tx
         )
 
@@ -255,16 +255,15 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
         context.insert(pending)
         tx.status = .pending
 
-        // Act: processQueue should terminal-fail on TTL without attempting send.
+        // Act: processQueue should keep pending (no TTL failure).
         await actions.processQueue()
 
         guard let tx2 = TestFetch.fetchOne(Transmission.self, context) else {
-            XCTFail("Expected a Transmission after TTL check")
+            XCTFail("Expected a Transmission after poll")
             return
         }
 
-        TestAssert.transmissionStatus(.failed, tx2)
-        XCTAssertEqual(tx2.deliveryAttempts.last?.outcome, .failed)
-        XCTAssertEqual(tx2.deliveryAttempts.last?.statusCode, 408)
+        TestAssert.transmissionStatus(.pending, tx2)
+        XCTAssertEqual(tx2.deliveryAttempts.last?.outcome, .pending)
     }
 }

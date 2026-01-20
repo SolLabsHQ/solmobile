@@ -21,10 +21,7 @@ import SwiftData
 ///
 /// Covered:
 /// - backoff (don’t resend too soon)
-/// - pending TTL expiry (pending too long -> fail w/ 408 attempt)
 /// - max attempts terminal (too many attempts -> fail)
-///
-/// Note: `TransmissionActions` is `@MainActor`, so these tests run on MainActor.
 @MainActor
 final class TransmissionActionsRetryPolicyTests: XCTestCase {
 
@@ -191,10 +188,9 @@ final class TransmissionActionsRetryPolicyTests: XCTestCase {
         XCTAssertEqual(fresh.status, .queued)
     }
 
-    func test_processQueue_pendingTTL_expires_marksFailed_records408Attempt() async throws {
+    func test_processQueue_ignores_poll_attempts_for_send_limits() async throws {
         // Arrange
         let transport = CountingTransport { _ in
-            // TTL expiry should short-circuit before send.
             return ChatResponse(
                 text: "ok",
                 statusCode: 200,
@@ -215,39 +211,46 @@ final class TransmissionActionsRetryPolicyTests: XCTestCase {
 
         let tx = try fetchSingleTransmission()
 
-        // Pending for longer than pendingTTLSeconds (= 30s in `TransmissionActions`).
-        let old = Date().addingTimeInterval(-31)
-        let pendingAttempt = DeliveryAttempt(
-            createdAt: old,
-            statusCode: 202,
-            outcome: .pending,
-            errorMessage: nil,
-            transmissionId: nil,
-            transmission: tx
-        )
-        tx.deliveryAttempts.append(pendingAttempt)
-        context.insert(pendingAttempt)
+        // Seed 5 send attempts (below max), plus newer poll attempts that should not block sending.
+        for i in 0..<5 {
+            let a = DeliveryAttempt(
+                createdAt: Date().addingTimeInterval(TimeInterval(-120 - i)),
+                statusCode: 500,
+                outcome: .failed,
+                source: .send,
+                errorMessage: "fail \(i)",
+                transmissionId: nil,
+                transmission: tx
+            )
+            tx.deliveryAttempts.append(a)
+            context.insert(a)
+        }
 
-        tx.status = .pending
+        for i in 0..<3 {
+            let a = DeliveryAttempt(
+                createdAt: Date().addingTimeInterval(TimeInterval(-i)),
+                statusCode: 200,
+                outcome: .pending,
+                source: .poll,
+                errorMessage: nil,
+                transmissionId: "tx-poll",
+                transmission: tx
+            )
+            tx.deliveryAttempts.append(a)
+            context.insert(a)
+        }
+
+        tx.status = .queued
         try context.save()
 
         // Act
         await actions.processQueue()
 
         // Assert
-        XCTAssertEqual(transport.sendCallCount, 0)
+        XCTAssertEqual(transport.sendCallCount, 1)
 
         let fresh = try fetchSingleTransmission()
-        XCTAssertEqual(fresh.status, .failed)
-        XCTAssertNotNil(fresh.lastError)
-        XCTAssertTrue(fresh.lastError?.lowercased().contains("timed out") == true)
-
-        // Original pending + terminal 408 attempt.
-        XCTAssertEqual(fresh.deliveryAttempts.count, 2)
-
-        let last = fresh.deliveryAttempts.sorted(by: { $0.createdAt < $1.createdAt }).last
-        XCTAssertEqual(last?.statusCode, 408)
-        XCTAssertEqual(last?.outcome, .failed)
+        XCTAssertEqual(fresh.status, .succeeded)
     }
 
     func test_processQueue_maxAttempts_marksFailed_terminal() async throws {
@@ -274,7 +277,7 @@ final class TransmissionActionsRetryPolicyTests: XCTestCase {
 
         let tx = try fetchSingleTransmission()
 
-        // Seed attempts >= maxAttempts (= 6 in `TransmissionActions`).
+        // Seed attempts >= maxSendAttempts (= 6 in `TransmissionActions`).
         // Use older createdAt values so we don’t hit backoff logic first.
         for i in 0..<6 {
             let a = DeliveryAttempt(

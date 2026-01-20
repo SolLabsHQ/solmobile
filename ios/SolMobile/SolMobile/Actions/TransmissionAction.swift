@@ -190,7 +190,6 @@ struct ChatResponse {
 
 // MARK: - Outbox processor
 
-@MainActor
 final class TransmissionActions {
 
     private let outboxLog = Logger(subsystem: "com.sollabshq.solmobile", category: "Outbox")
@@ -201,9 +200,13 @@ final class TransmissionActions {
     private let statusWatcher: TransmissionStatusWatcher?
 
     // v0 retry derivation (local-first): derived from DeliveryAttempt ledger.
-    private let pendingTTLSeconds: TimeInterval = 30
-    private let maxAttempts: Int = 6
+    private let maxSendAttempts: Int = 6
     private let backoffCapSeconds: TimeInterval = 10
+    private let pendingFastIntervalSeconds: TimeInterval = 2
+    private let pendingLinearStartSeconds: TimeInterval = 10
+    private let pendingLinearStepSeconds: TimeInterval = 2
+    private let pendingSlowThresholdSeconds: TimeInterval = 60
+    private let pendingSlowIntervalSeconds: TimeInterval = 20
 
     init(
         modelContext: ModelContext,
@@ -292,13 +295,18 @@ final class TransmissionActions {
             guard let tx = try? fetchTransmission(id: sel.txId) else { continue }
             let now = Date()
             let attempts = sortedAttempts(tx.deliveryAttempts)
-            let attemptCount = attempts.count
 
-            if enforceTerminalConditions(runId: runId, tx: tx, txId: sel.txId, attempts: attempts, attemptCount: attemptCount, now: now) {
+            guard let pendingSince = pendingSinceIfActive(attempts) else {
                 continue
             }
 
-            if shouldRespectBackoffAndExit(runId: runId, txId: sel.txId, attempts: attempts, attemptCount: attemptCount, now: now) {
+            if shouldRespectPollBackoffAndExit(
+                runId: runId,
+                txId: sel.txId,
+                attempts: attempts,
+                pendingSince: pendingSince,
+                now: now
+            ) {
                 continue
             }
 
@@ -324,15 +332,16 @@ final class TransmissionActions {
 
         let now = Date()
         let attempts = sortedAttempts(tx.deliveryAttempts)
-        let attemptCount = attempts.count
+        let sendAttempts = attempts.filter { $0.source == .send }
+        let sendAttemptCount = sendAttempts.count
 
         // Client-side terminal conditions.
-        if enforceTerminalConditions(runId: runId, tx: tx, txId: sel.txId, attempts: attempts, attemptCount: attemptCount, now: now) {
+        if enforceSendAttemptLimit(runId: runId, tx: tx, txId: sel.txId, sendAttemptCount: sendAttemptCount) {
             return
         }
 
         // Respect backoff (quiet exit, remain queued).
-        if shouldRespectBackoffAndExit(runId: runId, txId: sel.txId, attempts: attempts, attemptCount: attemptCount, now: now) {
+        if shouldRespectSendBackoffAndExit(runId: runId, txId: sel.txId, sendAttempts: sendAttempts, sendAttemptCount: sendAttemptCount, now: now) {
             return
         }
 
@@ -438,6 +447,7 @@ final class TransmissionActions {
         attemptId: UUID,
         statusCode: Int,
         outcome: DeliveryOutcome,
+        source: DeliveryAttemptSource,
         errorMessage: String?,
         transmissionId: String?,
         retryableInferred: Bool?,
@@ -448,6 +458,7 @@ final class TransmissionActions {
             id: attemptId,
             statusCode: statusCode,
             outcome: outcome,
+            source: source,
             errorMessage: errorMessage,
             transmissionId: transmissionId,
             retryableInferred: retryableInferred,
@@ -603,6 +614,7 @@ final class TransmissionActions {
                 attemptId: attemptId,
                 statusCode: 422,
                 outcome: .failed,
+                source: .send,
                 errorMessage: "budget_exceeded(local)",
                 transmissionId: nil,
                 retryableInferred: false,
@@ -664,6 +676,7 @@ final class TransmissionActions {
                 attemptId: attemptId,
                 statusCode: response.statusCode,
                 outcome: outcome,
+                source: .send,
                 errorMessage: nil,
                 transmissionId: response.transmissionId,
                 retryableInferred: nil,
@@ -725,6 +738,7 @@ final class TransmissionActions {
                 attemptId: attemptId,
                 statusCode: code,
                 outcome: .failed,
+                source: .send,
                 errorMessage: msg,
                 transmissionId: decision.transmissionId,
                 retryableInferred: decision.retryable,
@@ -747,24 +761,23 @@ final class TransmissionActions {
         return budgetStore.parseBudgetExceeded(from: info.body)
     }
 
-    private func enforceTerminalConditions(
+    private func enforceSendAttemptLimit(
         runId: String,
         tx: Transmission,
         txId: UUID,
-        attempts: [DeliveryAttempt],
-        attemptCount: Int,
-        now: Date
+        sendAttemptCount: Int
     ) -> Bool {
-        if attemptCount >= maxAttempts {
-            // Client-side terminal: too many attempts.
+        if sendAttemptCount >= maxSendAttempts {
+            // Client-side terminal: too many send attempts.
             tx.status = .failed
-            tx.lastError = "Max retry attempts exceeded (\(maxAttempts))"
+            tx.lastError = "Max retry attempts exceeded (\(maxSendAttempts))"
 
             recordAttempt(
                 tx: tx,
                 attemptId: UUID(),
                 statusCode: -1,
                 outcome: .failed,
+                source: .terminal,
                 errorMessage: tx.lastError,
                 transmissionId: nil,
                 retryableInferred: false,
@@ -772,56 +785,67 @@ final class TransmissionActions {
                 finalURL: nil
             )
 
-            outboxLog.error("processQueue run=\(runId, privacy: .public) event=terminal_max_attempts tx=\(short(txId), privacy: .public) attempts=\(attemptCount, privacy: .public)")
+            outboxLog.error("processQueue run=\(runId, privacy: .public) event=terminal_max_attempts tx=\(short(txId), privacy: .public) attempts=\(sendAttemptCount, privacy: .public)")
             return true
-        }
-
-        if let pendingSince = pendingSinceIfActive(attempts) {
-            let age = now.timeIntervalSince(pendingSince)
-
-            if age > pendingTTLSeconds {
-                // Client-side terminal: pending too long.
-                tx.status = .failed
-                tx.lastError = "Timed out waiting for delivery (pending > \(Int(pendingTTLSeconds))s)"
-
-                recordAttempt(
-                    tx: tx,
-                    attemptId: UUID(),
-                    statusCode: 408,
-                    outcome: .failed,
-                    errorMessage: tx.lastError,
-                    transmissionId: nil,
-                    retryableInferred: false,
-                    retryAfterSeconds: nil,
-                    finalURL: nil
-                )
-
-                outboxLog.error("processQueue run=\(runId, privacy: .public) event=terminal_pending_ttl tx=\(short(txId), privacy: .public) ageSec=\(age, privacy: .public) ttlSec=\(self.pendingTTLSeconds, privacy: .public)")
-                return true
-            }
         }
 
         return false
     }
 
-    private func shouldRespectBackoffAndExit(
+    private func shouldRespectSendBackoffAndExit(
+        runId: String,
+        txId: UUID,
+        sendAttempts: [DeliveryAttempt],
+        sendAttemptCount: Int,
+        now: Date
+    ) -> Bool {
+        guard let last = sendAttempts.last else { return false }
+
+        let backoff = backoffSeconds(forAttemptCount: sendAttemptCount)
+        let retryAfter = last.retryAfterSeconds ?? 0
+        let wait = max(backoff, retryAfter)
+        let nextAt = last.createdAt.addingTimeInterval(wait)
+
+        if now < nextAt {
+            // Respect backoff: keep queued and exit quietly.
+            outboxLog.info("processQueue run=\(runId, privacy: .public) event=backoff tx=\(short(txId), privacy: .public) waitSec=\(wait, privacy: .public) nextAt=\(timeWithSeconds(nextAt), privacy: .public)")
+            return true
+        }
+
+        return false
+    }
+
+    private func pollIntervalSeconds(pendingAge: TimeInterval, pollAttemptCount: Int) -> TimeInterval {
+        if pendingAge <= pendingLinearStartSeconds {
+            return pendingFastIntervalSeconds
+        }
+
+        if pendingAge <= pendingSlowThresholdSeconds {
+            let steps = max(0, pollAttemptCount - 1)
+            let interval = pendingFastIntervalSeconds + (TimeInterval(steps) * pendingLinearStepSeconds)
+            return min(interval, pendingSlowIntervalSeconds)
+        }
+
+        return pendingSlowIntervalSeconds
+    }
+
+    private func shouldRespectPollBackoffAndExit(
         runId: String,
         txId: UUID,
         attempts: [DeliveryAttempt],
-        attemptCount: Int,
+        pendingSince: Date,
         now: Date
     ) -> Bool {
-        if let last = attempts.last {
-            let backoff = backoffSeconds(forAttemptCount: attemptCount)
-            let retryAfter = last.retryAfterSeconds ?? 0
-            let wait = max(backoff, retryAfter)
-            let nextAt = last.createdAt.addingTimeInterval(wait)
+        let pollAttempts = attempts.filter { $0.source == .poll }
+        guard let lastPoll = pollAttempts.last else { return false }
 
-            if now < nextAt {
-                // Respect backoff: keep queued and exit quietly.
-                outboxLog.info("processQueue run=\(runId, privacy: .public) event=backoff tx=\(short(txId), privacy: .public) waitSec=\(wait, privacy: .public) nextAt=\(timeWithSeconds(nextAt), privacy: .public)")
-                return true
-            }
+        let pendingAge = now.timeIntervalSince(pendingSince)
+        let wait = pollIntervalSeconds(pendingAge: pendingAge, pollAttemptCount: pollAttempts.count)
+        let nextAt = lastPoll.createdAt.addingTimeInterval(wait)
+
+        if now < nextAt {
+            outboxLog.info("processQueue run=\(runId, privacy: .public) event=poll_backoff tx=\(short(txId), privacy: .public) waitSec=\(wait, privacy: .public) nextAt=\(timeWithSeconds(nextAt), privacy: .public)")
+            return true
         }
 
         return false
@@ -880,6 +904,7 @@ final class TransmissionActions {
                 attemptId: attemptId,
                 statusCode: poll.statusCode,
                 outcome: poll.pending ? .pending : .succeeded,
+                source: .poll,
                 errorMessage: nil,
                 transmissionId: serverTxId,
                 retryableInferred: nil,
@@ -924,6 +949,7 @@ final class TransmissionActions {
                 attemptId: attemptId,
                 statusCode: statusCode(from: error),
                 outcome: .failed,
+                source: .poll,
                 errorMessage: errorMessage(from: error),
                 transmissionId: decision.transmissionId ?? serverTxId,
                 retryableInferred: decision.retryable,
