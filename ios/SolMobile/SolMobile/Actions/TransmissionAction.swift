@@ -277,14 +277,19 @@ nonisolated final class TransmissionActions {
         enqueueChat(
             threadId: thread.id,
             messageId: userMessage.id,
+            messageText: userMessage.text,
             shouldFail: shouldFail
         )
     }
 
-    func enqueueChat(threadId: UUID, messageId: UUID, shouldFail: Bool) {
+    func enqueueChat(threadId: UUID, messageId: UUID, messageText: String?, shouldFail: Bool) {
         outboxLog.info("enqueueChat thread=\(short(threadId), privacy: .public) msg=\(short(messageId), privacy: .public) shouldFail=\(shouldFail, privacy: .public)")
 
-        let packet = Packet(threadId: threadId, messageIds: [messageId])
+        let packet = Packet(
+            threadId: threadId,
+            messageIds: [messageId],
+            messageText: messageText
+        )
         packet.packetType = shouldFail ? "chat_fail" : "chat"
 
         outboxLog.info("enqueueChat packet=\(short(packet.id), privacy: .public) type=\(packet.packetType, privacy: .public)")
@@ -388,6 +393,7 @@ nonisolated final class TransmissionActions {
         let threadId: UUID
         let messageIds: [UUID]
         let firstMessageId: UUID?
+        let messageText: String?
     }
 
     private struct PendingSelection {
@@ -434,7 +440,8 @@ nonisolated final class TransmissionActions {
             packetType: packet.packetType,
             threadId: packet.threadId,
             messageIds: packet.messageIds,
-            firstMessageId: packet.messageIds.first
+            firstMessageId: packet.messageIds.first,
+            messageText: packet.messageText
         )
     }
 
@@ -672,7 +679,33 @@ nonisolated final class TransmissionActions {
         )
 
         do {
-            let userText = (sel.firstMessageId.flatMap { try? fetchMessage(id: $0)?.text }) ?? ""
+            let rawText = sel.messageText
+                ?? (sel.firstMessageId.flatMap { try? fetchMessage(id: $0)?.text })
+                ?? ""
+            let trimmedText = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmedText.isEmpty {
+                tx.status = .failed
+                tx.lastError = "Missing message text for send"
+
+                recordAttempt(
+                    tx: tx,
+                    attemptId: attemptId,
+                    statusCode: -1,
+                    outcome: .failed,
+                    source: .send,
+                    errorMessage: tx.lastError,
+                    transmissionId: nil,
+                    retryableInferred: false,
+                    retryAfterSeconds: nil,
+                    finalURL: nil
+                )
+
+                outboxLog.error("processQueue run=\(runId, privacy: .public) event=missing_text tx=\(short(sel.txId), privacy: .public)")
+                try? modelContext.save()
+                return
+            }
+
+            let userText = rawText
 
             outboxLog.debug("processQueue run=\(runId, privacy: .public) event=context tx=\(short(sel.txId), privacy: .public) userTextLen=\(userText.count, privacy: .public)")
 

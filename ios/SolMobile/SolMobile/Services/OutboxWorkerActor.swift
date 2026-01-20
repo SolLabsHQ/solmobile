@@ -32,13 +32,13 @@ actor OutboxWorkerActor {
         await engine.processQueue(pollLimit: pollLimit, pollFirst: pollFirst)
     }
 
-    func enqueueChat(threadId: UUID, messageId: UUID, shouldFail: Bool) {
+    func enqueueChat(threadId: UUID, messageId: UUID, messageText: String?, shouldFail: Bool) {
         let engine = TransmissionActions(
             modelContext: ModelContext(container),
             transport: transport,
             statusWatcher: statusWatcher
         )
-        engine.enqueueChat(threadId: threadId, messageId: messageId, shouldFail: shouldFail)
+        engine.enqueueChat(threadId: threadId, messageId: messageId, messageText: messageText, shouldFail: shouldFail)
     }
 
     func retryFailed() {

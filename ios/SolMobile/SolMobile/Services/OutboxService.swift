@@ -91,12 +91,14 @@ final class OutboxService {
 
         let threadId = thread.id
         let messageId = userMessage.id
+        let messageText = userMessage.text
 
         Task { [weak self] in
             guard let self else { return }
             await self.worker.enqueueChat(
                 threadId: threadId,
                 messageId: messageId,
+                messageText: messageText,
                 shouldFail: shouldFail
             )
             await MainActor.run {
