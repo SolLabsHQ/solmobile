@@ -15,12 +15,13 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
     private struct MockPendingThenPollTransport: ChatTransportPolling {
         let txId: String = "tx-pending-1"
 
-        func send(envelope: PacketEnvelope) async throws -> ChatResponse {
+        func send(envelope: PacketEnvelope, diagnostics: DiagnosticsContext? = nil) async throws -> ChatResponse {
             return ChatResponse(
                 text: "",
                 statusCode: 202,
                 transmissionId: txId,
                 pending: true,
+                responseInfo: nil,
                 threadMemento: nil,
                 evidenceSummary: nil,
                 evidence: nil,
@@ -29,7 +30,7 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
             )
         }
 
-        func poll(transmissionId: String) async throws -> ChatPollResponse {
+        func poll(transmissionId: String, diagnostics: DiagnosticsContext? = nil) async throws -> ChatPollResponse {
             XCTAssertEqual(transmissionId, txId)
 
             return ChatPollResponse(
@@ -37,6 +38,7 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
                 assistant: "done",
                 serverStatus: "completed",
                 statusCode: 200,
+                responseInfo: nil,
                 threadMemento: nil,
                 evidenceSummary: nil,
                 evidence: nil,
@@ -50,12 +52,13 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
     private struct MockPendingNoPollingTransport: ChatTransport {
         let txId: String = "tx-pending-nopoll"
 
-        func send(envelope: PacketEnvelope) async throws -> ChatResponse {
+        func send(envelope: PacketEnvelope, diagnostics: DiagnosticsContext? = nil) async throws -> ChatResponse {
             ChatResponse(
                 text: "",
                 statusCode: 202,
                 transmissionId: txId,
                 pending: true,
+                responseInfo: nil,
                 threadMemento: nil,
                 evidenceSummary: nil,
                 evidence: nil,
@@ -69,12 +72,13 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
     private struct MockPendingThenPollStillPendingTransport: ChatTransportPolling {
         let txId: String = "tx-pending-still"
 
-        func send(envelope: PacketEnvelope) async throws -> ChatResponse {
+        func send(envelope: PacketEnvelope, diagnostics: DiagnosticsContext? = nil) async throws -> ChatResponse {
             ChatResponse(
                 text: "",
                 statusCode: 202,
                 transmissionId: txId,
                 pending: true,
+                responseInfo: nil,
                 threadMemento: nil,
                 evidenceSummary: nil,
                 evidence: nil,
@@ -83,7 +87,7 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
             )
         }
 
-        func poll(transmissionId: String) async throws -> ChatPollResponse {
+        func poll(transmissionId: String, diagnostics: DiagnosticsContext? = nil) async throws -> ChatPollResponse {
             XCTAssertEqual(transmissionId, txId)
 
             return ChatPollResponse(
@@ -91,6 +95,7 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
                 assistant: nil,
                 serverStatus: "created",
                 statusCode: 200,
+                responseInfo: nil,
                 threadMemento: nil,
                 evidenceSummary: nil,
                 evidence: nil,
@@ -104,12 +109,13 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
     private struct MockPendingThenPollThrowsTransport: ChatTransportPolling {
         let txId: String = "tx-pending-throw"
 
-        func send(envelope: PacketEnvelope) async throws -> ChatResponse {
+        func send(envelope: PacketEnvelope, diagnostics: DiagnosticsContext? = nil) async throws -> ChatResponse {
             ChatResponse(
                 text: "",
                 statusCode: 202,
                 transmissionId: txId,
                 pending: true,
+                responseInfo: nil,
                 threadMemento: nil,
                 evidenceSummary: nil,
                 evidence: nil,
@@ -118,9 +124,9 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
             )
         }
 
-        func poll(transmissionId: String) async throws -> ChatPollResponse {
+        func poll(transmissionId: String, diagnostics: DiagnosticsContext? = nil) async throws -> ChatPollResponse {
             XCTAssertEqual(transmissionId, txId)
-            throw TransportError.httpStatus(code: 503, body: "unavailable")
+            throw TransportError.httpStatus(HTTPErrorInfo(code: 503, body: "unavailable"))
         }
     }
 
@@ -233,7 +239,7 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
     }
 
     @MainActor
-    func test_pending202_poll_throw_marks_failed_and_records_failed_attempt() async {
+    func test_pending202_poll_throw_requeues_and_records_failed_attempt() async {
         let transport = MockPendingThenPollThrowsTransport()
         let actions = TransmissionActions(modelContext: context, transport: transport)
 
@@ -245,7 +251,7 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
         // Pass 1: 202 pending.
         await actions.processQueue()
 
-        // Pass 2: poll throws => tx failed.
+        // Pass 2: poll throws => tx requeued (retryable).
         await actions.processQueue()
 
         guard let tx = TestFetch.fetchOne(Transmission.self, context) else {
@@ -253,7 +259,7 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
             return
         }
 
-        TestAssert.transmissionStatus(.failed, tx)
+        TestAssert.transmissionStatus(.queued, tx)
         XCTAssertEqual(tx.deliveryAttempts.last?.outcome, .failed)
         XCTAssertTrue((tx.lastError ?? "").count > 0)
     }

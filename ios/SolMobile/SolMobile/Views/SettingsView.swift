@@ -9,7 +9,7 @@ import os
 
 struct SettingsView: View {
     // Persisted dev knob (UserDefaults via @AppStorage)
-    @AppStorage("solserver.baseURL") private var solserverBaseURL: String = "http://127.0.0.1:3333"
+    @AppStorage(SolServerBaseURL.storageKey) private var solserverBaseURL: String = SolServerBaseURL.defaultBaseURLString
 
     // Light tracing for debugging (non-sensitive)
     private let log = Logger(subsystem: "com.sollabshq.solmobile", category: "Settings")
@@ -78,7 +78,7 @@ struct SettingsView: View {
     }
 
     private var effectiveBaseURL: String {
-        isValidBaseURL ? trimmedBaseURL : "http://127.0.0.1:3333"
+        isValidBaseURL ? trimmedBaseURL : SolServerBaseURL.defaultBaseURLString
     }
 
     private var healthzURL: URL? {
@@ -130,8 +130,18 @@ struct SettingsView: View {
                     DiagnosticsStore.shared.record(
                         method: "GET",
                         url: url,
+                        responseURL: (resp as? HTTPURLResponse)?.url,
+                        redirectChain: [],
                         status: status,
                         latencyMs: ms,
+                        retryableInferred: nil,
+                        retryableSource: nil,
+                        parsedErrorCode: nil,
+                        traceRunId: nil,
+                        attemptId: nil,
+                        threadId: nil,
+                        localTransmissionId: nil,
+                        transmissionId: nil,
                         error: nil,
                         responseData: data,
                         responseHeaders: (resp as? HTTPURLResponse)?.allHeaderFields,
@@ -172,8 +182,18 @@ struct SettingsView: View {
                         DiagnosticsStore.shared.record(
                             method: "GET",
                             url: url,
+                            responseURL: nil,
+                            redirectChain: [],
                             status: nil,
                             latencyMs: ms,
+                            retryableInferred: nil,
+                            retryableSource: nil,
+                            parsedErrorCode: nil,
+                            traceRunId: nil,
+                            attemptId: nil,
+                            threadId: nil,
+                            localTransmissionId: nil,
+                            transmissionId: nil,
                             error: error,
                             responseData: nil,
                             responseHeaders: nil,

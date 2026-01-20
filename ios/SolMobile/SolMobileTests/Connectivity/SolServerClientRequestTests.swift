@@ -10,10 +10,10 @@ import XCTest
 
 final class SolServerClientRequestTests: XCTestCase {
 
-    private func makeSession() -> URLSession {
+    private func makeConfig() -> URLSessionConfiguration {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [URLProtocolStub.self]
-        return URLSession(configuration: config)
+        return config
     }
 
     private func jsonData(_ obj: Any) -> Data {
@@ -45,10 +45,9 @@ final class SolServerClientRequestTests: XCTestCase {
 
     // NOTE: Change these to your actual initializer shape if needed.
     private func makeClient() -> SolServerClient {
-        let session = makeSession()
         return SolServerClient(
             baseURL: URL(string: "http://127.0.0.1:3333")!,
-            session: session
+            configuration: makeConfig()
         )
     }
 
@@ -207,9 +206,9 @@ final class SolServerClientRequestTests: XCTestCase {
         do {
             _ = try await client.chat(threadId: "t1", clientRequestId: "c1", message: "hi")
             XCTFail("Expected throw")
-        } catch let TransportError.httpStatus(code, body) {
-            XCTAssertEqual(code, 500)
-            XCTAssertTrue(body.contains("boom"))
+        } catch let TransportError.httpStatus(info) {
+            XCTAssertEqual(info.code, 500)
+            XCTAssertTrue(info.body.contains("boom"))
         } catch {
             XCTFail("Unexpected error: \(error)")
         }
@@ -277,9 +276,9 @@ final class SolServerClientRequestTests: XCTestCase {
         do {
             _ = try await client.decideMemento(threadId: "t1", mementoId: "m1", decision: .accept)
             XCTFail("Expected throw")
-        } catch let TransportError.httpStatus(code, body) {
-            XCTAssertEqual(code, 409)
-            XCTAssertTrue(body.contains("already_accepted"))
+        } catch let TransportError.httpStatus(info) {
+            XCTAssertEqual(info.code, 409)
+            XCTAssertTrue(info.body.contains("already_accepted"))
         } catch {
             XCTFail("Unexpected error: \(error)")
         }
@@ -344,9 +343,9 @@ final class SolServerClientRequestTests: XCTestCase {
         do {
             _ = try await client.transmission("tx-bad")
             XCTFail("Expected throw")
-        } catch let TransportError.httpStatus(code, body) {
-            XCTAssertEqual(code, 404)
-            XCTAssertTrue(body.contains("nope"))
+        } catch let TransportError.httpStatus(info) {
+            XCTAssertEqual(info.code, 404)
+            XCTAssertTrue(info.body.contains("nope"))
         } catch {
             XCTFail("Unexpected error: \(error)")
         }

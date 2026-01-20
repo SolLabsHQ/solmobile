@@ -65,7 +65,7 @@ final class TransmissionActionsRetryPolicyTests: XCTestCase {
             self.handler = handler
         }
 
-        func send(envelope: PacketEnvelope) async throws -> ChatResponse {
+        func send(envelope: PacketEnvelope, diagnostics: DiagnosticsContext? = nil) async throws -> ChatResponse {
             sendCallCount += 1
             return try await handler(envelope)
         }
@@ -99,6 +99,7 @@ final class TransmissionActionsRetryPolicyTests: XCTestCase {
                 statusCode: 200,
                 transmissionId: "tx-1",
                 pending: false,
+                responseInfo: nil,
                 threadMemento: nil,
                 evidenceSummary: nil,
                 evidence: nil,
@@ -141,6 +142,55 @@ final class TransmissionActionsRetryPolicyTests: XCTestCase {
         XCTAssertEqual(fresh.deliveryAttempts.count, 1)
     }
 
+    func test_processQueue_respectsRetryAfterHeader() async throws {
+        let transport = CountingTransport { _ in
+            // If this gets called, we violated retry-after.
+            return ChatResponse(
+                text: "ok",
+                statusCode: 200,
+                transmissionId: "tx-1",
+                pending: false,
+                responseInfo: nil,
+                threadMemento: nil,
+                evidenceSummary: nil,
+                evidence: nil,
+                evidenceWarnings: nil,
+                outputEnvelope: nil
+            )
+        }
+
+        let (thread, user) = makeThreadAndUserMessage(text: "hello")
+        let actions = TransmissionActions(modelContext: context, transport: transport)
+        actions.enqueueChat(thread: thread, userMessage: user)
+
+        let tx = try fetchSingleTransmission()
+
+        let retryAttempt = DeliveryAttempt(
+            createdAt: Date(),
+            statusCode: 429,
+            outcome: .failed,
+            errorMessage: "rate_limited",
+            transmissionId: nil,
+            retryableInferred: true,
+            retryAfterSeconds: 60,
+            finalURL: nil,
+            transmission: tx
+        )
+        tx.deliveryAttempts.append(retryAttempt)
+        context.insert(retryAttempt)
+
+        tx.status = .queued
+        tx.lastError = nil
+        try context.save()
+
+        await actions.processQueue()
+
+        XCTAssertEqual(transport.sendCallCount, 0)
+
+        let fresh = try fetchSingleTransmission()
+        XCTAssertEqual(fresh.status, .queued)
+    }
+
     func test_processQueue_pendingTTL_expires_marksFailed_records408Attempt() async throws {
         // Arrange
         let transport = CountingTransport { _ in
@@ -150,6 +200,7 @@ final class TransmissionActionsRetryPolicyTests: XCTestCase {
                 statusCode: 200,
                 transmissionId: "tx-1",
                 pending: false,
+                responseInfo: nil,
                 threadMemento: nil,
                 evidenceSummary: nil,
                 evidence: nil,
@@ -208,6 +259,7 @@ final class TransmissionActionsRetryPolicyTests: XCTestCase {
                 statusCode: 200,
                 transmissionId: "tx-1",
                 pending: false,
+                responseInfo: nil,
                 threadMemento: nil,
                 evidenceSummary: nil,
                 evidence: nil,

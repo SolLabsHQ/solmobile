@@ -128,7 +128,7 @@ struct DiagnosticsView: View {
     }
 
     private func environmentSnapshot() -> String {
-        let baseURL = DiagnosticsStore.redactedURLString(from: URL(string: effectiveBaseURL()))
+        let baseURL = DiagnosticsStore.redactedURLString(from: SolServerBaseURL.effectiveURL())
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "-"
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "-"
         let osVersion = UIDevice.current.systemVersion
@@ -148,12 +148,7 @@ struct DiagnosticsView: View {
     }
 
     private func effectiveBaseURL() -> String {
-        let raw = UserDefaults.standard.string(forKey: "solserver.baseURL") ?? "http://127.0.0.1:3333"
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if URL(string: trimmed) != nil {
-            return trimmed
-        }
-        return "http://127.0.0.1:3333"
+        return SolServerBaseURL.effectiveURLString()
     }
 
     private func lastFailureSummary() -> String {

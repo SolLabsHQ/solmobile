@@ -36,6 +36,15 @@ final class DeliveryAttempt {
     /// Optional correlation id if the server returned one.
     var transmissionId: String?
 
+    /// Whether the client inferred this failure as retryable.
+    var retryableInferred: Bool?
+
+    /// Optional retry-after seconds for rate limits (server-provided).
+    var retryAfterSeconds: Double?
+
+    /// Final response URL after redirects (redacted in diagnostics export).
+    var finalURL: String?
+
     /// Parent Transmission (inverse relationship lives on Transmission.deliveryAttempts).
     @Relationship var transmission: Transmission?
 
@@ -46,6 +55,9 @@ final class DeliveryAttempt {
         outcome: DeliveryOutcome,
         errorMessage: String? = nil,
         transmissionId: String? = nil,
+        retryableInferred: Bool? = nil,
+        retryAfterSeconds: Double? = nil,
+        finalURL: String? = nil,
         transmission: Transmission? = nil
     ) {
         self.id = id
@@ -54,7 +66,9 @@ final class DeliveryAttempt {
         self.outcome = outcome
         self.errorMessage = errorMessage
         self.transmissionId = transmissionId
+        self.retryableInferred = retryableInferred
+        self.retryAfterSeconds = retryAfterSeconds
+        self.finalURL = finalURL
         self.transmission = transmission
     }
 }
-

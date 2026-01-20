@@ -19,6 +19,7 @@ final class FakeTransport: ChatTransport, ChatTransportPolling, ChatTransportMem
             statusCode: 200,
             transmissionId: "tx1",
             pending: false,
+            responseInfo: nil,
             threadMemento: nil,
             evidenceSummary: nil,
             evidence: nil,
@@ -33,6 +34,7 @@ final class FakeTransport: ChatTransport, ChatTransportPolling, ChatTransportMem
             assistant: "polled",
             serverStatus: "completed",
             statusCode: 200,
+            responseInfo: nil,
             threadMemento: nil,
             evidenceSummary: nil,
             evidence: nil,
@@ -45,12 +47,12 @@ final class FakeTransport: ChatTransport, ChatTransportPolling, ChatTransportMem
         ThreadMementoDecisionResult(statusCode: 200, applied: true, reason: "applied", memento: nil)
     }
 
-    func send(envelope: PacketEnvelope) async throws -> ChatResponse {
+    func send(envelope: PacketEnvelope, diagnostics: DiagnosticsContext? = nil) async throws -> ChatResponse {
         sendCalls.append(.init(envelope: envelope))
         return try nextSend()
     }
 
-    func poll(transmissionId: String) async throws -> ChatPollResponse {
+    func poll(transmissionId: String, diagnostics: DiagnosticsContext? = nil) async throws -> ChatPollResponse {
         return try nextPoll(transmissionId)
     }
 

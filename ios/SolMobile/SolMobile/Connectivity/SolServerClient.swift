@@ -88,6 +88,7 @@ private struct MementoDecisionResponse: Codable {
 final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision {
     let baseURL: URL
     private let session: URLSession
+    private let redirectTracker: RedirectTracker
 
     // Dev telemetry keys used by Settings/dev UI
     private enum DevTelemetry {
@@ -106,61 +107,173 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
         }
     }
 
-    init(baseURL: URL, session: URLSession = .shared) {
+    init(
+        baseURL: URL,
+        configuration: URLSessionConfiguration = .default,
+        redirectTracker: RedirectTracker = RedirectTracker()
+    ) {
         self.baseURL = baseURL
-        self.session = session
+        self.redirectTracker = redirectTracker
+        self.session = URLSession(
+            configuration: configuration,
+            delegate: redirectTracker,
+            delegateQueue: nil
+        )
     }
 
     /// Convenience init for app runtime where Settings controls the base URL.
-    convenience init(session: URLSession = .shared) {
-        let raw = (UserDefaults.standard.string(forKey: "solserver.baseURL") ?? "http://127.0.0.1:3333")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let url = URL(string: raw) ?? URL(string: "http://127.0.0.1:3333")!
-        self.init(baseURL: url, session: session)
+    convenience init(configuration: URLSessionConfiguration = .default) {
+        self.init(baseURL: SolServerBaseURL.effectiveURL(), configuration: configuration)
     }
 
     // MARK: - Low-level HTTP helper
 
-    private func requestJSON(_ req: URLRequest) async throws -> (Data, HTTPURLResponse) {
+    private func requestJSON(
+        _ req: URLRequest,
+        diagnostics: DiagnosticsContext? = nil
+    ) async throws -> (Data, HTTPURLResponse, ResponseInfo) {
         var authorizedReq = req
         applyAuthHeader(&authorizedReq)
-        let hadAuthorization = authorizedReq.value(forHTTPHeaderField: "Authorization") != nil
-        let started = Date()
 
-        do {
-            let (data, resp) = try await session.data(for: authorizedReq)
-            guard let http = resp as? HTTPURLResponse else { throw URLError(.badServerResponse) }
-
-            let latencyMs = Int(Date().timeIntervalSince(started) * 1000)
+        if AppEnvironment.current.requiresHTTPS,
+           let url = authorizedReq.url,
+           url.scheme?.lowercased() != "https" {
+            let error = TransportError.insecureBaseURL(reason: "HTTPS required in \(AppEnvironment.current.rawValue)")
             DiagnosticsStore.shared.record(
                 method: authorizedReq.httpMethod ?? "GET",
                 url: authorizedReq.url,
-                status: http.statusCode,
-                latencyMs: latencyMs,
-                error: nil,
-                responseData: data,
-                responseHeaders: http.allHeaderFields,
-                requestHeaders: authorizedReq.allHTTPHeaderFields,
-                requestBody: authorizedReq.httpBody,
-                hadAuthorization: hadAuthorization
-            )
-
-            return (data, http)
-        } catch {
-            let latencyMs = Int(Date().timeIntervalSince(started) * 1000)
-            DiagnosticsStore.shared.record(
-                method: authorizedReq.httpMethod ?? "GET",
-                url: authorizedReq.url,
+                responseURL: nil,
+                redirectChain: [],
                 status: nil,
-                latencyMs: latencyMs,
+                latencyMs: nil,
+                retryableInferred: false,
+                retryableSource: RetryableSource.parseFailedDefault.rawValue,
+                parsedErrorCode: "insecure_base_url",
+                traceRunId: nil,
+                attemptId: diagnostics?.attemptId.uuidString,
+                threadId: diagnostics?.threadId?.uuidString,
+                localTransmissionId: diagnostics?.localTransmissionId?.uuidString,
+                transmissionId: nil,
                 error: error,
                 responseData: nil,
                 responseHeaders: nil,
                 requestHeaders: authorizedReq.allHTTPHeaderFields,
                 requestBody: authorizedReq.httpBody,
-                hadAuthorization: hadAuthorization
+                hadAuthorization: authorizedReq.value(forHTTPHeaderField: "Authorization") != nil
             )
             throw error
+        }
+
+        let hadAuthorization = authorizedReq.value(forHTTPHeaderField: "Authorization") != nil
+        let started = Date()
+
+        return try await withCheckedThrowingContinuation { continuation in
+            var taskId = 0
+            let task = session.dataTask(with: authorizedReq) { data, response, error in
+                let latencyMs = Int(Date().timeIntervalSince(started) * 1000)
+                let redirectChain = self.redirectTracker.consumeChain(taskId: taskId)
+
+                if let error {
+                    let decision = RetryPolicy.classify(statusCode: nil, body: nil, headers: nil, error: error)
+                    DiagnosticsStore.shared.record(
+                        method: authorizedReq.httpMethod ?? "GET",
+                        url: authorizedReq.url,
+                        responseURL: response?.url,
+                        redirectChain: redirectChain,
+                        status: nil,
+                        latencyMs: latencyMs,
+                        retryableInferred: decision.retryable,
+                        retryableSource: decision.source.rawValue,
+                        parsedErrorCode: decision.errorCode,
+                        traceRunId: decision.traceRunId,
+                        attemptId: diagnostics?.attemptId.uuidString,
+                        threadId: diagnostics?.threadId?.uuidString,
+                        localTransmissionId: diagnostics?.localTransmissionId?.uuidString,
+                        transmissionId: decision.transmissionId,
+                        error: error,
+                        responseData: nil,
+                        responseHeaders: nil,
+                        requestHeaders: authorizedReq.allHTTPHeaderFields,
+                        requestBody: authorizedReq.httpBody,
+                        hadAuthorization: hadAuthorization
+                    )
+                    continuation.resume(throwing: error)
+                    return
+                }
+
+                guard let data, let http = response as? HTTPURLResponse else {
+                    let error = URLError(.badServerResponse)
+                    DiagnosticsStore.shared.record(
+                        method: authorizedReq.httpMethod ?? "GET",
+                        url: authorizedReq.url,
+                        responseURL: response?.url,
+                        redirectChain: redirectChain,
+                        status: nil,
+                        latencyMs: latencyMs,
+                        retryableInferred: true,
+                        retryableSource: RetryableSource.networkError.rawValue,
+                        parsedErrorCode: nil,
+                        traceRunId: nil,
+                        attemptId: diagnostics?.attemptId.uuidString,
+                        threadId: diagnostics?.threadId?.uuidString,
+                        localTransmissionId: diagnostics?.localTransmissionId?.uuidString,
+                        transmissionId: nil,
+                        error: error,
+                        responseData: nil,
+                        responseHeaders: nil,
+                        requestHeaders: authorizedReq.allHTTPHeaderFields,
+                        requestBody: authorizedReq.httpBody,
+                        hadAuthorization: hadAuthorization
+                    )
+                    continuation.resume(throwing: error)
+                    return
+                }
+
+                let headers = self.normalizedHeaders(http.allHeaderFields)
+                let responseInfo = ResponseInfo(
+                    statusCode: http.statusCode,
+                    headers: headers,
+                    finalURL: http.url,
+                    redirectChain: redirectChain
+                )
+
+                let bodyString = String(data: data, encoding: .utf8)
+                let decision = RetryPolicy.classify(
+                    statusCode: http.statusCode,
+                    body: bodyString,
+                    headers: headers,
+                    error: nil
+                )
+                let traceRunId = self.extractTraceRunId(headers: headers, body: bodyString)
+                let transmissionId = self.extractTransmissionId(headers: headers, body: bodyString)
+
+                DiagnosticsStore.shared.record(
+                    method: authorizedReq.httpMethod ?? "GET",
+                    url: authorizedReq.url,
+                    responseURL: responseInfo.finalURL,
+                    redirectChain: redirectChain,
+                    status: http.statusCode,
+                    latencyMs: latencyMs,
+                    retryableInferred: decision.retryable,
+                    retryableSource: decision.source.rawValue,
+                    parsedErrorCode: decision.errorCode,
+                    traceRunId: traceRunId,
+                    attemptId: diagnostics?.attemptId.uuidString,
+                    threadId: diagnostics?.threadId?.uuidString,
+                    localTransmissionId: diagnostics?.localTransmissionId?.uuidString,
+                    transmissionId: transmissionId ?? decision.transmissionId,
+                    error: nil,
+                    responseData: data,
+                    responseHeaders: http.allHeaderFields,
+                    requestHeaders: authorizedReq.allHTTPHeaderFields,
+                    requestBody: authorizedReq.httpBody,
+                    hadAuthorization: hadAuthorization
+                )
+
+                continuation.resume(returning: (data, http, responseInfo))
+            }
+            taskId = task.taskIdentifier
+            task.resume()
         }
     }
 
@@ -171,11 +284,55 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     }
 
-    private func require2xx(_ http: HTTPURLResponse, data: Data) throws {
+    private func require2xx(_ http: HTTPURLResponse, data: Data, responseInfo: ResponseInfo) throws {
         guard (200...299).contains(http.statusCode) else {
             let body = String(data: data, encoding: .utf8) ?? ""
-            throw TransportError.httpStatus(code: http.statusCode, body: body)
+            throw TransportError.httpStatus(
+                HTTPErrorInfo(
+                    code: http.statusCode,
+                    body: body,
+                    headers: responseInfo.headers,
+                    finalURL: responseInfo.finalURL,
+                    redirectChain: responseInfo.redirectChain
+                )
+            )
         }
+    }
+
+    private func normalizedHeaders(_ headers: [AnyHashable: Any]) -> [String: String] {
+        var normalized: [String: String] = [:]
+        for (key, value) in headers {
+            let keyString = String(describing: key).lowercased()
+            normalized[keyString] = String(describing: value)
+        }
+        return normalized
+    }
+
+    private func extractTraceRunId(headers: [String: String], body: String?) -> String? {
+        if let trace = headers["x-sol-trace-run-id"], !trace.isEmpty {
+            return trace
+        }
+        return RetryPolicy.parseErrorEnvelope(from: body)?.traceRunId
+    }
+
+    private func extractTransmissionId(headers: [String: String], body: String?) -> String? {
+        if let id = headers["x-sol-transmission-id"], !id.isEmpty {
+            return id
+        }
+        if let parsed = RetryPolicy.parseErrorEnvelope(from: body), let id = parsed.transmissionId {
+            return id
+        }
+        guard let body, let data = body.data(using: .utf8) else { return nil }
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        if let id = json["transmissionId"] as? String, !id.isEmpty {
+            return id
+        }
+        if let id = json["transmission_id"] as? String, !id.isEmpty {
+            return id
+        }
+        return nil
     }
 
     // MARK: - Typed endpoints (useful for decoding tests / direct calls)
@@ -192,8 +349,8 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
         var req = URLRequest(url: url)
         req.httpMethod = "GET"
 
-        let (data, http) = try await requestJSON(req)
-        try require2xx(http, data: data)
+        let (data, http, responseInfo) = try await requestJSON(req)
+        try require2xx(http, data: data, responseInfo: responseInfo)
 
         return try JSONDecoder().decode(TransmissionResponse.self, from: data)
     }
@@ -207,11 +364,11 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
         }
         req.httpBody = try JSONEncoder().encode(Request(threadId: threadId, clientRequestId: clientRequestId, message: message))
 
-        let (data, http) = try await requestJSON(req)
+        let (data, http, responseInfo) = try await requestJSON(req)
         DevTelemetry.persistLastChat(statusCode: http.statusCode, method: req.httpMethod ?? "POST", url: req.url)
 
         // 200 = normal ok; 202 = pending accepted (still decodes)
-        try require2xx(http, data: data)
+        try require2xx(http, data: data, responseInfo: responseInfo)
 
         return try JSONDecoder().decode(Response.self, from: data)
     }
@@ -228,8 +385,8 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
         let body = MementoDecisionRequest(threadId: threadId, mementoId: mementoId, decision: decision.rawValue)
         req.httpBody = try JSONEncoder().encode(body)
 
-        let (data, http) = try await requestJSON(req)
-        try require2xx(http, data: data)
+        let (data, http, responseInfo) = try await requestJSON(req)
+        try require2xx(http, data: data, responseInfo: responseInfo)
 
         let decoded = try JSONDecoder().decode(MementoDecisionResponse.self, from: data)
 
@@ -243,7 +400,7 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
 
     // MARK: - ChatTransport / Outbox integration
 
-    func send(envelope: PacketEnvelope) async throws -> ChatResponse {
+    func send(envelope: PacketEnvelope, diagnostics: DiagnosticsContext? = nil) async throws -> ChatResponse {
         let simulate500 = (envelope.packetType == "chat_fail")
         let simulate202 = envelope.messageText
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -267,7 +424,7 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
         )
         req.httpBody = try JSONEncoder().encode(dto)
 
-        let (data, http) = try await requestJSON(req)
+        let (data, http, responseInfo) = try await requestJSON(req, diagnostics: diagnostics)
         DevTelemetry.persistLastChat(statusCode: http.statusCode, method: req.httpMethod ?? "POST", url: req.url)
 
         let headerTxId = http.value(forHTTPHeaderField: "x-sol-transmission-id")
@@ -286,6 +443,7 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
                 statusCode: 202,
                 transmissionId: txId,
                 pending: true,
+                responseInfo: responseInfo,
                 threadMemento: decoded?.threadMemento,
                 evidenceSummary: decoded?.evidenceSummary,
                 evidence: decoded?.evidence,
@@ -294,7 +452,7 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
             )
         }
 
-        try require2xx(http, data: data)
+        try require2xx(http, data: data, responseInfo: responseInfo)
 
         let decoded = try JSONDecoder().decode(Response.self, from: data)
         let txId = headerTxId ?? decoded.transmissionId
@@ -304,6 +462,7 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
             statusCode: http.statusCode,
             transmissionId: txId,
             pending: decoded.pending ?? false,
+            responseInfo: responseInfo,
             threadMemento: decoded.threadMemento,
             evidenceSummary: decoded.evidenceSummary,
             evidence: decoded.evidence,
@@ -312,7 +471,7 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
         )
     }
 
-    func poll(transmissionId: String) async throws -> ChatPollResponse {
+    func poll(transmissionId: String, diagnostics: DiagnosticsContext? = nil) async throws -> ChatPollResponse {
         let url = baseURL
             .appendingPathComponent("/v1/transmissions")
             .appendingPathComponent(transmissionId)
@@ -320,8 +479,8 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
         var req = URLRequest(url: url)
         req.httpMethod = "GET"
 
-        let (data, http) = try await requestJSON(req)
-        try require2xx(http, data: data)
+        let (data, http, responseInfo) = try await requestJSON(req, diagnostics: diagnostics)
+        try require2xx(http, data: data, responseInfo: responseInfo)
 
         let decoded = try JSONDecoder().decode(TransmissionResponse.self, from: data)
         let pending = decoded.pending ?? (decoded.transmission.status == "created")
@@ -331,6 +490,7 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
             assistant: decoded.assistant,
             serverStatus: decoded.transmission.status,
             statusCode: http.statusCode,
+            responseInfo: responseInfo,
             threadMemento: decoded.threadMemento,
             evidenceSummary: nil,  // Poll endpoint doesn't return evidence for MVP
             evidence: nil,

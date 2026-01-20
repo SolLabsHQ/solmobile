@@ -33,7 +33,7 @@ final class ThreadMementoDecisionTests: SwiftDataTestBase {
         var returnedId: String = "memento-accepted-1"
 
 
-        func send(envelope: PacketEnvelope) async throws -> ChatResponse {
+        func send(envelope: PacketEnvelope, diagnostics: DiagnosticsContext? = nil) async throws -> ChatResponse {
             XCTFail("send(envelope:) should not be called in ThreadMementoDecisionTests")
             throw MockError.unexpectedSend
         }
@@ -62,13 +62,14 @@ final class ThreadMementoDecisionTests: SwiftDataTestBase {
     }
 
     private struct MockChatTransportOnly: ChatTransport {
-        func send(envelope: PacketEnvelope) async throws -> ChatResponse {
+        func send(envelope: PacketEnvelope, diagnostics: DiagnosticsContext? = nil) async throws -> ChatResponse {
             // Not used for these tests.
             return ChatResponse(
                 text: "ok",
                 statusCode: 200,
                 transmissionId: "tx-1",
                 pending: false,
+                responseInfo: nil,
                 threadMemento: nil,
                 evidenceSummary: nil,
                 evidence: nil,

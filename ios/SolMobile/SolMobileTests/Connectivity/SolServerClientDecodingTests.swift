@@ -151,12 +151,12 @@ final class SolServerClientDecodingTests: XCTestCase {
     }
 
     func test_transportError_httpStatus_carriesCodeAndBody() throws {
-        let err = TransportError.httpStatus(code: 500, body: "boom")
+        let err = TransportError.httpStatus(HTTPErrorInfo(code: 500, body: "boom"))
 
         switch err {
-        case let .httpStatus(code, body):
-            XCTAssertEqual(code, 500)
-            XCTAssertEqual(body, "boom")
+        case let .httpStatus(info):
+            XCTAssertEqual(info.code, 500)
+            XCTAssertEqual(info.body, "boom")
         default:
             XCTFail("Expected .httpStatus")
         }
