@@ -130,6 +130,105 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
         }
     }
 
+    private final class MockPendingThenPollTransientTransport: ChatTransportPolling {
+        let txId: String = "tx-pending-transient"
+        private var pollCalls: Int = 0
+
+        func send(envelope: PacketEnvelope, diagnostics: DiagnosticsContext? = nil) async throws -> ChatResponse {
+            ChatResponse(
+                text: "",
+                statusCode: 202,
+                transmissionId: txId,
+                pending: true,
+                responseInfo: nil,
+                threadMemento: nil,
+                evidenceSummary: nil,
+                evidence: nil,
+                evidenceWarnings: nil,
+                outputEnvelope: nil
+            )
+        }
+
+        func poll(transmissionId: String, diagnostics: DiagnosticsContext? = nil) async throws -> ChatPollResponse {
+            XCTAssertEqual(transmissionId, txId)
+            pollCalls += 1
+
+            if pollCalls == 1 {
+                throw TransportError.httpStatus(HTTPErrorInfo(code: 503, body: "unavailable"))
+            }
+
+            return ChatPollResponse(
+                pending: false,
+                assistant: "done",
+                serverStatus: "completed",
+                statusCode: 200,
+                responseInfo: nil,
+                threadMemento: nil,
+                evidenceSummary: nil,
+                evidence: nil,
+                evidenceWarnings: nil,
+                outputEnvelope: nil
+            )
+        }
+    }
+
+    private actor CallRecorder {
+        private(set) var sendCalls: Int = 0
+        private(set) var sendAt: Date?
+        private(set) var pollStartAt: Date?
+
+        func recordSend() {
+            sendCalls += 1
+            if sendAt == nil {
+                sendAt = Date()
+            }
+        }
+
+        func recordPollStart() {
+            if pollStartAt == nil {
+                pollStartAt = Date()
+            }
+        }
+    }
+
+    private struct MockSlowPollTransport: ChatTransportPolling {
+        let recorder: CallRecorder
+
+        func send(envelope: PacketEnvelope, diagnostics: DiagnosticsContext? = nil) async throws -> ChatResponse {
+            await recorder.recordSend()
+            return ChatResponse(
+                text: "ok",
+                statusCode: 200,
+                transmissionId: "tx-send",
+                pending: false,
+                responseInfo: nil,
+                threadMemento: nil,
+                evidenceSummary: nil,
+                evidence: nil,
+                evidenceWarnings: nil,
+                outputEnvelope: nil
+            )
+        }
+
+        func poll(transmissionId: String, diagnostics: DiagnosticsContext? = nil) async throws -> ChatPollResponse {
+            await recorder.recordPollStart()
+            try? await Task.sleep(nanoseconds: 200_000_000)
+
+            return ChatPollResponse(
+                pending: true,
+                assistant: nil,
+                serverStatus: "created",
+                statusCode: 200,
+                responseInfo: nil,
+                threadMemento: nil,
+                evidenceSummary: nil,
+                evidence: nil,
+                evidenceWarnings: nil,
+                outputEnvelope: nil
+            )
+        }
+    }
+
     @MainActor
     func test_pending202_then_poll_completes_and_appends_assistant() async {
         let transport = MockPendingThenPollTransport()
@@ -222,6 +321,85 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
         TestAssert.transmissionStatus(.pending, tx)
         XCTAssertEqual(tx.deliveryAttempts.last?.outcome, .failed)
         XCTAssertTrue((tx.lastError ?? "").count > 0)
+    }
+
+    @MainActor
+    func test_pending202_poll_transient_error_recovers_and_completes() async {
+        let transport = MockPendingThenPollTransientTransport()
+        let actions = TransmissionActions(modelContext: context, transport: transport)
+
+        let thread = SeedFactory.makeThread(context, title: "poll-transient-thread")
+        let user = SeedFactory.makeUserMessage(context, thread: thread, text: "/pending hello")
+
+        SeedFactory.enqueueChat(actions, thread: thread, userMessage: user)
+
+        // Pass 1: send -> 202 => poll throws => stays pending (retryable).
+        await actions.processQueue()
+
+        guard let tx1 = TestFetch.fetchOne(Transmission.self, context) else {
+            XCTFail("Expected a Transmission after polling")
+            return
+        }
+
+        TestAssert.transmissionStatus(.pending, tx1)
+
+        if let lastPoll = tx1.deliveryAttempts.last {
+            lastPoll.createdAt = Date().addingTimeInterval(-5)
+            try? context.save()
+        }
+
+        // Pass 2: poll succeeds => should complete and append assistant.
+        await actions.processQueue()
+
+        guard let tx2 = TestFetch.fetchOne(Transmission.self, context),
+              let t2 = TestFetch.fetchOne(ConversationThread.self, context) else {
+            XCTFail("Expected Transmission + Thread after recovery poll")
+            return
+        }
+
+        TestAssert.transmissionStatus(.succeeded, tx2)
+        XCTAssertTrue(t2.messages.contains(where: { $0.creatorType == .assistant && $0.text == "done" }))
+    }
+
+    @MainActor
+    func test_send_first_avoids_slow_poll_blocking_send() async {
+        let recorder = CallRecorder()
+        let transport = MockSlowPollTransport(recorder: recorder)
+        let actions = TransmissionActions(modelContext: context, transport: transport)
+
+        let pendingThread = SeedFactory.makeThread(context, title: "slow-poll-thread")
+        let pendingUser = SeedFactory.makeUserMessage(context, thread: pendingThread, text: "pending")
+        let pendingPacket = Packet(threadId: pendingThread.id, messageIds: [pendingUser.id])
+        context.insert(pendingPacket)
+        let pendingTx = Transmission(packet: pendingPacket)
+        pendingTx.status = .pending
+        let pendingAttempt = DeliveryAttempt(
+            createdAt: Date(),
+            statusCode: 202,
+            outcome: .pending,
+            source: .send,
+            errorMessage: nil,
+            transmissionId: "tx-slow",
+            transmission: pendingTx
+        )
+        pendingTx.deliveryAttempts.append(pendingAttempt)
+        context.insert(pendingTx)
+        context.insert(pendingAttempt)
+
+        let queuedThread = SeedFactory.makeThread(context, title: "queued-thread")
+        let queuedUser = SeedFactory.makeUserMessage(context, thread: queuedThread, text: "hello")
+        SeedFactory.enqueueChat(actions, thread: queuedThread, userMessage: queuedUser)
+
+        let task = Task {
+            await actions.processQueue(pollLimit: 1, pollFirst: false)
+        }
+
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        let sendCalls = await recorder.sendCalls
+        XCTAssertEqual(sendCalls, 1, "Expected send to start before slow poll completes")
+
+        await task.value
     }
 
     @MainActor

@@ -29,6 +29,26 @@ final class OutboxService {
 
     private let pollLimit: Int = 3
     private let tickSeconds: TimeInterval = 5
+    private enum RunReason: String {
+        case start
+        case enqueue
+        case retry
+        case timer
+        case reachability
+        case bgRefresh = "bg_refresh"
+        case willResignActive = "will_resign_active"
+        case didBecomeActive = "did_become_active"
+        case rerun
+
+        var pollFirst: Bool {
+            switch self {
+            case .enqueue, .retry, .bgRefresh, .willResignActive:
+                return false
+            case .start, .timer, .reachability, .didBecomeActive, .rerun:
+                return true
+            }
+        }
+    }
 
     init(
         container: ModelContainer,
@@ -60,17 +80,29 @@ final class OutboxService {
         startTimer()
         registerAppLifecycle()
 
-        kick(reason: "start", useBackgroundTask: false)
+        kick(reason: .start, useBackgroundTask: false)
     }
 
     func enqueueChat(thread: ConversationThread, userMessage: Message) {
-        let engine = TransmissionActions(
-            modelContext: ModelContext(container),
-            transport: transport,
-            statusWatcher: statusWatcher
-        )
-        engine.enqueueChat(thread: thread, userMessage: userMessage)
-        kick(reason: "enqueue", useBackgroundTask: true)
+        let shouldFail = userMessage.text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .hasPrefix("/fail")
+
+        let threadId = thread.id
+        let messageId = userMessage.id
+
+        Task { [weak self] in
+            guard let self else { return }
+            await self.worker.enqueueChat(
+                threadId: threadId,
+                messageId: messageId,
+                shouldFail: shouldFail
+            )
+            await MainActor.run {
+                self.kick(reason: .enqueue, useBackgroundTask: true)
+            }
+        }
     }
 
     func retryFailed() {
@@ -78,13 +110,13 @@ final class OutboxService {
             guard let self else { return }
             await self.worker.retryFailed()
             await MainActor.run {
-                self.kick(reason: "retry", useBackgroundTask: true)
+                self.kick(reason: .retry, useBackgroundTask: true)
             }
         }
     }
 
     func runBackgroundRefresh() async {
-        await runOnce(reason: "bg_refresh", useBackgroundTask: false)
+        await runOnce(reason: .bgRefresh, useBackgroundTask: false)
     }
 
     private func registerAppLifecycle() {
@@ -96,7 +128,7 @@ final class OutboxService {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.kick(reason: "will_resign_active", useBackgroundTask: true)
+                self?.kick(reason: .willResignActive, useBackgroundTask: true)
             }
         }
 
@@ -106,7 +138,7 @@ final class OutboxService {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.kick(reason: "did_become_active", useBackgroundTask: false)
+                self?.kick(reason: .didBecomeActive, useBackgroundTask: false)
             }
         }
 
@@ -120,7 +152,7 @@ final class OutboxService {
         monitor.pathUpdateHandler = { [weak self] path in
             guard path.status == .satisfied else { return }
             Task { @MainActor [weak self] in
-                self?.kick(reason: "reachability", useBackgroundTask: false)
+                self?.kick(reason: .reachability, useBackgroundTask: false)
             }
         }
         monitor.start(queue: queue)
@@ -132,13 +164,13 @@ final class OutboxService {
         timerTask = Task { @MainActor [weak self] in
             while let self, !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: UInt64(self.tickSeconds * 1_000_000_000))
-                self.kick(reason: "timer", useBackgroundTask: false)
+                self.kick(reason: .timer, useBackgroundTask: false)
             }
         }
     }
 
-    private func kick(reason: String, useBackgroundTask: Bool) {
-        outboxLog.info("kick reason=\(reason, privacy: .public) processing=\(self.isProcessing, privacy: .public)")
+    private func kick(reason: RunReason, useBackgroundTask: Bool) {
+        outboxLog.info("kick reason=\(reason.rawValue, privacy: .public) processing=\(self.isProcessing, privacy: .public)")
 
         guard !isProcessing else {
             needsRerun = true
@@ -153,16 +185,16 @@ final class OutboxService {
             self.isProcessing = false
             if self.needsRerun {
                 self.needsRerun = false
-                self.kick(reason: "rerun", useBackgroundTask: false)
+                self.kick(reason: .rerun, useBackgroundTask: false)
             }
         }
     }
 
-    private func runOnce(reason: String, useBackgroundTask: Bool) async {
-        outboxLog.info("run_once reason=\(reason, privacy: .public)")
+    private func runOnce(reason: RunReason, useBackgroundTask: Bool) async {
+        outboxLog.info("run_once reason=\(reason.rawValue, privacy: .public)")
 
         let work: () async -> Void = {
-            await self.worker.processQueue(pollLimit: self.pollLimit)
+            await self.worker.processQueue(pollLimit: self.pollLimit, pollFirst: reason.pollFirst)
         }
 
         if useBackgroundTask {

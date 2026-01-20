@@ -25,16 +25,14 @@ struct DraftSnapshot: Sendable {
     let updatedAt: Date
 }
 
-@MainActor
-protocol DraftStoreBacking {
+nonisolated protocol DraftStoreBacking {
     func fetch(threadId: String) -> DraftSnapshot?
     func upsert(threadId: String, content: String, updatedAt: Date)
     func delete(threadId: String)
     func cleanupExpired(cutoff: Date) throws
 }
 
-@MainActor
-final class SwiftDataDraftStoreBacking: DraftStoreBacking {
+nonisolated final class SwiftDataDraftStoreBacking: DraftStoreBacking {
     private let modelContext: ModelContext
 
     init(modelContext: ModelContext) {
@@ -93,8 +91,7 @@ final class SwiftDataDraftStoreBacking: DraftStoreBacking {
     }
 }
 
-@MainActor
-final class DraftStore {
+nonisolated final class DraftStore {
     static let ttlSeconds: TimeInterval = 60 * 60 * 24 * 30
 
     private let backing: DraftStoreBacking

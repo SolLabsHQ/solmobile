@@ -23,13 +23,22 @@ actor OutboxWorkerActor {
         self.statusWatcher = statusWatcher
     }
 
-    func processQueue(pollLimit: Int) async {
+    func processQueue(pollLimit: Int, pollFirst: Bool) async {
         let engine = TransmissionActions(
             modelContext: ModelContext(container),
             transport: transport,
             statusWatcher: statusWatcher
         )
-        await engine.processQueue(pollLimit: pollLimit)
+        await engine.processQueue(pollLimit: pollLimit, pollFirst: pollFirst)
+    }
+
+    func enqueueChat(threadId: UUID, messageId: UUID, shouldFail: Bool) {
+        let engine = TransmissionActions(
+            modelContext: ModelContext(container),
+            transport: transport,
+            statusWatcher: statusWatcher
+        )
+        engine.enqueueChat(threadId: threadId, messageId: messageId, shouldFail: shouldFail)
     }
 
     func retryFailed() {

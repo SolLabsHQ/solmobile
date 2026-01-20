@@ -15,36 +15,32 @@ import os
 
 // MARK: - Small helpers
 
-private func msSince(_ startNs: UInt64) -> Double {
+nonisolated private func msSince(_ startNs: UInt64) -> Double {
     let endNs = DispatchTime.now().uptimeNanoseconds
     return Double(endNs &- startNs) / 1_000_000.0
 }
 
-private func short(_ id: UUID) -> String {
+nonisolated private func short(_ id: UUID) -> String {
     String(id.uuidString.prefix(8))
 }
 
-private func shortOrDash(_ s: String?) -> String {
+nonisolated private func shortOrDash(_ s: String?) -> String {
     (s?.isEmpty == false) ? s! : "-"
 }
 
-private let timeWithSecondsFormatter: DateFormatter = {
+nonisolated private func timeWithSeconds(_ d: Date) -> String {
     let f = DateFormatter()
     f.locale = .autoupdatingCurrent
     f.timeZone = .autoupdatingCurrent
     f.dateFormat = "h:mm:ss a"
-    return f
-}()
-
-private func timeWithSeconds(_ d: Date) -> String {
-    timeWithSecondsFormatter.string(from: d)
+    return f.string(from: d)
 }
 
 // MARK: - ThreadMemento formatting
 
 /// ThreadMemento is a navigation artifact returned by SolServer.
 /// It is not durable knowledge; the client may choose to Accept / Decline / Revoke.
-private enum ThreadMementoFormatter {
+nonisolated private enum ThreadMementoFormatter {
     static func format(_ m: ThreadMementoDTO) -> String {
         func join(_ xs: [String]) -> String {
             guard !xs.isEmpty else { return "(none)" }
@@ -190,10 +186,9 @@ struct ChatResponse {
 
 // MARK: - Outbox processor
 
-final class TransmissionActions {
+nonisolated final class TransmissionActions {
 
     private let outboxLog = Logger(subsystem: "com.sollabshq.solmobile", category: "Outbox")
-    private let budgetStore = BudgetStore.shared
 
     private let modelContext: ModelContext
     private let transport: any ChatTransport
@@ -210,15 +205,14 @@ final class TransmissionActions {
 
     init(
         modelContext: ModelContext,
-        transport: (any ChatTransport)? = nil,
+        transport: any ChatTransport,
         statusWatcher: TransmissionStatusWatcher? = nil
     ) {
         self.modelContext = modelContext
-        let resolvedTransport = transport ?? SolServerClient()
-        self.transport = resolvedTransport
+        self.transport = transport
         if let statusWatcher {
             self.statusWatcher = statusWatcher
-        } else if let polling = resolvedTransport as? any ChatTransportPolling {
+        } else if let polling = transport as? any ChatTransportPolling {
             self.statusWatcher = PollingTransmissionStatusWatcher(transport: polling)
         } else {
             self.statusWatcher = nil
@@ -234,19 +228,44 @@ final class TransmissionActions {
     }
 
     private func pendingSinceIfActive(_ attempts: [DeliveryAttempt]) -> Date? {
-        // Pending is "active" only if the last attempt outcome is pending.
-        guard let last = attempts.last, last.outcome == .pending else { return nil }
+        guard let last = attempts.last else { return nil }
 
-        // Find the start of the trailing contiguous pending streak.
-        var since = last.createdAt
-        for a in attempts.reversed() {
-            if a.outcome == .pending {
-                since = a.createdAt
-            } else {
-                break
+        if last.outcome == .pending {
+            // Find the start of the trailing contiguous pending streak.
+            var since = last.createdAt
+            for a in attempts.reversed() {
+                if a.outcome == .pending {
+                    since = a.createdAt
+                } else {
+                    break
+                }
             }
+            return since
         }
-        return since
+
+        if last.source == .poll,
+           last.outcome == .failed,
+           last.retryableInferred == true {
+            if let lastPending = attempts.reversed().first(where: { $0.outcome == .pending }) {
+                return lastPending.createdAt
+            }
+            return last.createdAt
+        }
+
+        return nil
+    }
+
+    private func activePollAttempt(_ attempts: [DeliveryAttempt]) -> DeliveryAttempt? {
+        guard let last = attempts.last else { return nil }
+        if last.outcome == .pending {
+            return last
+        }
+        if last.source == .poll,
+           last.outcome == .failed,
+           last.retryableInferred == true {
+            return last
+        }
+        return nil
     }
 
     func enqueueChat(thread: ConversationThread, userMessage: Message) {
@@ -255,9 +274,17 @@ final class TransmissionActions {
             .lowercased()
             .hasPrefix("/fail")
 
-        outboxLog.info("enqueueChat thread=\(short(thread.id), privacy: .public) msg=\(short(userMessage.id), privacy: .public) shouldFail=\(shouldFail, privacy: .public)")
+        enqueueChat(
+            threadId: thread.id,
+            messageId: userMessage.id,
+            shouldFail: shouldFail
+        )
+    }
 
-        let packet = Packet(threadId: thread.id, messageIds: [userMessage.id])
+    func enqueueChat(threadId: UUID, messageId: UUID, shouldFail: Bool) {
+        outboxLog.info("enqueueChat thread=\(short(threadId), privacy: .public) msg=\(short(messageId), privacy: .public) shouldFail=\(shouldFail, privacy: .public)")
+
+        let packet = Packet(threadId: threadId, messageIds: [messageId])
         packet.packetType = shouldFail ? "chat_fail" : "chat"
 
         outboxLog.info("enqueueChat packet=\(short(packet.id), privacy: .public) type=\(packet.packetType, privacy: .public)")
@@ -272,7 +299,7 @@ final class TransmissionActions {
         try? modelContext.save()
     }
 
-    func processQueue(pollLimit: Int = 1) async {
+    func processQueue(pollLimit: Int = 1, pollFirst: Bool = true) async {
         let runId = String(UUID().uuidString.prefix(8))
         outboxLog.info("processQueue run=\(runId, privacy: .public) event=start")
 
@@ -280,9 +307,12 @@ final class TransmissionActions {
             outboxLog.info("processQueue run=\(runId, privacy: .public) event=end")
         }
 
-        await pollPending(runId: runId, limit: pollLimit)
+        if pollFirst {
+            await pollPending(runId: runId, limit: pollLimit)
+        }
         await sendNextQueued(runId: runId)
-        await pollPending(runId: runId, limit: 1)
+        let trailingPollLimit = pollFirst ? 1 : pollLimit
+        await pollPending(runId: runId, limit: trailingPollLimit)
     }
 
     // Poll up to N pending transmissions (does not block sending).
@@ -297,6 +327,7 @@ final class TransmissionActions {
             let attempts = sortedAttempts(tx.deliveryAttempts)
 
             guard let pendingSince = pendingSinceIfActive(attempts) else {
+                recoverPendingWithoutActiveAttempt(runId: runId, tx: tx, attemptCount: attempts.count)
                 continue
             }
 
@@ -434,12 +465,13 @@ final class TransmissionActions {
         attempts.sorted { $0.createdAt < $1.createdAt }
     }
 
-    private func ensureRequestId(for tx: Transmission) -> String {
+    private func ensureRequestId(for tx: Transmission) -> (String, Bool) {
         let trimmed = tx.requestId.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
             tx.requestId = tx.packet.id.uuidString
+            return (tx.requestId, true)
         }
-        return tx.requestId
+        return (tx.requestId, false)
     }
 
     private func recordAttempt(
@@ -603,8 +635,7 @@ final class TransmissionActions {
 
         let startNs = DispatchTime.now().uptimeNanoseconds
 
-        budgetStore.refreshIfExpired()
-        if budgetStore.isBlockedNow() {
+        if await isBudgetBlockedNow() {
             tx.status = .failed
             tx.lastError = "budget_exceeded"
             let attemptId = UUID()
@@ -645,7 +676,10 @@ final class TransmissionActions {
 
             outboxLog.debug("processQueue run=\(runId, privacy: .public) event=context tx=\(short(sel.txId), privacy: .public) userTextLen=\(userText.count, privacy: .public)")
 
-            let requestId = ensureRequestId(for: tx)
+            let (requestId, didBackfill) = ensureRequestId(for: tx)
+            if didBackfill {
+                try? modelContext.save()
+            }
             let envelope = PacketEnvelope(
                 packetId: sel.packetId,
                 packetType: sel.packetType,
@@ -727,8 +761,8 @@ final class TransmissionActions {
             let decision = retryDecision(for: error)
             let code = statusCode(from: error)
             let msg = errorMessage(from: error)
-            if let info = budgetExceededInfo(from: error) {
-                budgetStore.applyBudgetExceeded(blockedUntil: info.blockedUntil)
+            if let info = await budgetExceededInfo(from: error) {
+                await applyBudgetExceeded(info)
             }
 
             let errorInfo = httpErrorInfo(from: error)
@@ -756,9 +790,23 @@ final class TransmissionActions {
         try? modelContext.save()
     }
 
-    private func budgetExceededInfo(from error: Error) -> BudgetExceededInfo? {
+    private func budgetExceededInfo(from error: Error) async -> BudgetExceededInfo? {
         guard case let TransportError.httpStatus(info) = error, info.code == 422 else { return nil }
-        return budgetStore.parseBudgetExceeded(from: info.body)
+        return await MainActor.run {
+            BudgetStore.shared.parseBudgetExceeded(from: info.body)
+        }
+    }
+
+    private func isBudgetBlockedNow() async -> Bool {
+        await MainActor.run {
+            BudgetStore.shared.isBlockedNow()
+        }
+    }
+
+    private func applyBudgetExceeded(_ info: BudgetExceededInfo) async {
+        await MainActor.run {
+            BudgetStore.shared.applyBudgetExceeded(blockedUntil: info.blockedUntil)
+        }
     }
 
     private func enforceSendAttemptLimit(
@@ -864,8 +912,7 @@ final class TransmissionActions {
         sel: PendingSelection,
         attempts: [DeliveryAttempt]
     ) async {
-        guard let last = attempts.last,
-              last.outcome == .pending,
+        guard let last = activePollAttempt(attempts),
               let serverTxId = last.transmissionId,
               !serverTxId.isEmpty else {
             if let tx = try? fetchTransmission(id: sel.txId) {
@@ -1042,7 +1089,17 @@ final class TransmissionActions {
             outboxLog.info("retryFailed event=status tx=\(short(tx.id), privacy: .public) to=queued")
         }
 
+        try? modelContext.save()
         outboxLog.info("retryFailed event=end")
+    }
+
+    private func recoverPendingWithoutActiveAttempt(runId: String, tx: Transmission, attemptCount: Int) {
+        guard tx.status == .pending else { return }
+        tx.status = .queued
+        tx.lastError = "Recovered pending transmission without active attempt"
+        outboxLog.info(
+            "processQueue run=\(runId, privacy: .public) event=pending_recovered tx=\(short(tx.id), privacy: .public) attempts=\(attemptCount, privacy: .public)"
+        )
     }
 
     // MARK: - SwiftData fetch helpers

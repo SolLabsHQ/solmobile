@@ -494,8 +494,9 @@ private func acceptMemento(_ m: MementoViewModel) {
     acceptedMemento = m
 
     // Submit to SolServer (throws on transport issues). We still keep the optimistic UI.
+    let transport = SolServerClient()
     Task {
-        let actions = TransmissionActions(modelContext: modelContext)
+        let actions = TransmissionActions(modelContext: modelContext, transport: transport)
 
         do {
             let result = try await actions.decideThreadMemento(
@@ -540,8 +541,9 @@ private func acceptMemento(_ m: MementoViewModel) {
         UserDefaults.standard.set(m.id, forKey: mementoDefaultsKeyDismissed)
 
         // Submit to SolServer and clear the local draft fields so the banner disappears immediately.
+        let transport = SolServerClient()
         Task {
-            let actions = TransmissionActions(modelContext: modelContext)
+            let actions = TransmissionActions(modelContext: modelContext, transport: transport)
             do {
                 let result = try await actions.decideThreadMemento(threadId: thread.id, mementoId: m.id, decision: .decline)
 
@@ -576,8 +578,9 @@ private func acceptMemento(_ m: MementoViewModel) {
             let id = current["id"] as? String ?? ""
 
             // Submit to SolServer and clear the local draft fields so the banner disappears immediately.
+            let transport = SolServerClient()
             Task {
-                let actions = TransmissionActions(modelContext: modelContext)
+                let actions = TransmissionActions(modelContext: modelContext, transport: transport)
                 do {
                     let result = try await actions.decideThreadMemento(threadId: thread.id, mementoId: id, decision: .revoke)
 

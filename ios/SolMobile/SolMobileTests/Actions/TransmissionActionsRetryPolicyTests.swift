@@ -313,4 +313,41 @@ final class TransmissionActionsRetryPolicyTests: XCTestCase {
         XCTAssertEqual(last?.statusCode, -1)
         XCTAssertEqual(last?.outcome, .failed)
     }
+
+    func test_retryFailed_persists_changes_on_reload() async throws {
+        let transport = CountingTransport { _ in
+            return ChatResponse(
+                text: "ok",
+                statusCode: 200,
+                transmissionId: "tx-1",
+                pending: false,
+                responseInfo: nil,
+                threadMemento: nil,
+                evidenceSummary: nil,
+                evidence: nil,
+                evidenceWarnings: nil,
+                outputEnvelope: nil
+            )
+        }
+
+        let (thread, user) = makeThreadAndUserMessage(text: "hello")
+        let actions = TransmissionActions(modelContext: context, transport: transport)
+        actions.enqueueChat(thread: thread, userMessage: user)
+
+        let tx = try fetchSingleTransmission()
+        tx.status = .failed
+        tx.lastError = "boom"
+        try context.save()
+
+        actions.retryFailed()
+
+        let reloadContext = ModelContext(container)
+        guard let reloaded = try reloadContext.fetch(FetchDescriptor<Transmission>()).first else {
+            XCTFail("Expected to reload a Transmission")
+            return
+        }
+
+        XCTAssertEqual(reloaded.status, .queued)
+        XCTAssertNil(reloaded.lastError)
+    }
 }
