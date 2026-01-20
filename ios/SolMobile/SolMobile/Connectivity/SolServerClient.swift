@@ -86,6 +86,10 @@ private struct MementoDecisionResponse: Codable {
     let memento: ThreadMementoDTO?
 }
 
+private final class TaskIdBox {
+    var value: Int = 0
+}
+
 final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision {
     let baseURL: URL
     private let session: URLSession
@@ -115,7 +119,7 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
     ) {
         self.baseURL = baseURL
         self.redirectTracker = redirectTracker
-        var resolvedConfig = configuration
+        let resolvedConfig = configuration
         if #available(iOS 13.0, *) {
             resolvedConfig.tlsMinimumSupportedProtocolVersion = .TLSv12
         }
@@ -173,10 +177,10 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
         let started = Date()
 
         return try await withCheckedThrowingContinuation { continuation in
-            var taskId = 0
+            let taskIdBox = TaskIdBox()
             let task = session.dataTask(with: authorizedReq) { data, response, error in
                 let latencyMs = Int(Date().timeIntervalSince(started) * 1000)
-                let redirectChain = self.redirectTracker.consumeChain(taskId: taskId)
+                let redirectChain = self.redirectTracker.consumeChain(taskId: taskIdBox.value)
 
                 if let error {
                     let decision = RetryPolicy.classify(statusCode: nil, body: nil, headers: nil, error: error)
@@ -277,7 +281,7 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
 
                 continuation.resume(returning: (data, http, responseInfo))
             }
-            taskId = task.taskIdentifier
+            taskIdBox.value = task.taskIdentifier
             task.resume()
         }
     }
