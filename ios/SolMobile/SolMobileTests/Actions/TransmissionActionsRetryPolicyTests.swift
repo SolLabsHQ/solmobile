@@ -68,6 +68,29 @@ final class TransmissionActionsRetryPolicyTests: XCTestCase {
         }
     }
 
+    private final class RecordingTransport: ChatTransport {
+        private(set) var requestIds: [String] = []
+        private var callIndex: Int = 0
+        private let responses: [Result<ChatResponse, Error>]
+
+        init(responses: [Result<ChatResponse, Error>]) {
+            self.responses = responses
+        }
+
+        func send(envelope: PacketEnvelope, diagnostics: DiagnosticsContext? = nil) async throws -> ChatResponse {
+            requestIds.append(envelope.requestId)
+            let idx = min(callIndex, responses.count - 1)
+            callIndex += 1
+
+            switch responses[idx] {
+            case let .success(response):
+                return response
+            case let .failure(error):
+                throw error
+            }
+        }
+    }
+
     private func makeThreadAndUserMessage(text: String) -> (ConversationThread, Message) {
         let thread = ConversationThread(title: "T1")
         context.insert(thread)
@@ -349,5 +372,47 @@ final class TransmissionActionsRetryPolicyTests: XCTestCase {
 
         XCTAssertEqual(reloaded.status, .queued)
         XCTAssertNil(reloaded.lastError)
+    }
+
+    func test_requestId_stays_stable_across_retries() async throws {
+        let transport = RecordingTransport(
+            responses: [
+                .failure(TransportError.httpStatus(HTTPErrorInfo(code: 500, body: "boom"))),
+                .success(
+                    ChatResponse(
+                        text: "ok",
+                        statusCode: 200,
+                        transmissionId: "tx-1",
+                        pending: false,
+                        responseInfo: nil,
+                        threadMemento: nil,
+                        evidenceSummary: nil,
+                        evidence: nil,
+                        evidenceWarnings: nil,
+                        outputEnvelope: nil
+                    )
+                )
+            ]
+        )
+
+        let (thread, user) = makeThreadAndUserMessage(text: "hello")
+        let actions = TransmissionActions(modelContext: context, transport: transport)
+        actions.enqueueChat(thread: thread, userMessage: user)
+
+        await actions.processQueue()
+
+        let tx = try fetchSingleTransmission()
+        if let lastAttempt = tx.deliveryAttempts.sorted(by: { $0.createdAt < $1.createdAt }).last {
+            lastAttempt.createdAt = Date().addingTimeInterval(-5)
+            try context.save()
+        }
+
+        await actions.processQueue()
+
+        XCTAssertEqual(transport.requestIds.count, 2)
+        XCTAssertEqual(transport.requestIds[0], transport.requestIds[1])
+
+        let refreshed = try fetchSingleTransmission()
+        XCTAssertEqual(refreshed.requestId, transport.requestIds[0])
     }
 }

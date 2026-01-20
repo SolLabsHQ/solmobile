@@ -202,6 +202,7 @@ nonisolated final class TransmissionActions {
     private let pendingLinearStepSeconds: TimeInterval = 2
     private let pendingSlowThresholdSeconds: TimeInterval = 60
     private let pendingSlowIntervalSeconds: TimeInterval = 20
+    private let sendingStaleThresholdSeconds: TimeInterval = 60
 
     init(
         modelContext: ModelContext,
@@ -311,6 +312,8 @@ nonisolated final class TransmissionActions {
         defer {
             outboxLog.info("processQueue run=\(runId, privacy: .public) event=end")
         }
+
+        recoverStaleSending(runId: runId, now: Date())
 
         if pollFirst {
             await pollPending(runId: runId, limit: pollLimit)
@@ -466,6 +469,30 @@ nonisolated final class TransmissionActions {
         return pending.prefix(limit).map { tx in
             PendingSelection(txId: tx.id, packetId: tx.packet.id, threadId: tx.packet.threadId)
         }
+    }
+
+    private func recoverStaleSending(runId: String, now: Date) {
+        let sendingRaw = TransmissionStatus.sending.rawValue
+        let descriptor = FetchDescriptor<Transmission>(
+            predicate: #Predicate { $0.statusRaw == sendingRaw },
+            sortBy: [SortDescriptor(\Transmission.createdAt, order: .forward)]
+        )
+
+        guard let sending = try? modelContext.fetch(descriptor) else {
+            outboxLog.error("processQueue run=\(runId, privacy: .public) event=fetch_failed scope=sending")
+            return
+        }
+
+        let stale = sending.filter { now.timeIntervalSince($0.createdAt) >= sendingStaleThresholdSeconds }
+        guard !stale.isEmpty else { return }
+
+        for tx in stale {
+            tx.status = .queued
+            tx.lastError = "Recovered stale sending transmission"
+            outboxLog.info("processQueue run=\(runId, privacy: .public) event=sending_recovered tx=\(short(tx.id), privacy: .public)")
+        }
+
+        try? modelContext.save()
     }
 
     private func sortedAttempts(_ attempts: [DeliveryAttempt]) -> [DeliveryAttempt] {

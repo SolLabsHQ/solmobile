@@ -48,6 +48,38 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
         }
     }
 
+    private struct MockPollCompletesTransport: ChatTransportPolling {
+        func send(envelope: PacketEnvelope, diagnostics: DiagnosticsContext? = nil) async throws -> ChatResponse {
+            return ChatResponse(
+                text: "",
+                statusCode: 202,
+                transmissionId: "tx-any",
+                pending: true,
+                responseInfo: nil,
+                threadMemento: nil,
+                evidenceSummary: nil,
+                evidence: nil,
+                evidenceWarnings: nil,
+                outputEnvelope: nil
+            )
+        }
+
+        func poll(transmissionId: String, diagnostics: DiagnosticsContext? = nil) async throws -> ChatPollResponse {
+            return ChatPollResponse(
+                pending: false,
+                assistant: "done",
+                serverStatus: "completed",
+                statusCode: 200,
+                responseInfo: nil,
+                threadMemento: nil,
+                evidenceSummary: nil,
+                evidence: nil,
+                evidenceWarnings: nil,
+                outputEnvelope: nil
+            )
+        }
+    }
+
     // Transport that returns 202 but does NOT support polling.
     private struct MockPendingNoPollingTransport: ChatTransport {
         let txId: String = "tx-pending-nopoll"
@@ -354,6 +386,46 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
         guard let tx2 = TestFetch.fetchOne(Transmission.self, context),
               let t2 = TestFetch.fetchOne(ConversationThread.self, context) else {
             XCTFail("Expected Transmission + Thread after recovery poll")
+            return
+        }
+
+        TestAssert.transmissionStatus(.succeeded, tx2)
+        XCTAssertTrue(t2.messages.contains(where: { $0.creatorType == .assistant && $0.text == "done" }))
+    }
+
+    @MainActor
+    func test_pending_survives_restart_and_resolves() async {
+        let transport1 = MockPendingThenPollStillPendingTransport()
+        let actions1 = TransmissionActions(modelContext: context, transport: transport1)
+
+        let thread = SeedFactory.makeThread(context, title: "pending-restart-thread")
+        let user = SeedFactory.makeUserMessage(context, thread: thread, text: "/pending hello")
+
+        SeedFactory.enqueueChat(actions1, thread: thread, userMessage: user)
+
+        await actions1.processQueue()
+
+        guard let tx1 = TestFetch.fetchOne(Transmission.self, context) else {
+            XCTFail("Expected a Transmission after first pass")
+            return
+        }
+
+        TestAssert.transmissionStatus(.pending, tx1)
+
+        if let lastPoll = tx1.deliveryAttempts.last {
+            lastPoll.createdAt = Date().addingTimeInterval(-5)
+            try? context.save()
+        }
+
+        let restartContext = ModelContext(container)
+        let transport2 = MockPollCompletesTransport()
+        let actions2 = TransmissionActions(modelContext: restartContext, transport: transport2)
+
+        await actions2.processQueue()
+
+        guard let tx2 = TestFetch.fetchOne(Transmission.self, restartContext),
+              let t2 = TestFetch.fetchOne(ConversationThread.self, restartContext) else {
+            XCTFail("Expected Transmission + Thread after restart poll")
             return
         }
 

@@ -167,6 +167,49 @@ final class TransmissionActionsTests: SwiftDataTestBase {
         XCTAssertEqual(updated[1].status, .succeeded)
     }
 
+    func test_staleSending_requeues_and_sends() async throws {
+        var didSend = false
+        let transport = TestTransport { _ in
+            didSend = true
+            return ChatResponse(
+                text: "ok",
+                statusCode: 200,
+                transmissionId: "tx-ok",
+                pending: false,
+                responseInfo: nil,
+                threadMemento: nil,
+                evidenceSummary: nil,
+                evidence: nil,
+                evidenceWarnings: nil,
+                outputEnvelope: nil
+            )
+        }
+
+        let thread = ConversationThread(title: "T1")
+        context.insert(thread)
+
+        let user = Message(thread: thread, creatorType: .user, text: "hello")
+        thread.messages.append(user)
+        context.insert(user)
+
+        let packet = Packet(threadId: thread.id, messageIds: [user.id], messageText: user.text)
+        context.insert(packet)
+
+        let tx = Transmission(packet: packet)
+        tx.status = .sending
+        tx.createdAt = Date().addingTimeInterval(-120)
+        context.insert(tx)
+        try context.save()
+
+        let actions = TransmissionActions(modelContext: context, transport: transport)
+        await actions.processQueue()
+
+        XCTAssertTrue(didSend)
+
+        let fresh = try context.fetch(FetchDescriptor<Transmission>()).first
+        XCTAssertEqual(fresh?.status, .succeeded)
+    }
+
     func test_retryFailed_flipsChatFailToChat_requeues_andThenSucceeds() async throws {
         // Arrange
         let transport = TestTransport { envelope in

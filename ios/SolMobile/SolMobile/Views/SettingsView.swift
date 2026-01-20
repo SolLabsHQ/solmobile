@@ -77,8 +77,12 @@ struct SettingsView: View {
         URL(string: trimmedBaseURL) != nil
     }
 
+    private var overrideBaseURL: String {
+        trimmedBaseURL.isEmpty ? "(none)" : trimmedBaseURL
+    }
+
     private var effectiveBaseURL: String {
-        isValidBaseURL ? trimmedBaseURL : SolServerBaseURL.defaultBaseURLString
+        SolServerBaseURL.effectiveURLString()
     }
 
     private var healthzURL: URL? {
@@ -312,6 +316,18 @@ struct SettingsView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
+
+                    HStack {
+                        Text("Override")
+                            .foregroundStyle(.secondary)
+
+                        Spacer()
+
+                        Text(overrideBaseURL)
+                            .font(.footnote)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
 
                     // Show what the app will actually use (helps when the field is invalid)
                     HStack {
