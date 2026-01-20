@@ -261,6 +261,42 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
         }
     }
 
+    private struct MockPollRecordingTransport: ChatTransportPolling {
+        let recorder: CallRecorder
+
+        func send(envelope: PacketEnvelope, diagnostics: DiagnosticsContext? = nil) async throws -> ChatResponse {
+            XCTFail("send should not be called in poll-only test")
+            return ChatResponse(
+                text: "",
+                statusCode: 200,
+                transmissionId: "tx-unused",
+                pending: false,
+                responseInfo: nil,
+                threadMemento: nil,
+                evidenceSummary: nil,
+                evidence: nil,
+                evidenceWarnings: nil,
+                outputEnvelope: nil
+            )
+        }
+
+        func poll(transmissionId: String, diagnostics: DiagnosticsContext? = nil) async throws -> ChatPollResponse {
+            await recorder.recordPollStart()
+            return ChatPollResponse(
+                pending: true,
+                assistant: nil,
+                serverStatus: "created",
+                statusCode: 200,
+                responseInfo: nil,
+                threadMemento: nil,
+                evidenceSummary: nil,
+                evidence: nil,
+                evidenceWarnings: nil,
+                outputEnvelope: nil
+            )
+        }
+    }
+
     @MainActor
     func test_pending202_then_poll_completes_and_appends_assistant() async {
         let transport = MockPendingThenPollTransport()
@@ -515,5 +551,101 @@ final class TransmissionActionsPollingTests: SwiftDataTestBase {
 
         TestAssert.transmissionStatus(.pending, tx2)
         XCTAssertEqual(tx2.deliveryAttempts.last?.outcome, .pending)
+    }
+
+    @MainActor
+    func test_poll_backoff_skips_when_too_soon() async {
+        let recorder = CallRecorder()
+        let transport = MockPollRecordingTransport(recorder: recorder)
+        let actions = TransmissionActions(modelContext: context, transport: transport)
+
+        let thread = SeedFactory.makeThread(context, title: "poll-backoff-too-soon")
+        let user = SeedFactory.makeUserMessage(context, thread: thread, text: "hello")
+
+        let packet = Packet(threadId: thread.id, messageIds: [user.id], messageText: user.text)
+        context.insert(packet)
+
+        let tx = Transmission(packet: packet)
+        tx.status = .pending
+
+        let sendAttempt = DeliveryAttempt(
+            createdAt: Date().addingTimeInterval(-6),
+            statusCode: 202,
+            outcome: .pending,
+            source: .send,
+            errorMessage: nil,
+            transmissionId: "tx-backoff",
+            transmission: tx
+        )
+
+        let pollAttempt = DeliveryAttempt(
+            createdAt: Date(),
+            statusCode: 200,
+            outcome: .pending,
+            source: .poll,
+            errorMessage: nil,
+            transmissionId: "tx-backoff",
+            transmission: tx
+        )
+
+        tx.deliveryAttempts.append(sendAttempt)
+        tx.deliveryAttempts.append(pollAttempt)
+        context.insert(tx)
+        context.insert(sendAttempt)
+        context.insert(pollAttempt)
+        try? context.save()
+
+        await actions.processQueue()
+
+        let pollStartAt = await recorder.pollStartAt
+        XCTAssertNil(pollStartAt, "Expected poll to be skipped due to backoff")
+    }
+
+    @MainActor
+    func test_poll_backoff_allows_after_wait() async {
+        let recorder = CallRecorder()
+        let transport = MockPollRecordingTransport(recorder: recorder)
+        let actions = TransmissionActions(modelContext: context, transport: transport)
+
+        let thread = SeedFactory.makeThread(context, title: "poll-backoff-ready")
+        let user = SeedFactory.makeUserMessage(context, thread: thread, text: "hello")
+
+        let packet = Packet(threadId: thread.id, messageIds: [user.id], messageText: user.text)
+        context.insert(packet)
+
+        let tx = Transmission(packet: packet)
+        tx.status = .pending
+
+        let sendAttempt = DeliveryAttempt(
+            createdAt: Date().addingTimeInterval(-6),
+            statusCode: 202,
+            outcome: .pending,
+            source: .send,
+            errorMessage: nil,
+            transmissionId: "tx-backoff-ready",
+            transmission: tx
+        )
+
+        let pollAttempt = DeliveryAttempt(
+            createdAt: Date().addingTimeInterval(-5),
+            statusCode: 200,
+            outcome: .pending,
+            source: .poll,
+            errorMessage: nil,
+            transmissionId: "tx-backoff-ready",
+            transmission: tx
+        )
+
+        tx.deliveryAttempts.append(sendAttempt)
+        tx.deliveryAttempts.append(pollAttempt)
+        context.insert(tx)
+        context.insert(sendAttempt)
+        context.insert(pollAttempt)
+        try? context.save()
+
+        await actions.processQueue()
+
+        let pollStartAt = await recorder.pollStartAt
+        XCTAssertNotNil(pollStartAt, "Expected poll to proceed after backoff window")
     }
 }
