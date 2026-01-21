@@ -29,6 +29,63 @@ final class TransmissionActionsTests: SwiftDataTestBase {
         BudgetStore.shared.resetForTests()
     }
 
+    func test_memoryDistill_bypassesMissingText_andSends() async throws {
+        let transport = FakeTransport()
+        transport.nextSend = {
+            ChatResponse(
+                text: "",
+                statusCode: 202,
+                transmissionId: "tx-distill",
+                pending: true,
+                responseInfo: nil,
+                threadMemento: nil,
+                evidenceSummary: nil,
+                evidence: nil,
+                evidenceWarnings: nil,
+                outputEnvelope: nil
+            )
+        }
+
+        let thread = ConversationThread(title: "T1")
+        context.insert(thread)
+
+        let user = Message(thread: thread, creatorType: .user, text: "hello")
+        thread.messages.append(user)
+        context.insert(user)
+
+        let item = MemoryContextItem(
+            messageId: user.id.uuidString,
+            role: "user",
+            content: user.text,
+            createdAt: ISO8601DateFormatter().string(from: Date())
+        )
+
+        let request = MemoryDistillRequest(
+            threadId: thread.id.uuidString,
+            triggerMessageId: user.id.uuidString,
+            contextWindow: [item],
+            requestId: "mem:thread:\(thread.id.uuidString)",
+            reaffirmCount: 0
+        )
+
+        let actions = TransmissionActions(modelContext: context, transport: transport)
+        actions.enqueueMemoryDistill(
+            threadId: thread.id,
+            messageIds: [user.id],
+            payload: request
+        )
+
+        await actions.processQueue()
+
+        XCTAssertEqual(transport.sendCalls.count, 1)
+        XCTAssertEqual(transport.sendCalls.first?.envelope.packetType, "memory_distill")
+
+        let allTx = try context.fetch(FetchDescriptor<Transmission>())
+        XCTAssertEqual(allTx.count, 1)
+        XCTAssertTrue([.pending, .succeeded].contains(allTx[0].status))
+        XCTAssertNil(allTx[0].lastError)
+    }
+
     func test_processQueue_success_marksSucceeded_andAppendsAssistant() async throws {
         // Arrange
         let transport = FakeTransport()

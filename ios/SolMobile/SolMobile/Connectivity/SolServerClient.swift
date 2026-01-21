@@ -67,6 +67,7 @@ struct TransmissionResponse: Codable {
     let transmission: TransmissionDTO
     let pending: Bool?
     let assistant: String?
+    let outputEnvelope: OutputEnvelopeDTO?
 
     // Present once the transmission is completed and the server has a memento snapshot.
     let threadMemento: ThreadMementoDTO?
@@ -426,9 +427,117 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
         )
     }
 
+    // MARK: - Memory endpoints (PR #8)
+
+    func distillMemory(request: MemoryDistillRequest) async throws -> MemoryDistillResponse {
+        var req = URLRequest(url: baseURL.appendingPathComponent("/v1/memories/distill"))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONEncoder().encode(request)
+
+        let (data, http, responseInfo) = try await requestJSON(req)
+        try require2xx(http, data: data, responseInfo: responseInfo)
+        return try JSONDecoder().decode(MemoryDistillResponse.self, from: data)
+    }
+
+    func listMemories(cursor: String? = nil, limit: Int? = nil, domain: String? = nil, tagsAny: [String]? = nil) async throws -> MemoryListResponse {
+        var components = URLComponents(url: baseURL.appendingPathComponent("/v1/memories"), resolvingAgainstBaseURL: false)
+        var query: [URLQueryItem] = []
+        if let cursor { query.append(.init(name: "cursor", value: cursor)) }
+        if let limit { query.append(.init(name: "limit", value: String(limit))) }
+        if let domain { query.append(.init(name: "domain", value: domain)) }
+        if let tagsAny, !tagsAny.isEmpty {
+            query.append(.init(name: "tags_any", value: tagsAny.joined(separator: ",")))
+        }
+        if !query.isEmpty {
+            components?.queryItems = query
+        }
+
+        guard let url = components?.url else {
+            throw TransportError.httpStatus(
+                HTTPErrorInfo(code: 0, body: "Invalid memories URL", headers: [:], finalURL: nil, redirectChain: [])
+            )
+        }
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+
+        let (data, http, responseInfo) = try await requestJSON(req)
+        try require2xx(http, data: data, responseInfo: responseInfo)
+        return try JSONDecoder().decode(MemoryListResponse.self, from: data)
+    }
+
+    func createMemory(request: MemoryCreateRequest) async throws -> MemoryCreateResponse {
+        var req = URLRequest(url: baseURL.appendingPathComponent("/v1/memories"))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONEncoder().encode(request)
+
+        let (data, http, responseInfo) = try await requestJSON(req)
+        try require2xx(http, data: data, responseInfo: responseInfo)
+        return try JSONDecoder().decode(MemoryCreateResponse.self, from: data)
+    }
+
+    func updateMemory(memoryId: String, request: MemoryPatchRequest) async throws -> MemoryPatchResponse {
+        let url = baseURL.appendingPathComponent("/v1/memories").appendingPathComponent(memoryId)
+        var req = URLRequest(url: url)
+        req.httpMethod = "PATCH"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONEncoder().encode(request)
+
+        let (data, http, responseInfo) = try await requestJSON(req)
+        try require2xx(http, data: data, responseInfo: responseInfo)
+        return try JSONDecoder().decode(MemoryPatchResponse.self, from: data)
+    }
+
+    func deleteMemory(memoryId: String, confirm: Bool? = nil) async throws {
+        var components = URLComponents(url: baseURL.appendingPathComponent("/v1/memories").appendingPathComponent(memoryId), resolvingAgainstBaseURL: false)
+        if let confirm {
+            components?.queryItems = [URLQueryItem(name: "confirm", value: confirm ? "true" : "false")]
+        }
+        guard let url = components?.url else {
+            throw TransportError.httpStatus(
+                HTTPErrorInfo(code: 0, body: "Invalid memories delete URL", headers: [:], finalURL: nil, redirectChain: [])
+            )
+        }
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "DELETE"
+
+        let (data, http, responseInfo) = try await requestJSON(req)
+        try require2xx(http, data: data, responseInfo: responseInfo)
+        _ = data
+    }
+
+    func batchDeleteMemories(request: MemoryBatchDeleteRequest) async throws -> MemoryBatchDeleteResponse {
+        var req = URLRequest(url: baseURL.appendingPathComponent("/v1/memories/batch_delete"))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONEncoder().encode(request)
+
+        let (data, http, responseInfo) = try await requestJSON(req)
+        try require2xx(http, data: data, responseInfo: responseInfo)
+        return try JSONDecoder().decode(MemoryBatchDeleteResponse.self, from: data)
+    }
+
+    func clearAllMemories(request: MemoryClearAllRequest) async throws -> MemoryBatchDeleteResponse {
+        var req = URLRequest(url: baseURL.appendingPathComponent("/v1/memories/clear_all"))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONEncoder().encode(request)
+
+        let (data, http, responseInfo) = try await requestJSON(req)
+        try require2xx(http, data: data, responseInfo: responseInfo)
+        return try JSONDecoder().decode(MemoryBatchDeleteResponse.self, from: data)
+    }
+
     // MARK: - ChatTransport / Outbox integration
 
     func send(envelope: PacketEnvelope, diagnostics: DiagnosticsContext? = nil) async throws -> ChatResponse {
+        if envelope.packetType == "memory_distill" {
+            return try await sendMemoryDistill(envelope: envelope, diagnostics: diagnostics)
+        }
+
         let simulate500 = (envelope.packetType == "chat_fail")
         let simulate202 = envelope.messageText
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -499,6 +608,41 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
         )
     }
 
+    private func sendMemoryDistill(
+        envelope: PacketEnvelope,
+        diagnostics: DiagnosticsContext?
+    ) async throws -> ChatResponse {
+        guard let payload = envelope.payloadJson?.data(using: .utf8) else {
+            throw TransportError.httpStatus(
+                HTTPErrorInfo(code: 0, body: "Missing distill payload", headers: [:], finalURL: nil, redirectChain: [])
+            )
+        }
+
+        var req = URLRequest(url: baseURL.appendingPathComponent("/v1/memories/distill"))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = payload
+
+        let (data, http, responseInfo) = try await requestJSON(req, diagnostics: diagnostics)
+        try require2xx(http, data: data, responseInfo: responseInfo)
+
+        let decoded = try? JSONDecoder().decode(MemoryDistillResponse.self, from: data)
+        let txId = decoded?.transmissionId
+
+        return ChatResponse(
+            text: "",
+            statusCode: http.statusCode,
+            transmissionId: txId,
+            pending: true,
+            responseInfo: responseInfo,
+            threadMemento: nil,
+            evidenceSummary: nil,
+            evidence: nil,
+            evidenceWarnings: nil,
+            outputEnvelope: nil
+        )
+    }
+
     func poll(transmissionId: String, diagnostics: DiagnosticsContext? = nil) async throws -> ChatPollResponse {
         let url = baseURL
             .appendingPathComponent("/v1/transmissions")
@@ -523,7 +667,7 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
             evidenceSummary: nil,  // Poll endpoint doesn't return evidence for MVP
             evidence: nil,
             evidenceWarnings: nil,
-            outputEnvelope: nil
+            outputEnvelope: decoded.outputEnvelope
         )
     }
 }

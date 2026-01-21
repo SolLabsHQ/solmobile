@@ -17,6 +17,8 @@ struct ThreadListView: View {
     @Query private var transmissions: [Transmission]
     @State private var didRunDraftCleanup = false
     @State private var didScheduleStorageCleanup = false
+    @State private var pendingDeleteOffsets: IndexSet? = nil
+    @State private var showDeleteWarning = false
 
 
     var body: some View {
@@ -42,7 +44,10 @@ struct ThreadListView: View {
                         }
                     }
                 }
-                .onDelete(perform: delete)
+                .onDelete { offsets in
+                    pendingDeleteOffsets = offsets
+                    showDeleteWarning = true
+                }
             }
             .navigationTitle("Chats")
             .toolbar {
@@ -61,6 +66,19 @@ struct ThreadListView: View {
                 try? DraftStore(modelContext: modelContext).cleanupExpiredDrafts()
                 scheduleStorageCleanupIfDue()
                 StorageCleanupScheduler.shared.schedule()
+            }
+            .alert("Delete Thread?", isPresented: $showDeleteWarning) {
+                Button("Delete", role: .destructive) {
+                    if let offsets = pendingDeleteOffsets {
+                        delete(at: offsets)
+                    }
+                    pendingDeleteOffsets = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    pendingDeleteOffsets = nil
+                }
+            } message: {
+                Text("This deletes your conversation history. Saved memories remain in your Vault unless deleted separately.")
             }
         }
     }

@@ -14,6 +14,8 @@ enum ModelContainerFactory {
             ClaimSupport.self,
             ClaimMapEntry.self,
             CapturedSuggestion.self,
+            MemoryArtifact.self,
+            GhostCardLedger.self,
             DraftRecord.self,
             ThreadReadState.self,
             Packet.self,

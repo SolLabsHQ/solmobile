@@ -37,6 +37,17 @@ final class Message {
     var captureSuggestionTypeRaw: String?
     var captureSuggestionTitle: String?
 
+    // Ghost card metadata (ADR-023).
+    var ghostDisplayHint: String?
+    var ghostKindRaw: String?
+    var ghostTypeRaw: String?
+    var ghostMemoryId: String?
+    var ghostTriggerMessageId: String?
+    var ghostRigorLevelRaw: String?
+    var ghostSnippet: String?
+    var ghostFactNull: Bool = false
+    var ghostMoodAnchor: String?
+
     var thread: ConversationThread
     
     // Evidence ownership (cascade delete)
@@ -67,6 +78,15 @@ final class Message {
         captureSuggestionId: String? = nil,
         captureSuggestionTypeRaw: String? = nil,
         captureSuggestionTitle: String? = nil,
+        ghostDisplayHint: String? = nil,
+        ghostKindRaw: String? = nil,
+        ghostTypeRaw: String? = nil,
+        ghostMemoryId: String? = nil,
+        ghostTriggerMessageId: String? = nil,
+        ghostRigorLevelRaw: String? = nil,
+        ghostSnippet: String? = nil,
+        ghostFactNull: Bool = false,
+        ghostMoodAnchor: String? = nil,
         hasEvidence: Bool = false,
         captures: [Capture]? = nil,
         supports: [ClaimSupport]? = nil,
@@ -89,6 +109,15 @@ final class Message {
         self.captureSuggestionId = captureSuggestionId
         self.captureSuggestionTypeRaw = captureSuggestionTypeRaw
         self.captureSuggestionTitle = captureSuggestionTitle
+        self.ghostDisplayHint = ghostDisplayHint
+        self.ghostKindRaw = ghostKindRaw
+        self.ghostTypeRaw = ghostTypeRaw
+        self.ghostMemoryId = ghostMemoryId
+        self.ghostTriggerMessageId = ghostTriggerMessageId
+        self.ghostRigorLevelRaw = ghostRigorLevelRaw
+        self.ghostSnippet = ghostSnippet
+        self.ghostFactNull = ghostFactNull
+        self.ghostMoodAnchor = ghostMoodAnchor
         self.hasEvidence = hasEvidence
         self.captures = captures
         self.supports = supports

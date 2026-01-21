@@ -3,6 +3,9 @@ import SwiftData
 import os
 import Foundation
 import UIKit
+import EventKit
+import EventKitUI
+import CoreLocation
 
 struct ThreadDetailView: View {
     private static let perfLog = OSLog(subsystem: "com.sollabshq.solmobile", category: "ThreadDetailPerf")
@@ -235,12 +238,11 @@ struct ThreadDetailView: View {
         }
         .navigationTitle(thread.title)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
+            .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button(thread.pinned ? "Saved" : "Save to Memory") {
-                    pinThreadToMemory()
+                Button("Save to Memory") {
+                    triggerMemoryDistill()
                 }
-                .disabled(thread.pinned)
             }
         }
     }
@@ -263,9 +265,44 @@ struct ThreadDetailView: View {
         DraftStore(modelContext: modelContext)
     }
 
-    private func pinThreadToMemory() {
-        StoragePinningService(modelContext: modelContext)
-            .pinThreadAndMessages(thread: thread, messages: messages)
+    private func triggerMemoryDistill() {
+        guard let outboxService else { return }
+        let context = buildMemoryContext()
+        guard let triggerMessageId = context.last?.messageId else { return }
+
+        let requestId = "mem:thread:\(thread.id.uuidString)"
+        let payload = MemoryDistillRequest(
+            threadId: thread.id.uuidString,
+            triggerMessageId: triggerMessageId,
+            contextWindow: context,
+            requestId: requestId,
+            reaffirmCount: 0
+        )
+
+        outboxService.enqueueMemoryDistill(
+            threadId: thread.id,
+            messageIds: context.compactMap { UUID(uuidString: $0.messageId) },
+            payload: payload
+        )
+    }
+
+    private func buildMemoryContext() -> [MemoryContextItem] {
+        let eligible = messages.filter { message in
+            !message.isGhostCard
+        }
+
+        let window = eligible.suffix(15)
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        return window.map { message in
+            MemoryContextItem(
+                messageId: message.id.uuidString,
+                role: message.creatorType.rawValue,
+                content: message.text,
+                createdAt: formatter.string(from: message.createdAt)
+            )
+        }
     }
 
     private func restoreDraftIfNeeded() {
@@ -820,54 +857,100 @@ private struct MessageFramePreferenceKey: PreferenceKey {
 
 private struct MessageBubble: View {
     let message: Message
+    @Environment(\.modelContext) private var modelContext
     @State private var showingClaims = false
+    @State private var editorMode: MemoryEditorMode?
+    @State private var showDeleteConfirm = false
+    @State private var showErrorAlert = false
+    @State private var errorMessage: String = ""
+    @State private var activeExportSheet: ExportSheet?
+
+    private let eventStore = EKEventStore()
 
     var body: some View {
-        HStack {
-            if message.creatorType == .user { Spacer(minLength: 40) }
-
-            VStack(alignment: .leading, spacing: 0) {
-                Text(message.text)
-                    .padding(10)
-                    .background(message.creatorType == .user ? Color.gray.opacity(0.2) : Color.blue.opacity(0.15))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-
-                if message.creatorType == .assistant && hasClaimsBadge {
-                    Button {
-                        showingClaims = true
-                    } label: {
-                        Text("Evidence (\(message.claimsCount))")
-                            .font(.caption)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.gray.opacity(0.15))
-                            .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.top, 6)
-                    .padding(.horizontal, 10)
-                    .sheet(isPresented: $showingClaims) {
-                        EvidenceClaimsSheet(message: message)
+        if message.isGhostCard, let ghostCard = buildGhostCardModel() {
+            GhostCardComponent(card: ghostCard)
+                .sheet(item: $editorMode) { mode in
+                    MemoryEditorSheet(mode: mode) { updated in
+                        if let updated {
+                            upsertMemoryArtifact(from: updated, memoryId: updated.id)
+                            message.ghostMemoryId = updated.id
+                            message.ghostFactNull = false
+                            message.ghostSnippet = updated.snippet ?? message.ghostSnippet
+                            message.ghostRigorLevelRaw = updated.rigorLevel ?? message.ghostRigorLevelRaw
+                            message.ghostMoodAnchor = updated.moodAnchor ?? message.ghostMoodAnchor
+                            try? modelContext.save()
+                        }
                     }
                 }
+                .sheet(item: $activeExportSheet) { sheet in
+                    switch sheet {
+                    case .reminder(let reminder):
+                        ReminderSaveView(reminder: reminder, eventStore: eventStore) { _ in }
+                    case .calendar(let event):
+                        EventEditView(eventStore: eventStore, event: event) { _ in }
+                    }
+                }
+                .alert("Confirm Delete", isPresented: $showDeleteConfirm) {
+                    Button("Delete", role: .destructive) {
+                        Task { await performDelete(confirm: true) }
+                    }
+                    Button("Cancel", role: .cancel) { }
+                } message: {
+                    Text("This memory affects safety boundaries. Confirm to delete it.")
+                }
+                .alert("Action Failed", isPresented: $showErrorAlert) {
+                    Button("OK", role: .cancel) { }
+                } message: {
+                    Text(errorMessage)
+                }
+        } else {
+            HStack {
+                if message.creatorType == .user { Spacer(minLength: 40) }
 
-                if message.creatorType == .assistant, let capture = message.captureSuggestion {
-                    CaptureSuggestionCard(message: message, suggestion: capture)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(message.text)
+                        .padding(10)
+                        .background(message.creatorType == .user ? Color.gray.opacity(0.2) : Color.blue.opacity(0.15))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                    if message.creatorType == .assistant && hasClaimsBadge {
+                        Button {
+                            showingClaims = true
+                        } label: {
+                            Text("Evidence (\(message.claimsCount))")
+                                .font(.caption)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.gray.opacity(0.15))
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
                         .padding(.top, 6)
                         .padding(.horizontal, 10)
-                }
-                
-                // Evidence UI (PR #8) - only show for assistant messages with evidence
-                if message.creatorType == .assistant && hasEvidence {
-                    EvidenceView(
-                        message: message,
-                        urlOpener: SystemURLOpener()
-                    )
-                    .padding(.horizontal, 10)
-                }
-            }
+                        .sheet(isPresented: $showingClaims) {
+                            EvidenceClaimsSheet(message: message)
+                        }
+                    }
 
-            if message.creatorType != .user { Spacer(minLength: 40) }
+                    if message.creatorType == .assistant, let capture = message.captureSuggestion {
+                        CaptureSuggestionCard(message: message, suggestion: capture)
+                            .padding(.top, 6)
+                            .padding(.horizontal, 10)
+                    }
+
+                    // Evidence UI (PR #8) - only show for assistant messages with evidence
+                    if message.creatorType == .assistant && hasEvidence {
+                        EvidenceView(
+                            message: message,
+                            urlOpener: SystemURLOpener()
+                        )
+                        .padding(.horizontal, 10)
+                    }
+                }
+
+                if message.creatorType != .user { Spacer(minLength: 40) }
+            }
         }
     }
     
@@ -878,4 +961,330 @@ private struct MessageBubble: View {
     private var hasClaimsBadge: Bool {
         message.claimsCount > 0 || message.claimsTruncated
     }
+
+    private enum ExportSheet: Identifiable {
+        case reminder(reminder: EKReminder)
+        case calendar(event: EKEvent)
+
+        var id: String {
+            switch self {
+            case .reminder:
+                return "reminder"
+            case .calendar:
+                return "calendar"
+            }
+        }
+    }
+
+    private func buildGhostCardModel() -> GhostCardModel? {
+        guard let kind = message.ghostKind else { return nil }
+        let cta = message.ghostCTAState
+
+        let onEdit: (() -> Void)?
+        if cta.canEdit {
+            onEdit = { openEditor() }
+        } else {
+            onEdit = nil
+        }
+
+        let onForget: (() -> Void)?
+        if cta.canForget {
+            onForget = {
+                if cta.requiresConfirm {
+                    showDeleteConfirm = true
+                } else {
+                    Task { await performDelete(confirm: false) }
+                }
+            }
+        } else {
+            onForget = nil
+        }
+
+        let onAscend: (() async -> Bool)?
+        if kind == .journalMoment {
+            onAscend = { await donateJournalMoment() }
+        } else {
+            onAscend = nil
+        }
+
+        return GhostCardModel(
+            kind: kind,
+            title: nil,
+            body: nil,
+            summary: nil,
+            snippet: message.ghostSnippet,
+            memoryId: message.ghostMemoryId,
+            rigorLevel: message.ghostRigorLevel,
+            moodAnchor: message.moodAnchor,
+            factNull: message.ghostFactNull,
+            captureSuggestion: message.captureSuggestion,
+            hapticKey: message.ghostMemoryId ?? message.id.uuidString,
+            actions: GhostCardActions(
+                onEdit: onEdit,
+                onForget: onForget,
+                onAscend: onAscend,
+                onAddToCalendar: { Task { await presentEventEditor() } },
+                onAddToReminder: { Task { await presentReminderEditor() } },
+                onGoToThread: nil
+            )
+        )
+    }
+
+    private func openEditor() {
+        if let memoryId = message.ghostMemoryId {
+            editorMode = .edit(
+                memoryId: memoryId,
+                initialText: message.ghostSnippet ?? ""
+            )
+        } else {
+            editorMode = .create(
+                threadId: message.thread.id.uuidString,
+                messageId: message.ghostTriggerMessageId,
+                initialText: ""
+            )
+        }
+    }
+
+    private func performDelete(confirm: Bool) async {
+        guard let memoryId = message.ghostMemoryId else {
+            if message.ghostFactNull {
+                return
+            }
+            deleteLocalMessage()
+            return
+        }
+
+        do {
+            let client = SolServerClient()
+            try await client.deleteMemory(memoryId: memoryId, confirm: confirm ? true : nil)
+            deleteLocalMessage()
+            deleteMemoryArtifact(memoryId: memoryId)
+        } catch {
+            errorMessage = "Unable to delete memory."
+            showErrorAlert = true
+        }
+    }
+
+    private func deleteLocalMessage() {
+        modelContext.delete(message)
+        try? modelContext.save()
+    }
+
+    private func deleteMemoryArtifact(memoryId: String) {
+        let descriptor = FetchDescriptor<MemoryArtifact>(predicate: #Predicate { $0.memoryId == memoryId })
+        if let artifact = try? modelContext.fetch(descriptor).first {
+            modelContext.delete(artifact)
+            try? modelContext.save()
+        }
+    }
+
+    private func upsertMemoryArtifact(from dto: MemoryItemDTO, memoryId: String) {
+        let descriptor = FetchDescriptor<MemoryArtifact>(predicate: #Predicate { $0.memoryId == memoryId })
+        let existing = (try? modelContext.fetch(descriptor))?.first
+
+        if let existing {
+            existing.threadId = dto.threadId
+            existing.triggerMessageId = dto.triggerMessageId
+            existing.typeRaw = dto.type ?? existing.typeRaw
+            existing.snippet = dto.snippet ?? existing.snippet
+            existing.moodAnchor = dto.moodAnchor ?? existing.moodAnchor
+            existing.rigorLevelRaw = dto.rigorLevel ?? existing.rigorLevelRaw
+            existing.tagsCsv = dto.tags?.joined(separator: ",") ?? existing.tagsCsv
+            existing.fidelityRaw = dto.fidelity ?? existing.fidelityRaw
+            existing.transitionToHazyAt = dto.transitionToHazyAt.flatMap { ISO8601DateFormatter().date(from: $0) }
+            existing.updatedAt = dto.updatedAt.flatMap { ISO8601DateFormatter().date(from: $0) } ?? Date()
+            try? modelContext.save()
+            return
+        }
+
+        let createdAt = dto.createdAt.flatMap { ISO8601DateFormatter().date(from: $0) }
+        let artifact = MemoryArtifact(
+            memoryId: memoryId,
+            threadId: dto.threadId,
+            triggerMessageId: dto.triggerMessageId,
+            typeRaw: dto.type ?? "memory",
+            snippet: dto.snippet,
+            moodAnchor: dto.moodAnchor,
+            rigorLevelRaw: dto.rigorLevel,
+            tagsCsv: dto.tags?.joined(separator: ","),
+            fidelityRaw: dto.fidelity,
+            transitionToHazyAt: dto.transitionToHazyAt.flatMap { ISO8601DateFormatter().date(from: $0) },
+            createdAt: createdAt,
+            updatedAt: createdAt
+        )
+        modelContext.insert(artifact)
+        try? modelContext.save()
+    }
+
+    private func donateJournalMoment() async -> Bool {
+        guard let summary = message.ghostSnippet, !summary.isEmpty else { return false }
+        let memoryId = message.ghostMemoryId
+        let location = memoryId.flatMap { lookupMemoryLocation(memoryId: $0) }
+
+        let moodLabel = message.ghostMoodAnchor
+        let success = await JournalDonationService.shared.donateMoment(
+            summaryText: summary,
+            location: location,
+            moodAnchor: moodLabel
+        )
+
+        if success, let memoryId {
+            markAscended(memoryId: memoryId)
+            recordJournalCapture(memoryId: memoryId, location: location, moodAnchor: moodLabel)
+        }
+
+        return success
+    }
+
+    private func lookupMemoryLocation(memoryId: String) -> CLLocationCoordinate2D? {
+        let descriptor = FetchDescriptor<MemoryArtifact>(predicate: #Predicate { $0.memoryId == memoryId })
+        guard let artifact = try? modelContext.fetch(descriptor).first else { return nil }
+        guard let lat = artifact.locationLatitude, let lon = artifact.locationLongitude else { return nil }
+        return CLLocationCoordinate2D(latitude: lat, longitude: lon)
+    }
+
+    private func markAscended(memoryId: String) {
+        let descriptor = FetchDescriptor<MemoryArtifact>(predicate: #Predicate { $0.memoryId == memoryId })
+        if let artifact = try? modelContext.fetch(descriptor).first {
+            artifact.ascendedAt = Date()
+            try? modelContext.save()
+        }
+    }
+
+    private func recordJournalCapture(
+        memoryId: String,
+        location: CLLocationCoordinate2D?,
+        moodAnchor: String?
+    ) {
+        let suggestionId = "journal_\(memoryId)"
+        let descriptor = FetchDescriptor<CapturedSuggestion>(predicate: #Predicate { $0.suggestionId == suggestionId })
+        let existing = (try? modelContext.fetch(descriptor))?.first
+
+        if let existing {
+            existing.capturedAt = Date()
+            existing.destination = "journal"
+            existing.locationLatitude = location?.latitude
+            existing.locationLongitude = location?.longitude
+            existing.sentimentLabel = moodAnchor
+            try? modelContext.save()
+            return
+        }
+
+        let record = CapturedSuggestion(
+            suggestionId: suggestionId,
+            capturedAt: Date(),
+            destination: "journal",
+            messageId: message.id,
+            locationLatitude: location?.latitude,
+            locationLongitude: location?.longitude,
+            sentimentLabel: moodAnchor
+        )
+        modelContext.insert(record)
+        try? modelContext.save()
+    }
+
+    @MainActor
+    private func presentReminderEditor() async {
+        guard let suggestion = message.captureSuggestion else { return }
+        guard await requestReminderAccess() else { return }
+
+        let reminder = EKReminder(eventStore: eventStore)
+        reminder.title = suggestion.title
+        reminder.notes = suggestion.body
+        reminder.calendar = eventStore.defaultCalendarForNewReminders()
+
+        if let alarmDate = parseSuggestedDate(suggestion.suggestedDate) {
+            reminder.addAlarm(EKAlarm(absoluteDate: alarmDate))
+        }
+
+        activeExportSheet = .reminder(reminder: reminder)
+    }
+
+    @MainActor
+    private func presentEventEditor() async {
+        guard let suggestion = message.captureSuggestion else { return }
+        guard let startDate = parseSuggestedStartAt(suggestion.suggestedStartAt) else { return }
+
+        guard await requestEventAccess() else { return }
+
+        let event = EKEvent(eventStore: eventStore)
+        event.title = suggestion.title
+        event.notes = suggestion.body
+        event.calendar = eventStore.defaultCalendarForNewEvents
+        event.startDate = startDate
+        event.endDate = startDate.addingTimeInterval(3600)
+
+        activeExportSheet = .calendar(event: event)
+    }
+
+    @MainActor
+    private func requestEventAccess() async -> Bool {
+        if #available(iOS 17.0, *) {
+            do {
+                return try await eventStore.requestWriteOnlyAccessToEvents()
+            } catch {
+                errorMessage = "Calendar access failed."
+                showErrorAlert = true
+                return false
+            }
+        }
+        errorMessage = "Calendar access is unavailable on this iOS version."
+        showErrorAlert = true
+        return false
+    }
+
+    @MainActor
+    private func requestReminderAccess() async -> Bool {
+        if #available(iOS 17.0, *) {
+            do {
+                return try await eventStore.requestFullAccessToReminders()
+            } catch {
+                errorMessage = "Reminders access failed."
+                showErrorAlert = true
+                return false
+            }
+        }
+        errorMessage = "Reminders access is unavailable on this iOS version."
+        showErrorAlert = true
+        return false
+    }
+
+    private func parseSuggestedDate(_ raw: String?) -> Date? {
+        guard let raw else { return nil }
+        let parts = raw.split(separator: "-")
+        guard parts.count == 3,
+              let year = Int(parts[0]),
+              let month = Int(parts[1]),
+              let day = Int(parts[2]) else {
+            return nil
+        }
+
+        var components = DateComponents()
+        components.year = year
+        components.month = month
+        components.day = day
+        components.hour = 12
+        return Calendar.current.date(from: components)
+    }
+
+    private func parseSuggestedStartAt(_ raw: String?) -> Date? {
+        guard let raw else { return nil }
+        if let date = Self.iso8601WithFractional.date(from: raw) {
+            return date
+        }
+        return Self.iso8601Basic.date(from: raw)
+    }
+
+    private static let iso8601Basic: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+
+    private static let iso8601WithFractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
 }

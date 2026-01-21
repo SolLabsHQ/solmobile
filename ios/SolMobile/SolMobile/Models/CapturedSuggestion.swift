@@ -14,16 +14,25 @@ final class CapturedSuggestion {
     var capturedAt: Date
     var destination: String
     var messageId: UUID?
+    var locationLatitude: Double?
+    var locationLongitude: Double?
+    var sentimentLabel: String?
 
     init(
         suggestionId: String,
         capturedAt: Date = Date(),
         destination: String,
-        messageId: UUID? = nil
+        messageId: UUID? = nil,
+        locationLatitude: Double? = nil,
+        locationLongitude: Double? = nil,
+        sentimentLabel: String? = nil
     ) {
         self.suggestionId = suggestionId
         self.capturedAt = capturedAt
         self.destination = destination
         self.messageId = messageId
+        self.locationLatitude = locationLatitude
+        self.locationLongitude = locationLongitude
+        self.sentimentLabel = sentimentLabel
     }
 }

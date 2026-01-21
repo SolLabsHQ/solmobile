@@ -107,6 +107,20 @@ final class OutboxService {
         }
     }
 
+    func enqueueMemoryDistill(threadId: UUID, messageIds: [UUID], payload: MemoryDistillRequest) {
+        Task { [weak self] in
+            guard let self else { return }
+            await self.worker.enqueueMemoryDistill(
+                threadId: threadId,
+                messageIds: messageIds,
+                payload: payload
+            )
+            await MainActor.run {
+                self.kick(reason: .enqueue, useBackgroundTask: true)
+            }
+        }
+    }
+
     func retryFailed() {
         Task { [weak self] in
             guard let self else { return }

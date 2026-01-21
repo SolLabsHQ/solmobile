@@ -9,10 +9,12 @@ import Foundation
 
 struct OutputEnvelopeDTO: Codable {
     let assistantText: String
+    let notificationPolicy: String?
     let meta: OutputEnvelopeMetaDTO?
 
     enum CodingKeys: String, CodingKey {
         case assistantText = "assistant_text"
+        case notificationPolicy = "notification_policy"
         case meta
     }
 }
@@ -23,6 +25,15 @@ struct OutputEnvelopeMetaDTO: Codable {
     let usedEvidenceIds: [String]?
     let evidencePackId: String?
     let captureSuggestion: CaptureSuggestion?
+    let displayHint: String?
+    let ghostKind: String?
+    let ghostType: String?
+    let memoryId: String?
+    let triggerMessageId: String?
+    let rigorLevel: String?
+    let snippet: String?
+    let factNull: Bool?
+    let moodAnchor: String?
 
     enum CodingKeys: String, CodingKey {
         case metaVersion = "meta_version"
@@ -30,6 +41,15 @@ struct OutputEnvelopeMetaDTO: Codable {
         case usedEvidenceIds = "used_evidence_ids"
         case evidencePackId = "evidence_pack_id"
         case captureSuggestion = "capture_suggestion"
+        case displayHint = "display_hint"
+        case ghostKind = "ghost_kind"
+        case ghostType = "ghost_type"
+        case memoryId = "memory_id"
+        case triggerMessageId = "trigger_message_id"
+        case rigorLevel = "rigor_level"
+        case snippet
+        case factNull = "fact_null"
+        case moodAnchor = "mood_anchor"
     }
 
     init(
@@ -37,13 +57,31 @@ struct OutputEnvelopeMetaDTO: Codable {
         claims: [OutputEnvelopeClaimDTO]?,
         usedEvidenceIds: [String]?,
         evidencePackId: String?,
-        captureSuggestion: CaptureSuggestion? = nil
+        captureSuggestion: CaptureSuggestion? = nil,
+        displayHint: String? = nil,
+        ghostKind: String? = nil,
+        ghostType: String? = nil,
+        memoryId: String? = nil,
+        triggerMessageId: String? = nil,
+        rigorLevel: String? = nil,
+        snippet: String? = nil,
+        factNull: Bool? = nil,
+        moodAnchor: String? = nil
     ) {
         self.metaVersion = metaVersion
         self.claims = claims
         self.usedEvidenceIds = usedEvidenceIds
         self.evidencePackId = evidencePackId
         self.captureSuggestion = captureSuggestion
+        self.displayHint = displayHint
+        self.ghostKind = ghostKind
+        self.ghostType = ghostType
+        self.memoryId = memoryId
+        self.triggerMessageId = triggerMessageId
+        self.rigorLevel = rigorLevel
+        self.snippet = snippet
+        self.factNull = factNull
+        self.moodAnchor = moodAnchor
     }
 }
 
@@ -108,11 +146,29 @@ extension Message {
         captureSuggestionId = nil
         captureSuggestionTypeRaw = nil
         captureSuggestionTitle = nil
+        ghostDisplayHint = nil
+        ghostKindRaw = nil
+        ghostTypeRaw = nil
+        ghostMemoryId = nil
+        ghostTriggerMessageId = nil
+        ghostRigorLevelRaw = nil
+        ghostSnippet = nil
+        ghostFactNull = false
+        ghostMoodAnchor = nil
 
         guard let meta = envelope?.meta else { return }
 
         evidenceMetaVersion = meta.metaVersion
         evidencePackId = meta.evidencePackId
+        ghostDisplayHint = meta.displayHint
+        ghostKindRaw = meta.ghostKind
+        ghostTypeRaw = meta.ghostType
+        ghostMemoryId = meta.memoryId
+        ghostTriggerMessageId = meta.triggerMessageId
+        ghostRigorLevelRaw = meta.rigorLevel
+        ghostSnippet = meta.snippet
+        ghostFactNull = meta.factNull ?? false
+        ghostMoodAnchor = meta.moodAnchor
 
         if let suggestion = meta.captureSuggestion {
             let trimmedId = suggestion.suggestionId?.trimmingCharacters(in: .whitespacesAndNewlines)

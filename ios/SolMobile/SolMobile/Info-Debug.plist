@@ -2,11 +2,21 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.sollabshq.solmobile.cleanup</string>
+		<string>com.sollabshq.solmobile.outboxRefresh</string>
+	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSExceptionDomains</key>
 		<dict>
 			<key>127.0.0.1</key>
+			<dict>
+				<key>NSTemporaryExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+			</dict>
+			<key>192.168.50.240</key>
 			<dict>
 				<key>NSTemporaryExceptionAllowsInsecureHTTPLoads</key>
 				<true/>
@@ -18,29 +28,21 @@
 				<key>NSTemporaryExceptionAllowsInsecureHTTPLoads</key>
 				<true/>
 			</dict>
-			<key>192.168.50.240</key>
-			<dict>
-				<key>NSTemporaryExceptionAllowsInsecureHTTPLoads</key>
-				<true/>
-			</dict>
 		</dict>
 	</dict>
-	<key>BGTaskSchedulerPermittedIdentifiers</key>
-	<array>
-		<string>com.sollabshq.solmobile.cleanup</string>
-		<string>com.sollabshq.solmobile.outboxRefresh</string>
-	</array>
 	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
 	<string>SolMobile needs calendar access to save events from conversations.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>SolMobile uses your location to attach context to journal moments.</string>
 	<key>NSRemindersFullAccessUsageDescription</key>
 	<string>SolMobile needs reminders access to save tasks from conversations.</string>
-	<key>SOL_ENV</key>
-	<string>dev</string>
 	<key>SOLSERVER_BASE_URL_DEV</key>
 	<string>http://127.0.0.1:3333</string>
-	<key>SOLSERVER_BASE_URL_STAGING</key>
-	<string>https://solserver-staging.sollabshq.com</string>
 	<key>SOLSERVER_BASE_URL_PROD</key>
 	<string>https://api.sollabshq.com</string>
+	<key>SOLSERVER_BASE_URL_STAGING</key>
+	<string>https://solserver-staging.sollabshq.com</string>
+	<key>SOL_ENV</key>
+	<string>dev</string>
 </dict>
 </plist>

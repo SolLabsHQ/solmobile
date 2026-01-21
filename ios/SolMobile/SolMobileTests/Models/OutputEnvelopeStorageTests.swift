@@ -36,7 +36,7 @@ final class OutputEnvelopeStorageTests: XCTestCase {
             usedEvidenceIds: ["ev-2", "ev-1"],
             evidencePackId: "pack-1"
         )
-        let envelope = OutputEnvelopeDTO(assistantText: "Hello", meta: meta)
+        let envelope = OutputEnvelopeDTO(assistantText: "Hello", notificationPolicy: nil, meta: meta)
 
         message.applyOutputEnvelopeMeta(envelope)
 
@@ -76,7 +76,7 @@ final class OutputEnvelopeStorageTests: XCTestCase {
             usedEvidenceIds: ["ev-1"],
             evidencePackId: "pack-1"
         )
-        let envelope = OutputEnvelopeDTO(assistantText: "Hello", meta: meta)
+        let envelope = OutputEnvelopeDTO(assistantText: "Hello", notificationPolicy: nil, meta: meta)
 
         message.applyOutputEnvelopeMeta(envelope)
 
@@ -113,7 +113,7 @@ final class OutputEnvelopeStorageTests: XCTestCase {
             evidencePackId: nil,
             captureSuggestion: suggestion
         )
-        let envelope = OutputEnvelopeDTO(assistantText: "Hello", meta: meta)
+        let envelope = OutputEnvelopeDTO(assistantText: "Hello", notificationPolicy: nil, meta: meta)
 
         message.applyOutputEnvelopeMeta(envelope)
 
