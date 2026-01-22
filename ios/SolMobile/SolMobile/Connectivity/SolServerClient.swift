@@ -92,6 +92,20 @@ private final class TaskIdBox {
 }
 
 final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision {
+    private enum UserIdentity {
+        static let storageKey = "sol.dev.user_id"
+
+        static func resolvedId() -> String {
+            if let existing = UserDefaults.standard.string(forKey: storageKey),
+               !existing.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return existing
+            }
+            let created = UUID().uuidString.lowercased()
+            UserDefaults.standard.set(created, forKey: storageKey)
+            return created
+        }
+    }
+
     private let baseURLProvider: () -> URL
     var baseURL: URL { baseURLProvider() }
     private let session: URLSession
@@ -162,6 +176,7 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
         diagnostics: DiagnosticsContext? = nil
     ) async throws -> (Data, HTTPURLResponse, ResponseInfo) {
         var authorizedReq = req
+        applyUserIdHeader(&authorizedReq)
         applyAuthHeader(&authorizedReq)
 
         if AppEnvironment.current.requiresHTTPS,
@@ -311,6 +326,16 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
             return
         }
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    }
+
+    private func applyUserIdHeader(_ req: inout URLRequest) {
+        if req.value(forHTTPHeaderField: "x-sol-user-id") != nil {
+            return
+        }
+        if req.value(forHTTPHeaderField: "x-user-id") != nil {
+            return
+        }
+        req.setValue(UserIdentity.resolvedId(), forHTTPHeaderField: "x-sol-user-id")
     }
 
     private func require2xx(_ http: HTTPURLResponse, data: Data, responseInfo: ResponseInfo) throws {

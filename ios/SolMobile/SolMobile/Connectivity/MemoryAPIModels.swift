@@ -5,7 +5,7 @@
 
 import Foundation
 
-struct MemoryContextItem: Codable {
+nonisolated struct MemoryContextItem: Codable {
     let messageId: String
     let role: String
     let content: String
@@ -19,12 +19,13 @@ struct MemoryContextItem: Codable {
     }
 }
 
-struct MemoryDistillRequest: Codable {
+nonisolated struct MemoryDistillRequest: Codable {
     let threadId: String
     let triggerMessageId: String
     let contextWindow: [MemoryContextItem]
     let requestId: String
     let reaffirmCount: Int?
+    let consent: MemoryConsent
 
     enum CodingKeys: String, CodingKey {
         case threadId = "thread_id"
@@ -32,10 +33,11 @@ struct MemoryDistillRequest: Codable {
         case contextWindow = "context_window"
         case requestId = "request_id"
         case reaffirmCount = "reaffirm_count"
+        case consent
     }
 }
 
-struct MemoryDistillResponse: Codable {
+nonisolated struct MemoryDistillResponse: Codable {
     let requestId: String?
     let transmissionId: String?
     let status: String?
@@ -71,7 +73,7 @@ struct MemoryListResponse: Decodable {
     }
 }
 
-struct MemoryItemDTO: Codable {
+struct MemoryItemDTO: Decodable {
     let id: String
     let threadId: String?
     let triggerMessageId: String?
@@ -87,6 +89,7 @@ struct MemoryItemDTO: Codable {
 
     enum CodingKeys: String, CodingKey {
         case id
+        case memoryId = "memory_id"
         case threadId = "thread_id"
         case triggerMessageId = "trigger_message_id"
         case type
@@ -98,6 +101,34 @@ struct MemoryItemDTO: Codable {
         case transitionToHazyAt = "transition_to_hazy_at"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let id = try container.decodeIfPresent(String.self, forKey: .id)
+            ?? container.decodeIfPresent(String.self, forKey: .memoryId)
+        guard let resolvedId = id else {
+            throw DecodingError.keyNotFound(
+                CodingKeys.id,
+                DecodingError.Context(
+                    codingPath: decoder.codingPath,
+                    debugDescription: "Expected id or memory_id"
+                )
+            )
+        }
+
+        self.id = resolvedId
+        threadId = try container.decodeIfPresent(String.self, forKey: .threadId)
+        triggerMessageId = try container.decodeIfPresent(String.self, forKey: .triggerMessageId)
+        type = try container.decodeIfPresent(String.self, forKey: .type)
+        snippet = try container.decodeIfPresent(String.self, forKey: .snippet)
+        moodAnchor = try container.decodeIfPresent(String.self, forKey: .moodAnchor)
+        rigorLevel = try container.decodeIfPresent(String.self, forKey: .rigorLevel)
+        tags = try container.decodeIfPresent([String].self, forKey: .tags)
+        fidelity = try container.decodeIfPresent(String.self, forKey: .fidelity)
+        transitionToHazyAt = try container.decodeIfPresent(String.self, forKey: .transitionToHazyAt)
+        createdAt = try container.decodeIfPresent(String.self, forKey: .createdAt)
+        updatedAt = try container.decodeIfPresent(String.self, forKey: .updatedAt)
     }
 }
 
@@ -116,14 +147,16 @@ struct MemoryPatchPayload: Codable {
 struct MemoryPatchRequest: Codable {
     let requestId: String
     let patch: MemoryPatchPayload
+    let consent: MemoryConsent
 
     enum CodingKeys: String, CodingKey {
         case requestId = "request_id"
         case patch
+        case consent
     }
 }
 
-struct MemoryPatchResponse: Codable {
+struct MemoryPatchResponse: Decodable {
     let requestId: String?
     let memory: MemoryItemDTO?
 
@@ -157,7 +190,7 @@ struct MemoryCreateRequest: Codable {
     let requestId: String
     let memory: MemoryCreatePayload
     let source: MemoryCreateSource?
-    let consent: MemoryConsent?
+    let consent: MemoryConsent
 
     enum CodingKeys: String, CodingKey {
         case requestId = "request_id"
@@ -167,7 +200,7 @@ struct MemoryCreateRequest: Codable {
     }
 }
 
-struct MemoryCreateResponse: Codable {
+struct MemoryCreateResponse: Decodable {
     let requestId: String?
     let memory: MemoryItemDTO?
 

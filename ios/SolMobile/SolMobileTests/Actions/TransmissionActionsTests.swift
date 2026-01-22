@@ -65,7 +65,8 @@ final class TransmissionActionsTests: SwiftDataTestBase {
             triggerMessageId: user.id.uuidString,
             contextWindow: [item],
             requestId: "mem:thread:\(thread.id.uuidString)",
-            reaffirmCount: 0
+            reaffirmCount: 0,
+            consent: MemoryConsent(explicitUserConsent: true)
         )
 
         let actions = TransmissionActions(modelContext: context, transport: transport)

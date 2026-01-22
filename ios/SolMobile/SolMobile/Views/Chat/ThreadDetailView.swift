@@ -30,6 +30,16 @@ struct ThreadDetailView: View {
     @State private var newMessagesCount: Int? = nil
     @State private var scrollViewportHeight: CGFloat = 0
     @State private var lastVisibleAnchorId: UUID? = nil
+    @State private var composerHeight: CGFloat = 0
+    @State private var outboxBannerHeight: CGFloat = 0
+
+    private enum GhostOverlayMode: Equatable {
+        case full
+        case chip
+    }
+
+    @State private var ghostOverlayMode: GhostOverlayMode = .full
+    @State private var ghostSnoozeTask: Task<Void, Never>? = nil
 
     // ThreadMemento (navigation artifact): model-proposed snapshot returned by SolServer.
     // We store acceptance state locally (UserDefaults) so it survives view reloads.
@@ -67,8 +77,67 @@ struct ThreadDetailView: View {
         )
     }
 
+    // Messages excluding ghosts for scrollable display.
+    private var displayMessages: [Message] {
+        messages.filter { !$0.isGhostCard }
+    }
+
+    // Most recent ghost message for overlay.
+    private var latestGhostMessage: Message? {
+        // Show the most recent ghost card as an overlay (does not participate in List/VStack layout).
+        messages.last(where: { $0.isGhostCard })
+    }
+
+    private func snoozeDelaySeconds(for ghost: Message) -> TimeInterval {
+        // Short receipt window for real memories; longer for manual-entry.
+        if ghost.ghostFactNull { return 10 }
+        if ghost.ghostRigorLevelRaw == "high" { return 8 }
+        return 6
+    }
+
+    private func ghostChipTitle(for ghost: Message) -> String {
+        if ghost.ghostFactNull { return "Pick what to save" }
+        if ghost.ghostRigorLevelRaw == "high" { return "Saved (High-rigor)" }
+        return "Saved to Memory"
+    }
+
+    private func ghostSnoozeKey(for ghost: Message) -> String {
+        // Retrigger snooze when the ghost updates in place (placeholder -> real memory).
+        let mem = ghost.ghostMemoryId ?? "nil"
+        let factNull = ghost.ghostFactNull ? "1" : "0"
+        let rigor = ghost.ghostRigorLevelRaw ?? ""
+        return "\(ghost.id.uuidString)|\(mem)|\(factNull)|\(rigor)"
+    }
+
+    private func scheduleGhostAutoSnooze(_ ghost: Message) {
+        ghostSnoozeTask?.cancel()
+        let delay = snoozeDelaySeconds(for: ghost)
+        ghostSnoozeTask = Task {
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                // Only snooze if the same ghost is still the latest.
+                if latestGhostMessage?.id == ghost.id {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        ghostOverlayMode = .chip
+                    }
+                }
+            }
+        }
+    }
+
+    private func expandGhostOverlay() {
+        withAnimation(.easeInOut(duration: 0.15)) {
+            ghostOverlayMode = .full
+        }
+        if let ghost = latestGhostMessage {
+            scheduleGhostAutoSnooze(ghost)
+        }
+    }
+
     var body: some View {
-        VStack(spacing: 0) {
+        ZStack(alignment: .bottom) {
+            VStack(spacing: 0) {
 
             // Accepted ThreadMemento (navigation snapshot).
             if let acceptedMemento {
@@ -105,7 +174,7 @@ struct ThreadDetailView: View {
                 VStack(spacing: 0) {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 10) {
-                            ForEach(messages) { msg in
+                            ForEach(displayMessages) { msg in
                                 MessageBubble(message: msg)
                                     .id(msg.id)
                                     .background(GeometryReader { geo in
@@ -138,7 +207,7 @@ struct ThreadDetailView: View {
                     }
                     .onChange(of: messages.count) { _, _ in
                         applyInitialScroll(proxy: proxy)
-                        guard let last = messages.last else { return }
+                        guard let last = displayMessages.last else { return }
                         if autoScrollToLatest {
                             proxy.scrollTo(last.id, anchor: .bottom)
                         } else {
@@ -163,7 +232,7 @@ struct ThreadDetailView: View {
 
                     if showJumpToLatest {
                         Button("Jump to latest") {
-                            guard let last = messages.last else { return }
+                            guard let last = displayMessages.last else { return }
                             autoScrollToLatest = true
                             showJumpToLatest = false
                             showNewMessagesPill = false
@@ -186,6 +255,15 @@ struct ThreadDetailView: View {
                 banner
                     .padding(.horizontal, 10)
                     .padding(.top, 8)
+                    .background(
+                        GeometryReader { geo in
+                            Color.clear
+                                .onAppear { outboxBannerHeight = geo.size.height }
+                                .onChange(of: geo.size.height) { _, newValue in
+                                    outboxBannerHeight = newValue
+                                }
+                        }
+                    )
             }
 
             ComposerView(
@@ -196,12 +274,76 @@ struct ThreadDetailView: View {
                 send(text)
             }
             .padding(10)
+            .background(
+                GeometryReader { geo in
+                    Color.clear
+                        .onAppear { composerHeight = geo.size.height }
+                        .onChange(of: geo.size.height) { _, newValue in
+                            composerHeight = newValue
+                        }
+                }
+            )
+            }
+
+            // Ghost Cards should not "push" layout when they arrive. Render the newest ghost as an overlay
+            // pinned above the composer so it develops in place (Spirit Fade) without a layout pop.
+            if let ghost = latestGhostMessage {
+                Group {
+                    switch ghostOverlayMode {
+                    case .full:
+                        MessageBubble(message: ghost)
+                            .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                            .animation(.easeIn(duration: 1.2), value: ghost.id)
+
+                    case .chip:
+                        Button {
+                            expandGhostOverlay()
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "sparkles")
+                                Text(ghostChipTitle(for: ghost))
+                                    .font(.footnote)
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.vertical, 8)
+                            .padding(.horizontal, 12)
+                            .background(.thinMaterial)
+                            .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .transition(.opacity)
+                    }
+                }
+                .padding(.horizontal, 12)
+                // Lift above the composer (and any banner) so it stays visible and doesn't cover controls.
+                .padding(.bottom, composerHeight + outboxBannerHeight + 12)
+                .task(id: ghostSnoozeKey(for: ghost)) {
+                    // If the ghost updates in place (e.g., memoryId appears), re-arm the snooze.
+                    await MainActor.run {
+                        let typing = !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        if !typing {
+                            ghostOverlayMode = .full
+                        }
+                        scheduleGhostAutoSnooze(ghost)
+                    }
+                }
+            }
         }
         .onChange(of: outboxSummary.failed + outboxSummary.queued + outboxSummary.sending + outboxSummary.pending) { _, newValue in
             viewLog.debug("[outboxBanner] refresh total=\(newValue, privacy: .public)")
         }
         .onChange(of: outboxStatusSignature) { _, _ in
             updateOutboxSummary()
+        }
+        .onChange(of: latestGhostMessage?.id) { _, newId in
+            ghostSnoozeTask?.cancel()
+            guard let ghost = latestGhostMessage, newId != nil else {
+                ghostOverlayMode = .full
+                return
+            }
+            let typing = !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ghostOverlayMode = typing ? .chip : .full
+            scheduleGhostAutoSnooze(ghost)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
             let id = OSSignpostID(log: Self.perfLog)
@@ -215,6 +357,14 @@ struct ThreadDetailView: View {
             keyboardSignpostActive = false
         }
         .onChange(of: composerText) { _, newValue in
+            // If the user starts typing, snooze the overlay so it doesn't feel like it blocks the flow.
+            if !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               latestGhostMessage != nil,
+               ghostOverlayMode == .full {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    ghostOverlayMode = .chip
+                }
+            }
             handleComposerTextChange(newValue)
         }
         .onChange(of: scenePhase) { _, newValue in
@@ -232,6 +382,7 @@ struct ThreadDetailView: View {
             budgetStore.refreshIfExpired()
         }
         .onDisappear {
+            ghostSnoozeTask?.cancel()
             if let unreadTracker {
                 Task { await unreadTracker.flush(threadId: thread.id) }
             }
@@ -270,13 +421,14 @@ struct ThreadDetailView: View {
         let context = buildMemoryContext()
         guard let triggerMessageId = context.last?.messageId else { return }
 
-        let requestId = "mem:thread:\(thread.id.uuidString)"
+        let requestId = "mem:thread:\(thread.id.uuidString):\(triggerMessageId)"
         let payload = MemoryDistillRequest(
             threadId: thread.id.uuidString,
             triggerMessageId: triggerMessageId,
             contextWindow: context,
             requestId: requestId,
-            reaffirmCount: 0
+            reaffirmCount: 0,
+            consent: MemoryConsent(explicitUserConsent: true)
         )
 
         outboxService.enqueueMemoryDistill(
@@ -702,6 +854,9 @@ private func acceptMemento(_ m: MementoViewModel) {
         let pending = transmissions.filter { $0.status == .pending }.count
         let failed = transmissions.filter { $0.status == .failed }.count
         cachedOutboxSummary = OutboxSummary(queued: queued, sending: sending, pending: pending, failed: failed)
+        if (failed == 0) && (queued + sending + pending == 0) {
+            outboxBannerHeight = 0
+        }
     }
 
     private func pendingSince(_ tx: Transmission) -> Date? {
@@ -731,12 +886,12 @@ private func acceptMemento(_ m: MementoViewModel) {
 
     private func applyInitialScroll(proxy: ScrollViewProxy) {
         guard !initialScrollDone else { return }
-        guard !messages.isEmpty else { return }
+        guard !displayMessages.isEmpty else { return }
         initialScrollDone = true
 
         if let state = fetchReadState() {
             if let lastViewedId = state.lastViewedMessageId,
-               messages.contains(where: { $0.id == lastViewedId }) {
+               displayMessages.contains(where: { $0.id == lastViewedId }) {
                 autoScrollToLatest = false
                 showJumpToLatest = true
                 proxy.scrollTo(lastViewedId, anchor: .top)
@@ -754,7 +909,7 @@ private func acceptMemento(_ m: MementoViewModel) {
             }
         }
 
-        if let last = messages.last {
+        if let last = displayMessages.last {
             autoScrollToLatest = true
             showNewMessagesPill = false
             proxy.scrollTo(last.id, anchor: .bottom)
@@ -763,13 +918,13 @@ private func acceptMemento(_ m: MementoViewModel) {
 
     private func computeFirstUnreadMessageId(readUpToId: UUID?) -> UUID? {
         guard let readUpToId,
-              let idx = messages.firstIndex(where: { $0.id == readUpToId }) else {
+              let idx = displayMessages.firstIndex(where: { $0.id == readUpToId }) else {
             return nil
         }
 
-        let nextIndex = messages.index(after: idx)
-        guard nextIndex < messages.endIndex else { return nil }
-        return messages[nextIndex].id
+        let nextIndex = displayMessages.index(after: idx)
+        guard nextIndex < displayMessages.endIndex else { return nil }
+        return displayMessages[nextIndex].id
     }
 
     private func fetchReadState() -> ThreadReadState? {
@@ -780,13 +935,13 @@ private func acceptMemento(_ m: MementoViewModel) {
 
     private func unreadCount(readUpToId: UUID?) -> Int? {
         guard let readUpToId,
-              let idx = messages.firstIndex(where: { $0.id == readUpToId }) else {
+              let idx = displayMessages.firstIndex(where: { $0.id == readUpToId }) else {
             return nil
         }
 
-        let nextIndex = messages.index(after: idx)
-        guard nextIndex < messages.endIndex else { return nil }
-        return messages.distance(from: nextIndex, to: messages.endIndex)
+        let nextIndex = displayMessages.index(after: idx)
+        guard nextIndex < displayMessages.endIndex else { return nil }
+        return displayMessages.distance(from: nextIndex, to: displayMessages.endIndex)
     }
 
     private func refreshNewMessagesPill(forceShow: Bool = false, state: ThreadReadState? = nil) {
@@ -827,7 +982,7 @@ private func acceptMemento(_ m: MementoViewModel) {
     }
 
     private func updateAutoScroll(frames: [UUID: CGRect]) {
-        guard let last = messages.last,
+        guard let last = displayMessages.last,
               let frame = frames[last.id],
               scrollViewportHeight > 0 else { return }
 

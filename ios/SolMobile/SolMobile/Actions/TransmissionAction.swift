@@ -359,7 +359,8 @@ nonisolated final class TransmissionActions {
             triggerMessageId: payload.triggerMessageId,
             contextWindow: payload.contextWindow,
             requestId: requestId,
-            reaffirmCount: reaffirm
+            reaffirmCount: reaffirm,
+            consent: payload.consent
         )
 
         if let data = try? JSONEncoder().encode(updated) {

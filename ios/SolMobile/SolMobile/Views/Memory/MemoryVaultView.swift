@@ -131,7 +131,8 @@ struct MemoryVaultView: View {
     }
 
     private func upsertMemoryArtifact(from dto: MemoryItemDTO) {
-        let descriptor = FetchDescriptor<MemoryArtifact>(predicate: #Predicate { $0.memoryId == dto.id })
+        let memoryId = dto.id
+        let descriptor = FetchDescriptor<MemoryArtifact>(predicate: #Predicate { $0.memoryId == memoryId })
         let existing = (try? modelContext.fetch(descriptor))?.first
 
         let createdAt = dto.createdAt.flatMap { ISO8601DateFormatter().date(from: $0) }

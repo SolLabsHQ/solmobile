@@ -106,11 +106,16 @@ struct MemoryEditorSheet: View {
                     rigorLevel: nil
                 )
 
-                let source = MemoryCreateSource(
-                    threadId: threadId,
-                    messageId: messageId,
-                    createdAt: ISO8601DateFormatter().string(from: Date())
-                )
+                let source: MemoryCreateSource?
+                if let threadId, let messageId {
+                    source = MemoryCreateSource(
+                        threadId: threadId,
+                        messageId: messageId,
+                        createdAt: ISO8601DateFormatter().string(from: Date())
+                    )
+                } else {
+                    source = nil
+                }
 
                 let request = MemoryCreateRequest(
                     requestId: requestId,
@@ -128,7 +133,8 @@ struct MemoryEditorSheet: View {
                         snippet: trimmedText,
                         tags: nil,
                         moodAnchor: nil
-                    )
+                    ),
+                    consent: MemoryConsent(explicitUserConsent: true)
                 )
 
                 let response = try await client.updateMemory(memoryId: memoryId, request: request)
