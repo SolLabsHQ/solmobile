@@ -220,6 +220,7 @@ struct ThreadDetailView: View {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 10) {
                             ForEach(displayMessages) { msg in
+                            ForEach(displayMessages) { msg in
                                 MessageBubble(message: msg)
                                     .id(msg.id)
                                     .background(GeometryReader { geo in
@@ -253,6 +254,7 @@ struct ThreadDetailView: View {
                     .onChange(of: messages.count) { _, _ in
                         applyInitialScroll(proxy: proxy)
                         guard let last = displayMessages.last else { return }
+                        guard let last = displayMessages.last else { return }
                         if autoScrollToLatest {
                             proxy.scrollTo(last.id, anchor: .bottom)
                         } else {
@@ -277,6 +279,7 @@ struct ThreadDetailView: View {
 
                     if showJumpToLatest {
                         Button("Jump to latest") {
+                            guard let last = displayMessages.last else { return }
                             guard let last = displayMessages.last else { return }
                             autoScrollToLatest = true
                             showJumpToLatest = false

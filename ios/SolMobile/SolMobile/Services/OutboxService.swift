@@ -120,7 +120,6 @@ final class OutboxService {
             }
         }
     }
-
     func retryFailed() {
         Task { [weak self] in
             guard let self else { return }

@@ -36,7 +36,7 @@
 		0A9DB3DA2EFB634C0048DE62 /* Exceptions for "SolMobile" folder in "SolMobile" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				"Info-Debug.plist",
+				Info-Debug.plist,
 				Info.plist,
 			);
 			target = 0A9A00292EF133AF003FE519 /* SolMobile */;

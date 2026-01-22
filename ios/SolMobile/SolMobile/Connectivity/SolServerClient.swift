@@ -105,7 +105,6 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
             return created
         }
     }
-
     private let baseURLProvider: () -> URL
     var baseURL: URL { baseURLProvider() }
     private let session: URLSession

@@ -49,7 +49,6 @@ actor OutboxWorkerActor {
         )
         engine.enqueueMemoryDistill(threadId: threadId, messageIds: messageIds, payload: payload)
     }
-
     func retryFailed() {
         let engine = TransmissionActions(
             modelContext: ModelContext(container),

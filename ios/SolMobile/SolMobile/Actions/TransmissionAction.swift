@@ -368,7 +368,6 @@ nonisolated final class TransmissionActions {
         }
         return nil
     }
-
     func enqueueChat(threadId: UUID, messageId: UUID, messageText: String?, shouldFail: Bool) {
         outboxLog.info("enqueueChat thread=\(short(threadId), privacy: .public) msg=\(short(messageId), privacy: .public) shouldFail=\(shouldFail, privacy: .public)")
 
@@ -535,6 +534,8 @@ nonisolated final class TransmissionActions {
             threadId: packet.threadId,
             messageIds: packet.messageIds,
             firstMessageId: packet.messageIds.first,
+            messageText: packet.messageText,
+            payloadJson: packet.payloadJson
             messageText: packet.messageText,
             payloadJson: packet.payloadJson
         )
@@ -1137,7 +1138,6 @@ nonisolated final class TransmissionActions {
             BudgetStore.shared.parseBudgetExceeded(from: info.body)
         }
     }
-
     private func isBudgetBlockedNow() async -> Bool {
         await MainActor.run {
             BudgetStore.shared.isBlockedNow()
