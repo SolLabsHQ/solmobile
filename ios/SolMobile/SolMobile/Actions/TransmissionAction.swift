@@ -734,7 +734,15 @@ nonisolated final class TransmissionActions {
             || !evidenceModels.supports.isEmpty
             || !evidenceModels.claims.isEmpty
 
+        let previousMemoryId = assistantMessage.ghostMemoryId
         assistantMessage.applyOutputEnvelopeMeta(outputEnvelope)
+        GhostCardReceipt.fireCanonizationIfNeeded(
+            modelContext: modelContext,
+            previousMemoryId: previousMemoryId,
+            newMemoryId: assistantMessage.ghostMemoryId,
+            factNull: assistantMessage.ghostFactNull,
+            ghostKind: assistantMessage.ghostKind
+        )
 
         thread.messages.append(assistantMessage)
         thread.lastActiveAt = Date()
