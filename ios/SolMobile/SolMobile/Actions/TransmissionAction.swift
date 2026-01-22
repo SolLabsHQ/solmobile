@@ -536,8 +536,6 @@ nonisolated final class TransmissionActions {
             firstMessageId: packet.messageIds.first,
             messageText: packet.messageText,
             payloadJson: packet.payloadJson
-            messageText: packet.messageText,
-            payloadJson: packet.payloadJson
         )
     }
 

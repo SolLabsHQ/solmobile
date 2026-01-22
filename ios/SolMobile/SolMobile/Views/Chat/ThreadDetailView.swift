@@ -10,6 +10,7 @@ import CoreLocation
 struct ThreadDetailView: View {
     private static let perfLog = OSLog(subsystem: "com.sollabshq.solmobile", category: "ThreadDetailPerf")
     private static let pendingSlowThresholdSeconds: TimeInterval = 20
+    private static let keyboardDismissThreshold: CGFloat = 32
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
@@ -220,7 +221,6 @@ struct ThreadDetailView: View {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 10) {
                             ForEach(displayMessages) { msg in
-                            ForEach(displayMessages) { msg in
                                 MessageBubble(message: msg)
                                     .id(msg.id)
                                     .background(GeometryReader { geo in
@@ -234,6 +234,17 @@ struct ThreadDetailView: View {
                         .padding(.vertical, 12)
                         .padding(.horizontal, 12)
                     }
+                    .scrollDismissesKeyboard(.never)
+                    .contentShape(Rectangle())
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 10)
+                            .onEnded { value in
+                                let dy = value.translation.height
+                                let dx = value.translation.width
+                                guard dy > Self.keyboardDismissThreshold, abs(dy) > abs(dx) else { return }
+                                KeyboardDismiss.dismiss()
+                            }
+                    )
                     .coordinateSpace(name: "threadScroll")
                     .background(
                         GeometryReader { geo in
@@ -253,7 +264,6 @@ struct ThreadDetailView: View {
                     }
                     .onChange(of: messages.count) { _, _ in
                         applyInitialScroll(proxy: proxy)
-                        guard let last = displayMessages.last else { return }
                         guard let last = displayMessages.last else { return }
                         if autoScrollToLatest {
                             proxy.scrollTo(last.id, anchor: .bottom)
@@ -279,7 +289,6 @@ struct ThreadDetailView: View {
 
                     if showJumpToLatest {
                         Button("Jump to latest") {
-                            guard let last = displayMessages.last else { return }
                             guard let last = displayMessages.last else { return }
                             autoScrollToLatest = true
                             showJumpToLatest = false
@@ -1306,14 +1315,21 @@ private struct MessageBubble: View {
                 onEdit: onEdit,
                 onForget: onForget,
                 onAscend: onAscend,
-                onAddToCalendar: { Task { await presentEventEditor() } },
-                onAddToReminder: { Task { await presentReminderEditor() } },
+                onAddToCalendar: {
+                    KeyboardDismiss.dismiss()
+                    Task { await presentEventEditor() }
+                },
+                onAddToReminder: {
+                    KeyboardDismiss.dismiss()
+                    Task { await presentReminderEditor() }
+                },
                 onGoToThread: nil
             )
         )
     }
 
     private func openEditor() {
+        KeyboardDismiss.dismiss()
         if let memoryId = message.ghostMemoryId {
             editorMode = .edit(
                 memoryId: memoryId,
