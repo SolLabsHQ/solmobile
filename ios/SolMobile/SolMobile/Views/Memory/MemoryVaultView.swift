@@ -33,19 +33,23 @@ struct MemoryVaultView: View {
                         NavigationLink {
                             MemoryDetailView(memory: memory)
                         } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(memory.snippet ?? "(no snippet)")
-                                    .font(.subheadline)
-                                    .lineLimit(2)
-                                if let threadId = memory.threadId {
-                                    Text("Thread \(threadId)")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                if memory.ascendedAt != nil {
-                                    Text("Ascended")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
+                            HStack(alignment: .top, spacing: 8) {
+                                Text("👻")
+                                    .font(.system(size: 16))
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(memory.snippet ?? "(no snippet)")
+                                        .font(.subheadline)
+                                        .lineLimit(2)
+                                    if let threadId = memory.threadId {
+                                        Text("Thread \(threadId)")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    if memory.ascendedAt != nil {
+                                        Text("Ascended")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
                                 }
                             }
                         }

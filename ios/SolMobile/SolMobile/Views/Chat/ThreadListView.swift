@@ -58,6 +58,7 @@ struct ThreadListView: View {
                         Image(systemName: "square.and.pencil")
                     }
                     .accessibilityLabel("New Thread")
+                    .accessibilityIdentifier("new_thread_button")
                 }
             }
             .onAppear {

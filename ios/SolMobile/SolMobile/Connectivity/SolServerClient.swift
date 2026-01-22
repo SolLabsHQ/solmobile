@@ -139,6 +139,7 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
         if #available(iOS 13.0, *) {
             resolvedConfig.tlsMinimumSupportedProtocolVersion = .TLSv12
         }
+        Self.applyUITestProtocolIfNeeded(resolvedConfig)
         self.session = URLSession(
             configuration: resolvedConfig,
             delegate: redirectTracker,
@@ -157,11 +158,21 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
         if #available(iOS 13.0, *) {
             resolvedConfig.tlsMinimumSupportedProtocolVersion = .TLSv12
         }
+        Self.applyUITestProtocolIfNeeded(resolvedConfig)
         self.session = URLSession(
             configuration: resolvedConfig,
             delegate: redirectTracker,
             delegateQueue: nil
         )
+    }
+
+    private static func applyUITestProtocolIfNeeded(_ configuration: URLSessionConfiguration) {
+        guard UITestNetworkStub.isEnabled else { return }
+        var classes = configuration.protocolClasses ?? []
+        if !classes.contains(where: { $0 == UITestURLProtocol.self }) {
+            classes.insert(UITestURLProtocol.self, at: 0)
+        }
+        configuration.protocolClasses = classes
     }
 
     /// Convenience init for app runtime where Settings controls the base URL.

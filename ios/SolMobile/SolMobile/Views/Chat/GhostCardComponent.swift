@@ -90,6 +90,7 @@ struct GhostCardComponent: View {
     private static let ledgerMaxEntries = 500
 
     let card: GhostCardModel
+    @Binding private var externalAscendTrigger: Bool
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -100,6 +101,14 @@ struct GhostCardComponent: View {
     @State private var isHidden = false
     @State private var showAscendReceipt = false
     @State private var isAscending = false
+    @State private var showReceiptGlow = false
+    @State private var glowPulseOn = false
+    @State private var receiptGlowTask: Task<Void, Never>? = nil
+
+    init(card: GhostCardModel, externalAscendTrigger: Binding<Bool> = .constant(false)) {
+        self.card = card
+        self._externalAscendTrigger = externalAscendTrigger
+    }
 
     var body: some View {
         if isHidden {
@@ -115,6 +124,7 @@ struct GhostCardComponent: View {
                     Text(bodyText)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("ghost_snippet_label")
                 }
 
                 actionRow
@@ -125,6 +135,7 @@ struct GhostCardComponent: View {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .stroke(Color.white.opacity(0.1), lineWidth: 0.5)
             )
+            .overlay(receiptGlowOverlay)
             .background(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .fill(accentTint)
@@ -139,6 +150,17 @@ struct GhostCardComponent: View {
                 guard !isVisible else { return }
                 isVisible = true
                 fireHeartbeatIfNeeded()
+            }
+            .onChange(of: card.memoryId) { oldValue, newValue in
+                triggerReceiptGlowIfNeeded(previous: oldValue, current: newValue)
+            }
+            .onChange(of: externalAscendTrigger) { _, newValue in
+                guard newValue, card.actions.onAscend != nil else { return }
+                Task { await performAscend() }
+                externalAscendTrigger = false
+            }
+            .onDisappear {
+                receiptGlowTask?.cancel()
             }
             .overlay(alignment: .bottomLeading) {
                 if showAscendReceipt {
@@ -304,6 +326,11 @@ struct GhostCardComponent: View {
                 try? modelContext.save()
                 return
             }
+            if ledger.canonizationHapticFired {
+                ledger.arrivalHapticFired = true
+                try? modelContext.save()
+                return
+            }
             ledger.arrivalHapticFired = true
         } else {
             let ledger = GhostCardLedger(key: key, arrivalHapticFired: true)
@@ -387,7 +414,8 @@ struct GhostCardComponent: View {
         let success = await (card.actions.onAscend?() ?? false)
 
         if success {
-            GhostCardHaptics.releaseTick()
+            let intensity = PhysicalityManager.heartbeatIntensity(for: card.moodAnchor)
+            GhostCardHaptics.heartbeat(intensity: intensity)
             showAscendReceipt = true
             markAscended()
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
@@ -413,9 +441,70 @@ struct GhostCardComponent: View {
             try? modelContext.save()
         }
     }
+
+    private func triggerReceiptGlowIfNeeded(previous: String?, current: String?) {
+        let previousValue = (previous?.isEmpty == false) ? previous : nil
+        guard previousValue == nil,
+              let current,
+              !current.isEmpty,
+              !card.factNull else { return }
+
+        receiptGlowTask?.cancel()
+        withAnimation(.easeInOut(duration: 0.2)) {
+            showReceiptGlow = true
+        }
+        startGlowPulseIfNeeded()
+
+        let delay = receiptGlowWindowSeconds
+        receiptGlowTask = Task {
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showReceiptGlow = false
+                    glowPulseOn = false
+                }
+            }
+        }
+    }
+
+    private var receiptGlowWindowSeconds: TimeInterval {
+        card.rigorLevel == .high ? 5 : 3
+    }
+
+    private func startGlowPulseIfNeeded() {
+        guard card.rigorLevel == .high, showReceiptGlow, !reduceMotion else {
+            glowPulseOn = false
+            return
+        }
+        glowPulseOn = false
+        withAnimation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true)) {
+            glowPulseOn = true
+        }
+    }
+
+    @ViewBuilder
+    private var receiptGlowOverlay: some View {
+        if showReceiptGlow {
+            let glowColor = Color(red: 0.95, green: 0.82, blue: 0.32)
+            let glowRadius: CGFloat = card.rigorLevel == .high ? 18 : 12
+            let pulseOpacity: Double = card.rigorLevel == .high ? (glowPulseOn ? 0.95 : 0.6) : 0.85
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(glowColor.opacity(pulseOpacity), lineWidth: 1.2)
+                .shadow(color: glowColor.opacity(0.4), radius: glowRadius)
+                .transition(.opacity)
+        }
+    }
 }
 
-private enum GhostCardHaptics {
+enum GhostCardHaptics {
+    static func softImpact() {
+        guard PhysicalityManager.canFireHaptics() else { return }
+        let generator = UIImpactFeedbackGenerator(style: .soft)
+        generator.prepare()
+        generator.impactOccurred(intensity: 0.6)
+    }
+
     static func heartbeat(intensity: Double) {
         guard PhysicalityManager.canFireHaptics() else { return }
         let clamped = max(0.0, min(intensity, 1.0))

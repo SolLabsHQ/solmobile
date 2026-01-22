@@ -32,14 +32,22 @@ struct ThreadDetailView: View {
     @State private var lastVisibleAnchorId: UUID? = nil
     @State private var composerHeight: CGFloat = 0
     @State private var outboxBannerHeight: CGFloat = 0
+    @State private var starlightState: StarlightState = .idle
+    @State private var starlightPendingSince: Date? = nil
+    @State private var starlightFlashTask: Task<Void, Never>? = nil
+    @State private var lastAssistantMessageId: UUID? = nil
+    @State private var seededAssistantArrival: Bool = false
 
     private enum GhostOverlayMode: Equatable {
         case full
-        case chip
+        case hidden
     }
 
     @State private var ghostOverlayMode: GhostOverlayMode = .full
     @State private var ghostSnoozeTask: Task<Void, Never>? = nil
+    @State private var ghostHandleAscendTrigger: Bool = false
+    @State private var showRecoveryPill: Bool = false
+    @State private var recoveryPillTask: Task<Void, Never>? = nil
 
     // ThreadMemento (navigation artifact): model-proposed snapshot returned by SolServer.
     // We store acceptance state locally (UserDefaults) so it survives view reloads.
@@ -88,17 +96,25 @@ struct ThreadDetailView: View {
         messages.last(where: { $0.isGhostCard })
     }
 
-    private func snoozeDelaySeconds(for ghost: Message) -> TimeInterval {
-        // Short receipt window for real memories; longer for manual-entry.
-        if ghost.ghostFactNull { return 10 }
-        if ghost.ghostRigorLevelRaw == "high" { return 8 }
-        return 6
+    private var latestAssistantMessageId: UUID? {
+        messages.last(where: { $0.creatorType == .assistant && !$0.isGhostCard })?.id
     }
 
-    private func ghostChipTitle(for ghost: Message) -> String {
-        if ghost.ghostFactNull { return "Pick what to save" }
-        if ghost.ghostRigorLevelRaw == "high" { return "Saved (High-rigor)" }
-        return "Saved to Memory"
+    private func isGhostSaved(_ ghost: Message) -> Bool {
+        guard ghost.ghostFactNull == false else { return false }
+        return ghost.ghostMemoryId?.isEmpty == false
+    }
+
+    private func isGhostManualEntry(_ ghost: Message) -> Bool {
+        ghost.ghostFactNull
+    }
+
+    private func isGhostPending(_ ghost: Message) -> Bool {
+        ghost.ghostFactNull == false && ghost.ghostMemoryId?.isEmpty != false
+    }
+
+    private func receiptWindowSeconds(for ghost: Message) -> TimeInterval {
+        ghost.ghostRigorLevelRaw == "high" ? 5 : 3
     }
 
     private func ghostSnoozeKey(for ghost: Message) -> String {
@@ -109,24 +125,53 @@ struct ThreadDetailView: View {
         return "\(ghost.id.uuidString)|\(mem)|\(factNull)|\(rigor)"
     }
 
+    private func preferredOverlayMode(for ghost: Message, isTyping: Bool) -> GhostOverlayMode {
+        if isGhostManualEntry(ghost) && isTyping {
+            return .hidden
+        }
+        return .full
+    }
+
     private func scheduleGhostAutoSnooze(_ ghost: Message) {
         ghostSnoozeTask?.cancel()
-        let delay = snoozeDelaySeconds(for: ghost)
+
+        guard isGhostSaved(ghost) else { return }
+
+        let delay = receiptWindowSeconds(for: ghost)
         ghostSnoozeTask = Task {
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             guard !Task.isCancelled else { return }
             await MainActor.run {
-                // Only snooze if the same ghost is still the latest.
                 if latestGhostMessage?.id == ghost.id {
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        ghostOverlayMode = .chip
+                    withAnimation(.easeInOut(duration: 0.8)) {
+                        ghostOverlayMode = .hidden
                     }
                 }
             }
         }
     }
 
-    private func expandGhostOverlay() {
+    private func dismissGhostOverlay(_ ghost: Message) {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            ghostOverlayMode = .hidden
+        }
+        presentRecoveryPill(for: ghost)
+    }
+
+    private func presentRecoveryPill(for ghost: Message) {
+        recoveryPillTask?.cancel()
+        showRecoveryPill = true
+        let duration = ghost.ghostRigorLevelRaw == "high" ? 5.0 : 3.0
+        recoveryPillTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            showRecoveryPill = false
+        }
+    }
+
+    private func restoreGhostOverlay() {
+        recoveryPillTask?.cancel()
+        showRecoveryPill = false
         withAnimation(.easeInOut(duration: 0.15)) {
             ghostOverlayMode = .full
         }
@@ -268,6 +313,7 @@ struct ThreadDetailView: View {
 
             ComposerView(
                 text: $composerText,
+                starlightState: starlightState,
                 isSendBlocked: budgetStore.isBlockedNow(),
                 blockedUntil: budgetStore.state.blockedUntil
             ) { text in
@@ -287,46 +333,36 @@ struct ThreadDetailView: View {
 
             // Ghost Cards should not "push" layout when they arrive. Render the newest ghost as an overlay
             // pinned above the composer so it develops in place (Spirit Fade) without a layout pop.
-            if let ghost = latestGhostMessage {
-                Group {
-                    switch ghostOverlayMode {
-                    case .full:
-                        MessageBubble(message: ghost)
-                            .transition(.opacity.combined(with: .scale(scale: 0.98)))
-                            .animation(.easeIn(duration: 1.2), value: ghost.id)
-
-                    case .chip:
-                        Button {
-                            expandGhostOverlay()
-                        } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: "sparkles")
-                                Text(ghostChipTitle(for: ghost))
-                                    .font(.footnote)
-                                Spacer(minLength: 0)
-                            }
-                            .padding(.vertical, 8)
-                            .padding(.horizontal, 12)
-                            .background(.thinMaterial)
-                            .clipShape(Capsule())
-                        }
-                        .buttonStyle(.plain)
-                        .transition(.opacity)
-                    }
+            if let ghost = latestGhostMessage, ghostOverlayMode == .full {
+                MuseOverlayHost(
+                    canAscend: ghost.ghostKind == .journalMoment,
+                    onDismiss: { dismissGhostOverlay(ghost) },
+                    onAscend: { ghostHandleAscendTrigger = true }
+                ) {
+                    MessageBubble(message: ghost, handleAscendTrigger: $ghostHandleAscendTrigger)
                 }
-                .padding(.horizontal, 12)
-                // Lift above the composer (and any banner) so it stays visible and doesn't cover controls.
-                .padding(.bottom, composerHeight + outboxBannerHeight + 12)
+                .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                .animation(.easeIn(duration: 1.2), value: ghost.id)
                 .task(id: ghostSnoozeKey(for: ghost)) {
-                    // If the ghost updates in place (e.g., memoryId appears), re-arm the snooze.
                     await MainActor.run {
                         let typing = !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        if !typing {
-                            ghostOverlayMode = .full
+                        let mode = preferredOverlayMode(for: ghost, isTyping: typing)
+                        ghostOverlayMode = mode
+                        if mode == .hidden, isGhostManualEntry(ghost), typing {
+                            presentRecoveryPill(for: ghost)
                         }
                         scheduleGhostAutoSnooze(ghost)
                     }
                 }
+            }
+
+            if showRecoveryPill {
+                RecoveryPillView {
+                    restoreGhostOverlay()
+                }
+                .padding(.leading, 12)
+                .padding(.bottom, composerHeight + outboxBannerHeight + 12)
+                .transition(.opacity)
             }
         }
         .onChange(of: outboxSummary.failed + outboxSummary.queued + outboxSummary.sending + outboxSummary.pending) { _, newValue in
@@ -334,15 +370,34 @@ struct ThreadDetailView: View {
         }
         .onChange(of: outboxStatusSignature) { _, _ in
             updateOutboxSummary()
+            refreshStarlightPending()
+        }
+        .onChange(of: latestAssistantMessageId) { _, newId in
+            guard seededAssistantArrival else {
+                seededAssistantArrival = true
+                lastAssistantMessageId = newId
+                return
+            }
+            if let newId, newId != lastAssistantMessageId {
+                handleAssistantArrival()
+            }
+            lastAssistantMessageId = newId
         }
         .onChange(of: latestGhostMessage?.id) { _, newId in
             ghostSnoozeTask?.cancel()
+            ghostHandleAscendTrigger = false
+            recoveryPillTask?.cancel()
+            showRecoveryPill = false
             guard let ghost = latestGhostMessage, newId != nil else {
                 ghostOverlayMode = .full
                 return
             }
             let typing = !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ghostOverlayMode = typing ? .chip : .full
+            let mode = preferredOverlayMode(for: ghost, isTyping: typing)
+            ghostOverlayMode = mode
+            if mode == .hidden, isGhostManualEntry(ghost), typing {
+                presentRecoveryPill(for: ghost)
+            }
             scheduleGhostAutoSnooze(ghost)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
@@ -358,11 +413,13 @@ struct ThreadDetailView: View {
         }
         .onChange(of: composerText) { _, newValue in
             // If the user starts typing, snooze the overlay so it doesn't feel like it blocks the flow.
-            if !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-               latestGhostMessage != nil,
-               ghostOverlayMode == .full {
-                withAnimation(.easeInOut(duration: 0.15)) {
-                    ghostOverlayMode = .chip
+            let typing = !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            if typing, let ghost = latestGhostMessage, ghostOverlayMode == .full {
+                if isGhostManualEntry(ghost) {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        ghostOverlayMode = .hidden
+                    }
+                    presentRecoveryPill(for: ghost)
                 }
             }
             handleComposerTextChange(newValue)
@@ -378,11 +435,15 @@ struct ThreadDetailView: View {
         .onAppear {
             loadAcceptedMementoFromDefaults()
             updateOutboxSummary()
+            refreshStarlightPending()
+            lastAssistantMessageId = latestAssistantMessageId
+            seededAssistantArrival = true
             restoreDraftIfNeeded()
             budgetStore.refreshIfExpired()
         }
         .onDisappear {
             ghostSnoozeTask?.cancel()
+            recoveryPillTask?.cancel()
             if let unreadTracker {
                 Task { await unreadTracker.flush(threadId: thread.id) }
             }
@@ -394,6 +455,7 @@ struct ThreadDetailView: View {
                 Button("Save to Memory") {
                     triggerMemoryDistill()
                 }
+                .accessibilityIdentifier("save_to_memory_button")
             }
         }
     }
@@ -859,6 +921,46 @@ private func acceptMemento(_ m: MementoViewModel) {
         }
     }
 
+    private func refreshStarlightPending() {
+        guard starlightState != .flash else { return }
+        if let pendingSince = pendingChatSince() {
+            if starlightState == .idle {
+                starlightState = .pending
+            }
+            if starlightPendingSince == nil || pendingSince < (starlightPendingSince ?? pendingSince) {
+                starlightPendingSince = pendingSince
+            }
+        } else if starlightState == .pending {
+            starlightState = .idle
+            starlightPendingSince = nil
+        }
+    }
+
+    private func handleAssistantArrival() {
+        fireArrivalHaptic()
+        starlightFlashTask?.cancel()
+        starlightState = .flash
+        starlightPendingSince = nil
+        starlightFlashTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            guard !Task.isCancelled else { return }
+            starlightState = .idle
+        }
+    }
+
+    private func fireArrivalHaptic() {
+        guard PhysicalityManager.canFireHaptics() else { return }
+        let delta = starlightPendingSince.map { Date().timeIntervalSince($0) } ?? 0
+        if delta < 1.2 {
+            GhostCardHaptics.softImpact()
+            return
+        }
+
+        let scaled = min(max((delta - 1.2) / 4.0, 0.0), 1.0)
+        let intensity = min(1.2, 1.0 + (0.2 * scaled))
+        GhostCardHaptics.heartbeat(intensity: intensity)
+    }
+
     private func pendingSince(_ tx: Transmission) -> Date? {
         let attempts = tx.deliveryAttempts.sorted { $0.createdAt < $1.createdAt }
         guard let last = attempts.last, last.outcome == .pending else { return nil }
@@ -872,6 +974,13 @@ private func acceptMemento(_ m: MementoViewModel) {
             }
         }
         return since
+    }
+
+    private func pendingChatSince() -> Date? {
+        transmissions
+            .filter { $0.status == .pending && $0.packet.packetType == "chat" }
+            .compactMap(pendingSince)
+            .min()
     }
 
     private var hasLongPending: Bool {
@@ -1012,6 +1121,7 @@ private struct MessageFramePreferenceKey: PreferenceKey {
 
 private struct MessageBubble: View {
     let message: Message
+    @Binding var handleAscendTrigger: Bool
     @Environment(\.modelContext) private var modelContext
     @State private var showingClaims = false
     @State private var editorMode: MemoryEditorMode?
@@ -1022,18 +1132,33 @@ private struct MessageBubble: View {
 
     private let eventStore = EKEventStore()
 
+    init(message: Message, handleAscendTrigger: Binding<Bool> = .constant(false)) {
+        self.message = message
+        self._handleAscendTrigger = handleAscendTrigger
+    }
+
     var body: some View {
         if message.isGhostCard, let ghostCard = buildGhostCardModel() {
-            GhostCardComponent(card: ghostCard)
+            GhostCardComponent(card: ghostCard, externalAscendTrigger: $handleAscendTrigger)
+                .accessibilityIdentifier("ghost_overlay")
+                .accessibilityElement(children: .contain)
                 .sheet(item: $editorMode) { mode in
                     MemoryEditorSheet(mode: mode) { updated in
                         if let updated {
+                            let previousMemoryId = message.ghostMemoryId
                             upsertMemoryArtifact(from: updated, memoryId: updated.id)
                             message.ghostMemoryId = updated.id
                             message.ghostFactNull = false
                             message.ghostSnippet = updated.snippet ?? message.ghostSnippet
                             message.ghostRigorLevelRaw = updated.rigorLevel ?? message.ghostRigorLevelRaw
                             message.ghostMoodAnchor = updated.moodAnchor ?? message.ghostMoodAnchor
+                            GhostCardReceipt.fireCanonizationIfNeeded(
+                                modelContext: modelContext,
+                                previousMemoryId: previousMemoryId,
+                                newMemoryId: message.ghostMemoryId,
+                                factNull: message.ghostFactNull,
+                                ghostKind: message.ghostKind
+                            )
                             try? modelContext.save()
                         }
                     }

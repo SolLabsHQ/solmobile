@@ -32,6 +32,42 @@ final class SolMobileUITests: XCTestCase {
     }
 
     @MainActor
+    func testSaveToMemoryShowsGhostOverlay() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-ui_test_stub_network", "1"]
+        app.launch()
+
+        let chatTab = app.tabBars.buttons["Chat"]
+        if chatTab.exists {
+            chatTab.tap()
+        }
+
+        let newThreadButton = app.buttons["new_thread_button"]
+        XCTAssertTrue(newThreadButton.waitForExistence(timeout: 3))
+        newThreadButton.tap()
+
+        let threadCell = app.cells.element(boundBy: 0)
+        XCTAssertTrue(threadCell.waitForExistence(timeout: 3))
+        threadCell.tap()
+
+        let messageField = app.textFields["Message…"]
+        XCTAssertTrue(messageField.waitForExistence(timeout: 3))
+        messageField.tap()
+        messageField.typeText("Remember that my dog is named Max.")
+        app.buttons["Send"].tap()
+
+        let sentMessage = app.staticTexts["Remember that my dog is named Max."]
+        XCTAssertTrue(sentMessage.waitForExistence(timeout: 3))
+
+        let saveButton = app.buttons["save_to_memory_button"]
+        XCTAssertTrue(saveButton.waitForExistence(timeout: 3))
+        saveButton.tap()
+
+        let ghostOverlay = app.descendants(matching: .any).matching(identifier: "ghost_overlay").firstMatch
+        XCTAssertTrue(ghostOverlay.waitForExistence(timeout: 10))
+    }
+
+    @MainActor
     func testLaunchPerformance() throws {
         // This measures how long it takes to launch your application.
         measure(metrics: [XCTApplicationLaunchMetric()]) {
