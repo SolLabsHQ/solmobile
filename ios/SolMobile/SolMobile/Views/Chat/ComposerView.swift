@@ -9,6 +9,7 @@ import SwiftUI
 
 struct ComposerView: View {
     @Binding var text: String
+    var starlightState: StarlightState = .idle
     var isSendBlocked: Bool = false
     var blockedUntil: Date? = nil
     var onSend: (String) -> Void
@@ -16,6 +17,8 @@ struct ComposerView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 10) {
+                StarlightPulseView(state: starlightState)
+                    .frame(width: 12, height: 12)
                 TextField("Message…", text: $text, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
 

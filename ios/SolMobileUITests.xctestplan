@@ -9,10 +9,25 @@
     }
   ],
   "defaultOptions" : {
-
+    "commandLineArguments" : [
+      {
+        "argument" : "-ui_test_stub_network",
+        "enabled" : true
+      },
+      {
+        "argument" : "1",
+        "enabled" : true
+      }
+    ]
   },
   "testTargets" : [
-
+    {
+      "target" : {
+        "containerPath" : "container:SolMobile.xcodeproj",
+        "identifier" : "0A9A00402EF133B0003FE519",
+        "name" : "SolMobileUITests"
+      }
+    }
   ],
   "version" : 1
 }

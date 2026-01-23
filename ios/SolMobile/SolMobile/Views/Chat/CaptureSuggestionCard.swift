@@ -352,7 +352,7 @@ private struct ActivityView: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
-private struct EventEditView: UIViewControllerRepresentable {
+struct EventEditView: UIViewControllerRepresentable {
     let eventStore: EKEventStore
     let event: EKEvent
     let completion: (EKEventEditViewAction) -> Void
@@ -385,7 +385,7 @@ private struct EventEditView: UIViewControllerRepresentable {
     }
 }
 
-private struct ReminderSaveView: View {
+struct ReminderSaveView: View {
     let reminder: EKReminder
     let eventStore: EKEventStore
     let completion: (Bool) -> Void

@@ -283,6 +283,91 @@ nonisolated final class TransmissionActions {
         )
     }
 
+    func enqueueMemoryDistill(
+        threadId: UUID,
+        messageIds: [UUID],
+        payload: MemoryDistillRequest
+    ) {
+        let queuedRaw = TransmissionStatus.queued.rawValue
+        let pendingRaw = TransmissionStatus.pending.rawValue
+        let sendingRaw = TransmissionStatus.sending.rawValue
+        let descriptor = FetchDescriptor<Transmission>(
+            predicate: #Predicate {
+                $0.packet.packetType == "memory_distill"
+                    && $0.packet.threadId == threadId
+                    && ($0.statusRaw == queuedRaw || $0.statusRaw == pendingRaw || $0.statusRaw == sendingRaw)
+            },
+            sortBy: [SortDescriptor(\Transmission.createdAt, order: .reverse)]
+        )
+
+        let existing = (try? modelContext.fetch(descriptor))?.first
+        guard let encodedPayload = encodeMemoryPayload(
+            payload,
+            existing: existing
+        ) else {
+            outboxLog.error("enqueue_distill event=encode_failed thread=\(short(threadId), privacy: .public)")
+            return
+        }
+
+        if let existing {
+            existing.packet.payloadJson = encodedPayload
+            existing.packet.messageIds = messageIds
+            existing.packet.messageText = nil
+            existing.lastError = nil
+            if existing.status != .sending {
+                existing.status = .queued
+            }
+            outboxLog.info("enqueue_distill event=updated tx=\(short(existing.id), privacy: .public) thread=\(short(threadId), privacy: .public)")
+            try? modelContext.save()
+            return
+        }
+
+        let packet = Packet(
+            packetType: "memory_distill",
+            threadId: threadId,
+            messageIds: messageIds,
+            messageText: nil,
+            contextRefsJson: nil,
+            payloadJson: encodedPayload
+        )
+
+        let tx = Transmission(
+            type: "memory_distill",
+            requestId: payload.requestId,
+            status: .queued,
+            packet: packet
+        )
+
+        modelContext.insert(packet)
+        modelContext.insert(tx)
+        try? modelContext.save()
+        outboxLog.info("enqueue_distill event=created tx=\(short(tx.id), privacy: .public) thread=\(short(threadId), privacy: .public)")
+    }
+
+    private func encodeMemoryPayload(_ payload: MemoryDistillRequest, existing: Transmission?) -> String? {
+        let existingPayload = existing?.packet.payloadJson.flatMap { json in
+            try? JSONDecoder().decode(MemoryDistillRequest.self, from: Data(json.utf8))
+        }
+
+        let existingCount = existingPayload?.reaffirmCount ?? 0
+        let incomingCount = payload.reaffirmCount ?? 0
+        let reaffirm = (existingPayload == nil) ? incomingCount : max(existingCount + 1, incomingCount)
+
+        let requestId = existing?.requestId ?? payload.requestId
+        let updated = MemoryDistillRequest(
+            threadId: payload.threadId,
+            triggerMessageId: payload.triggerMessageId,
+            contextWindow: payload.contextWindow,
+            requestId: requestId,
+            reaffirmCount: reaffirm,
+            consent: payload.consent
+        )
+
+        if let data = try? JSONEncoder().encode(updated) {
+            return String(data: data, encoding: .utf8)
+        }
+        return nil
+    }
     func enqueueChat(threadId: UUID, messageId: UUID, messageText: String?, shouldFail: Bool) {
         outboxLog.info("enqueueChat thread=\(short(threadId), privacy: .public) msg=\(short(messageId), privacy: .public) shouldFail=\(shouldFail, privacy: .public)")
 
@@ -384,7 +469,11 @@ nonisolated final class TransmissionActions {
             return
         }
 
-        await sendOnce(runId: runId, sel: sel)
+        if sel.packetType == "memory_distill" {
+            await sendMemoryDistillOnce(runId: runId, sel: sel)
+        } else {
+            await sendOnce(runId: runId, sel: sel)
+        }
     }
 
     // MARK: - Outbox helpers (v0)
@@ -397,6 +486,7 @@ nonisolated final class TransmissionActions {
         let messageIds: [UUID]
         let firstMessageId: UUID?
         let messageText: String?
+        let payloadJson: String?
     }
 
     private struct PendingSelection {
@@ -444,7 +534,8 @@ nonisolated final class TransmissionActions {
             threadId: packet.threadId,
             messageIds: packet.messageIds,
             firstMessageId: packet.messageIds.first,
-            messageText: packet.messageText
+            messageText: packet.messageText,
+            payloadJson: packet.payloadJson
         )
     }
 
@@ -598,7 +689,7 @@ nonisolated final class TransmissionActions {
 
     private func appendAssistantMessageIfPossible(
         threadId: UUID,
-        assistantText: String,
+        assistantText: String?,
         transmissionId: String?,
         evidence: EvidenceDTO?,
         outputEnvelope: OutputEnvelopeDTO?,
@@ -608,7 +699,17 @@ nonisolated final class TransmissionActions {
     ) {
         guard let thread = try? fetchThread(id: threadId) else { return }
 
-        let text = assistantText.isEmpty ? "(no assistant text)" : assistantText
+        let text: String
+        if let assistantText, !assistantText.isEmpty {
+            text = assistantText
+        } else {
+            let hasGhostKind = outputEnvelope?.meta?.ghostKind != nil || outputEnvelope?.meta?.ghostType != nil
+            if hasGhostKind {
+                text = ""
+            } else {
+                text = "(missing assistant text)"
+            }
+        }
         let assistantMessage = Message(
             thread: thread,
             creatorType: .assistant,
@@ -631,12 +732,29 @@ nonisolated final class TransmissionActions {
             || !evidenceModels.supports.isEmpty
             || !evidenceModels.claims.isEmpty
 
+        let previousMemoryId = assistantMessage.ghostMemoryId
         assistantMessage.applyOutputEnvelopeMeta(outputEnvelope)
+        let newMemoryId = assistantMessage.ghostMemoryId
+        let factNull = assistantMessage.ghostFactNull
+        let ghostKind = assistantMessage.ghostKind
+        Task { @MainActor in
+            GhostCardReceipt.fireCanonizationIfNeeded(
+                modelContext: modelContext,
+                previousMemoryId: previousMemoryId,
+                newMemoryId: newMemoryId,
+                factNull: factNull,
+                ghostKind: ghostKind
+            )
+        }
 
         thread.messages.append(assistantMessage)
         thread.lastActiveAt = Date()
 
         modelContext.insert(assistantMessage)
+
+        if assistantMessage.isGhostCard {
+            upsertMemoryArtifact(from: assistantMessage)
+        }
 
         if !evidenceModels.captures.isEmpty {
             assistantMessage.captures = evidenceModels.captures
@@ -662,6 +780,50 @@ nonisolated final class TransmissionActions {
         DraftStore(modelContext: modelContext).deleteDraft(threadId: threadId)
 
         outboxLog.info("processQueue run=\(runId, privacy: .public) event=assistant_appended tx=\(short(txId), privacy: .public) via=\(via, privacy: .public)")
+    }
+
+    private func upsertMemoryArtifact(from message: Message) {
+        guard let memoryId = message.ghostMemoryId, !memoryId.isEmpty else { return }
+
+        let descriptor = FetchDescriptor<MemoryArtifact>(
+            predicate: #Predicate { $0.memoryId == memoryId }
+        )
+
+        let existing = (try? modelContext.fetch(descriptor))?.first
+        let typeRaw: String
+        switch message.ghostKind {
+        case .journalMoment:
+            typeRaw = "journal"
+        case .actionProposal:
+            typeRaw = "action"
+        case .memoryArtifact, .reverieInsight, .conflictResolver, .evidenceReceipt, .none:
+            typeRaw = "memory"
+        }
+
+        if let existing {
+            existing.threadId = message.thread.id.uuidString
+            existing.triggerMessageId = message.ghostTriggerMessageId ?? existing.triggerMessageId
+            existing.typeRaw = typeRaw
+            existing.snippet = message.ghostSnippet ?? existing.snippet
+            existing.moodAnchor = message.ghostMoodAnchor ?? existing.moodAnchor
+            existing.rigorLevelRaw = message.ghostRigorLevelRaw ?? existing.rigorLevelRaw
+            existing.updatedAt = Date()
+            return
+        }
+
+        let artifact = MemoryArtifact(
+            memoryId: memoryId,
+            threadId: message.thread.id.uuidString,
+            triggerMessageId: message.ghostTriggerMessageId,
+            typeRaw: typeRaw,
+            snippet: message.ghostSnippet,
+            moodAnchor: message.ghostMoodAnchor,
+            rigorLevelRaw: message.ghostRigorLevelRaw,
+            createdAt: message.createdAt,
+            updatedAt: message.createdAt
+        )
+
+        modelContext.insert(artifact)
     }
 
     private func sendOnce(runId: String, sel: QueueSelection) async {
@@ -850,13 +1012,143 @@ nonisolated final class TransmissionActions {
         try? modelContext.save()
     }
 
+    private func sendMemoryDistillOnce(runId: String, sel: QueueSelection) async {
+        guard let tx = try? fetchTransmission(id: sel.txId) else { return }
+
+        let startNs = DispatchTime.now().uptimeNanoseconds
+
+        tx.status = .sending
+        tx.lastError = nil
+        outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(sel.txId), privacy: .public) to=sending")
+
+        let attemptId = UUID()
+        let diagnostics = DiagnosticsContext(
+            attemptId: attemptId,
+            threadId: sel.threadId,
+            localTransmissionId: sel.txId
+        )
+
+        guard let payloadJson = sel.payloadJson, !payloadJson.isEmpty else {
+            tx.status = .failed
+            tx.lastError = "Missing distill payload for send"
+
+            recordAttempt(
+                tx: tx,
+                attemptId: attemptId,
+                statusCode: -1,
+                outcome: .failed,
+                source: .send,
+                errorMessage: tx.lastError,
+                transmissionId: nil,
+                retryableInferred: false,
+                retryAfterSeconds: nil,
+                finalURL: nil
+            )
+
+            outboxLog.error("processQueue run=\(runId, privacy: .public) event=missing_payload tx=\(short(sel.txId), privacy: .public)")
+            try? modelContext.save()
+            return
+        }
+
+        let envelope = PacketEnvelope(
+            packetId: sel.packetId,
+            packetType: sel.packetType,
+            threadId: sel.threadId,
+            messageIds: sel.messageIds,
+            messageText: "",
+            requestId: tx.requestId,
+            contextRefsJson: nil,
+            payloadJson: payloadJson
+        )
+
+        do {
+            outboxLog.info("processQueue run=\(runId, privacy: .public) event=send_distill tx=\(short(sel.txId), privacy: .public)")
+
+            let response = try await transport.send(envelope: envelope, diagnostics: diagnostics)
+
+            outboxLog.info(
+                "processQueue run=\(runId, privacy: .public) event=transport_ok tx=\(short(sel.txId), privacy: .public) http=\(response.statusCode, privacy: .public) pending=\(response.pending, privacy: .public) ms=\(msSince(startNs), format: .fixed(precision: 1))"
+            )
+
+            guard let freshTx = try? fetchTransmission(id: sel.txId) else { return }
+
+            let outcome: DeliveryOutcome = (response.pending || response.statusCode == 202)
+                ? .pending
+                : (response.statusCode == 200 ? .succeeded : .failed)
+
+            recordAttempt(
+                tx: freshTx,
+                attemptId: attemptId,
+                statusCode: response.statusCode,
+                outcome: outcome,
+                source: .send,
+                errorMessage: nil,
+                transmissionId: response.transmissionId,
+                retryableInferred: nil,
+                retryAfterSeconds: nil,
+                finalURL: response.responseInfo?.finalURL?.absoluteString
+            )
+
+            if response.pending || response.statusCode == 202 {
+                freshTx.status = .pending
+                outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(sel.txId), privacy: .public) to=pending reason=pending")
+                try? modelContext.save()
+
+                let pendingSelection = PendingSelection(
+                    txId: sel.txId,
+                    packetId: sel.packetId,
+                    threadId: sel.threadId
+                )
+                let pendingAttempts = sortedAttempts(freshTx.deliveryAttempts)
+                await pollOnce(runId: runId, sel: pendingSelection, attempts: pendingAttempts)
+                try? modelContext.save()
+                return
+            }
+
+            freshTx.status = .succeeded
+            outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(sel.txId), privacy: .public) to=succeeded")
+        } catch {
+            outboxLog.error(
+                "processQueue run=\(runId, privacy: .public) event=transport_failed tx=\(short(sel.txId), privacy: .public) ms=\(msSince(startNs), format: .fixed(precision: 1)) err=\(String(describing: error), privacy: .public)"
+            )
+
+            guard let freshTx = try? fetchTransmission(id: sel.txId) else { return }
+
+            let decision = retryDecision(for: error)
+            let code = statusCode(from: error)
+            let msg = errorMessage(from: error)
+
+            let errorInfo = httpErrorInfo(from: error)
+
+            recordAttempt(
+                tx: freshTx,
+                attemptId: attemptId,
+                statusCode: code,
+                outcome: .failed,
+                source: .send,
+                errorMessage: msg,
+                transmissionId: decision.transmissionId,
+                retryableInferred: decision.retryable,
+                retryAfterSeconds: decision.retryAfterSeconds,
+                finalURL: errorInfo?.finalURL?.absoluteString
+            )
+
+            freshTx.status = decision.retryable ? .queued : .failed
+            freshTx.lastError = msg
+
+            let outcome = decision.retryable ? "queued" : "failed"
+            outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(sel.txId), privacy: .public) to=\(outcome, privacy: .public) http=\(code, privacy: .public)")
+        }
+
+        try? modelContext.save()
+    }
+
     private func budgetExceededInfo(from error: Error) async -> BudgetExceededInfo? {
         guard case let TransportError.httpStatus(info) = error, info.code == 422 else { return nil }
         return await MainActor.run {
             BudgetStore.shared.parseBudgetExceeded(from: info.body)
         }
     }
-
     private func isBudgetBlockedNow() async -> Bool {
         await MainActor.run {
             BudgetStore.shared.isBlockedNow()
@@ -1029,14 +1321,12 @@ nonisolated final class TransmissionActions {
                 return
             }
 
-            let assistantText = (poll.assistant?.isEmpty == false) ? poll.assistant! : "(no assistant text)"
-
             appendAssistantMessageIfPossible(
                 threadId: sel.threadId,
-                assistantText: assistantText,
+                assistantText: poll.assistant,
                 transmissionId: serverTxId,
                 evidence: poll.evidence,
-                outputEnvelope: nil,
+                outputEnvelope: poll.outputEnvelope,
                 runId: runId,
                 txId: sel.txId,
                 via: "poll"

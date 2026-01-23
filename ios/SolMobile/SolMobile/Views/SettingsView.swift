@@ -452,6 +452,9 @@ struct SettingsView: View {
                 }
 
                 Section("Data Management") {
+                    NavigationLink(destination: MemoryVaultView()) {
+                        Label("Memory Vault", systemImage: "brain")
+                    }
                     NavigationLink(destination: StorageAuditView()) {
                         Label("Storage Audit", systemImage: "tray.full")
                     }

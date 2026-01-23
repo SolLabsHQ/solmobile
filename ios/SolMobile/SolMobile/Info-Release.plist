@@ -9,13 +9,15 @@
 	</array>
 	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
 	<string>SolMobile needs calendar access to save events from conversations.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>SolMobile uses your location to attach context to journal moments.</string>
 	<key>NSRemindersFullAccessUsageDescription</key>
 	<string>SolMobile needs reminders access to save tasks from conversations.</string>
-	<key>SOL_ENV</key>
-	<string>staging</string>
-	<key>SOLSERVER_BASE_URL_STAGING</key>
-	<string>https://solserver-staging.sollabshq.com</string>
 	<key>SOLSERVER_BASE_URL_PROD</key>
 	<string>https://api.sollabshq.com</string>
+	<key>SOLSERVER_BASE_URL_STAGING</key>
+	<string>https://solserver-staging.sollabshq.com</string>
+	<key>SOL_ENV</key>
+	<string>staging</string>
 </dict>
 </plist>

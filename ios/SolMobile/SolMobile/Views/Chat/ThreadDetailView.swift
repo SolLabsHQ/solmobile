@@ -3,10 +3,14 @@ import SwiftData
 import os
 import Foundation
 import UIKit
+import EventKit
+import EventKitUI
+import CoreLocation
 
 struct ThreadDetailView: View {
     private static let perfLog = OSLog(subsystem: "com.sollabshq.solmobile", category: "ThreadDetailPerf")
     private static let pendingSlowThresholdSeconds: TimeInterval = 20
+    private static let keyboardDismissThreshold: CGFloat = 32
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
@@ -27,6 +31,24 @@ struct ThreadDetailView: View {
     @State private var newMessagesCount: Int? = nil
     @State private var scrollViewportHeight: CGFloat = 0
     @State private var lastVisibleAnchorId: UUID? = nil
+    @State private var composerHeight: CGFloat = 0
+    @State private var outboxBannerHeight: CGFloat = 0
+    @State private var starlightState: StarlightState = .idle
+    @State private var starlightPendingSince: Date? = nil
+    @State private var starlightFlashTask: Task<Void, Never>? = nil
+    @State private var lastAssistantMessageId: UUID? = nil
+    @State private var seededAssistantArrival: Bool = false
+
+    private enum GhostOverlayMode: Equatable {
+        case full
+        case hidden
+    }
+
+    @State private var ghostOverlayMode: GhostOverlayMode = .full
+    @State private var ghostSnoozeTask: Task<Void, Never>? = nil
+    @State private var ghostHandleAscendTrigger: Bool = false
+    @State private var showRecoveryPill: Bool = false
+    @State private var recoveryPillTask: Task<Void, Never>? = nil
 
     // ThreadMemento (navigation artifact): model-proposed snapshot returned by SolServer.
     // We store acceptance state locally (UserDefaults) so it survives view reloads.
@@ -64,8 +86,104 @@ struct ThreadDetailView: View {
         )
     }
 
+    // Messages excluding ghosts for scrollable display.
+    private var displayMessages: [Message] {
+        messages.filter { !$0.isGhostCard }
+    }
+
+    // Most recent ghost message for overlay.
+    private var latestGhostMessage: Message? {
+        // Show the most recent ghost card as an overlay (does not participate in List/VStack layout).
+        messages.last(where: { $0.isGhostCard })
+    }
+
+    private var latestAssistantMessageId: UUID? {
+        messages.last(where: { $0.creatorType == .assistant && !$0.isGhostCard })?.id
+    }
+
+    private func isGhostSaved(_ ghost: Message) -> Bool {
+        guard ghost.ghostFactNull == false else { return false }
+        return ghost.ghostMemoryId?.isEmpty == false
+    }
+
+    private func isGhostManualEntry(_ ghost: Message) -> Bool {
+        ghost.ghostFactNull
+    }
+
+    private func isGhostPending(_ ghost: Message) -> Bool {
+        ghost.ghostFactNull == false && ghost.ghostMemoryId?.isEmpty != false
+    }
+
+    private func receiptWindowSeconds(for ghost: Message) -> TimeInterval {
+        ghost.ghostRigorLevelRaw == "high" ? 5 : 3
+    }
+
+    private func ghostSnoozeKey(for ghost: Message) -> String {
+        // Retrigger snooze when the ghost updates in place (placeholder -> real memory).
+        let mem = ghost.ghostMemoryId ?? "nil"
+        let factNull = ghost.ghostFactNull ? "1" : "0"
+        let rigor = ghost.ghostRigorLevelRaw ?? ""
+        return "\(ghost.id.uuidString)|\(mem)|\(factNull)|\(rigor)"
+    }
+
+    private func preferredOverlayMode(for ghost: Message, isTyping: Bool) -> GhostOverlayMode {
+        if isGhostManualEntry(ghost) && isTyping {
+            return .hidden
+        }
+        return .full
+    }
+
+    private func scheduleGhostAutoSnooze(_ ghost: Message) {
+        ghostSnoozeTask?.cancel()
+
+        guard isGhostSaved(ghost) else { return }
+
+        let delay = receiptWindowSeconds(for: ghost)
+        ghostSnoozeTask = Task {
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                if latestGhostMessage?.id == ghost.id {
+                    withAnimation(.easeInOut(duration: 0.8)) {
+                        ghostOverlayMode = .hidden
+                    }
+                }
+            }
+        }
+    }
+
+    private func dismissGhostOverlay(_ ghost: Message) {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            ghostOverlayMode = .hidden
+        }
+        presentRecoveryPill(for: ghost)
+    }
+
+    private func presentRecoveryPill(for ghost: Message) {
+        recoveryPillTask?.cancel()
+        showRecoveryPill = true
+        let duration = ghost.ghostRigorLevelRaw == "high" ? 5.0 : 3.0
+        recoveryPillTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            showRecoveryPill = false
+        }
+    }
+
+    private func restoreGhostOverlay() {
+        recoveryPillTask?.cancel()
+        showRecoveryPill = false
+        withAnimation(.easeInOut(duration: 0.15)) {
+            ghostOverlayMode = .full
+        }
+        if let ghost = latestGhostMessage {
+            scheduleGhostAutoSnooze(ghost)
+        }
+    }
+
     var body: some View {
-        VStack(spacing: 0) {
+        ZStack(alignment: .bottom) {
+            VStack(spacing: 0) {
 
             // Accepted ThreadMemento (navigation snapshot).
             if let acceptedMemento {
@@ -102,7 +220,7 @@ struct ThreadDetailView: View {
                 VStack(spacing: 0) {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 10) {
-                            ForEach(messages) { msg in
+                            ForEach(displayMessages) { msg in
                                 MessageBubble(message: msg)
                                     .id(msg.id)
                                     .background(GeometryReader { geo in
@@ -116,6 +234,17 @@ struct ThreadDetailView: View {
                         .padding(.vertical, 12)
                         .padding(.horizontal, 12)
                     }
+                    .scrollDismissesKeyboard(.never)
+                    .contentShape(Rectangle())
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 10)
+                            .onEnded { value in
+                                let dy = value.translation.height
+                                let dx = value.translation.width
+                                guard dy > Self.keyboardDismissThreshold, abs(dy) > abs(dx) else { return }
+                                KeyboardDismiss.dismiss()
+                            }
+                    )
                     .coordinateSpace(name: "threadScroll")
                     .background(
                         GeometryReader { geo in
@@ -135,7 +264,7 @@ struct ThreadDetailView: View {
                     }
                     .onChange(of: messages.count) { _, _ in
                         applyInitialScroll(proxy: proxy)
-                        guard let last = messages.last else { return }
+                        guard let last = displayMessages.last else { return }
                         if autoScrollToLatest {
                             proxy.scrollTo(last.id, anchor: .bottom)
                         } else {
@@ -160,7 +289,7 @@ struct ThreadDetailView: View {
 
                     if showJumpToLatest {
                         Button("Jump to latest") {
-                            guard let last = messages.last else { return }
+                            guard let last = displayMessages.last else { return }
                             autoScrollToLatest = true
                             showJumpToLatest = false
                             showNewMessagesPill = false
@@ -183,22 +312,105 @@ struct ThreadDetailView: View {
                 banner
                     .padding(.horizontal, 10)
                     .padding(.top, 8)
+                    .background(
+                        GeometryReader { geo in
+                            Color.clear
+                                .onAppear { outboxBannerHeight = geo.size.height }
+                                .onChange(of: geo.size.height) { _, newValue in
+                                    outboxBannerHeight = newValue
+                                }
+                        }
+                    )
             }
 
             ComposerView(
                 text: $composerText,
+                starlightState: starlightState,
                 isSendBlocked: budgetStore.isBlockedNow(),
                 blockedUntil: budgetStore.state.blockedUntil
             ) { text in
                 send(text)
             }
             .padding(10)
+            .background(
+                GeometryReader { geo in
+                    Color.clear
+                        .onAppear { composerHeight = geo.size.height }
+                        .onChange(of: geo.size.height) { _, newValue in
+                            composerHeight = newValue
+                        }
+                }
+            )
+            }
+
+            // Ghost Cards should not "push" layout when they arrive. Render the newest ghost as an overlay
+            // pinned above the composer so it develops in place (Spirit Fade) without a layout pop.
+            if let ghost = latestGhostMessage, ghostOverlayMode == .full {
+                MuseOverlayHost(
+                    canAscend: ghost.ghostKind == .journalMoment,
+                    onDismiss: { dismissGhostOverlay(ghost) },
+                    onAscend: { ghostHandleAscendTrigger = true }
+                ) {
+                    MessageBubble(message: ghost, handleAscendTrigger: $ghostHandleAscendTrigger)
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                .animation(.easeIn(duration: 1.2), value: ghost.id)
+                .task(id: ghostSnoozeKey(for: ghost)) {
+                    await MainActor.run {
+                        let typing = !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        let mode = preferredOverlayMode(for: ghost, isTyping: typing)
+                        ghostOverlayMode = mode
+                        if mode == .hidden, isGhostManualEntry(ghost), typing {
+                            presentRecoveryPill(for: ghost)
+                        }
+                        scheduleGhostAutoSnooze(ghost)
+                    }
+                }
+            }
+
+            if showRecoveryPill {
+                RecoveryPillView {
+                    restoreGhostOverlay()
+                }
+                .padding(.leading, 12)
+                .padding(.bottom, composerHeight + outboxBannerHeight + 12)
+                .transition(.opacity)
+            }
         }
         .onChange(of: outboxSummary.failed + outboxSummary.queued + outboxSummary.sending + outboxSummary.pending) { _, newValue in
             viewLog.debug("[outboxBanner] refresh total=\(newValue, privacy: .public)")
         }
         .onChange(of: outboxStatusSignature) { _, _ in
             updateOutboxSummary()
+            refreshStarlightPending()
+        }
+        .onChange(of: latestAssistantMessageId) { _, newId in
+            guard seededAssistantArrival else {
+                seededAssistantArrival = true
+                lastAssistantMessageId = newId
+                return
+            }
+            if let newId, newId != lastAssistantMessageId {
+                handleAssistantArrival()
+            }
+            lastAssistantMessageId = newId
+        }
+        .onChange(of: latestGhostMessage?.id) { _, newId in
+            ghostSnoozeTask?.cancel()
+            ghostHandleAscendTrigger = false
+            recoveryPillTask?.cancel()
+            showRecoveryPill = false
+            guard let ghost = latestGhostMessage, newId != nil else {
+                ghostOverlayMode = .full
+                return
+            }
+            let typing = !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            let mode = preferredOverlayMode(for: ghost, isTyping: typing)
+            ghostOverlayMode = mode
+            if mode == .hidden, isGhostManualEntry(ghost), typing {
+                presentRecoveryPill(for: ghost)
+            }
+            scheduleGhostAutoSnooze(ghost)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
             let id = OSSignpostID(log: Self.perfLog)
@@ -212,6 +424,16 @@ struct ThreadDetailView: View {
             keyboardSignpostActive = false
         }
         .onChange(of: composerText) { _, newValue in
+            // If the user starts typing, snooze the overlay so it doesn't feel like it blocks the flow.
+            let typing = !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            if typing, let ghost = latestGhostMessage, ghostOverlayMode == .full {
+                if isGhostManualEntry(ghost) {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        ghostOverlayMode = .hidden
+                    }
+                    presentRecoveryPill(for: ghost)
+                }
+            }
             handleComposerTextChange(newValue)
         }
         .onChange(of: scenePhase) { _, newValue in
@@ -225,22 +447,27 @@ struct ThreadDetailView: View {
         .onAppear {
             loadAcceptedMementoFromDefaults()
             updateOutboxSummary()
+            refreshStarlightPending()
+            lastAssistantMessageId = latestAssistantMessageId
+            seededAssistantArrival = true
             restoreDraftIfNeeded()
             budgetStore.refreshIfExpired()
         }
         .onDisappear {
+            ghostSnoozeTask?.cancel()
+            recoveryPillTask?.cancel()
             if let unreadTracker {
                 Task { await unreadTracker.flush(threadId: thread.id) }
             }
         }
         .navigationTitle(thread.title)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
+            .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button(thread.pinned ? "Saved" : "Save to Memory") {
-                    pinThreadToMemory()
+                Button("Save to Memory") {
+                    triggerMemoryDistill()
                 }
-                .disabled(thread.pinned)
+                .accessibilityIdentifier("save_to_memory_button")
             }
         }
     }
@@ -263,9 +490,45 @@ struct ThreadDetailView: View {
         DraftStore(modelContext: modelContext)
     }
 
-    private func pinThreadToMemory() {
-        StoragePinningService(modelContext: modelContext)
-            .pinThreadAndMessages(thread: thread, messages: messages)
+    private func triggerMemoryDistill() {
+        guard let outboxService else { return }
+        let context = buildMemoryContext()
+        guard let triggerMessageId = context.last?.messageId else { return }
+
+        let requestId = "mem:thread:\(thread.id.uuidString):\(triggerMessageId)"
+        let payload = MemoryDistillRequest(
+            threadId: thread.id.uuidString,
+            triggerMessageId: triggerMessageId,
+            contextWindow: context,
+            requestId: requestId,
+            reaffirmCount: 0,
+            consent: MemoryConsent(explicitUserConsent: true)
+        )
+
+        outboxService.enqueueMemoryDistill(
+            threadId: thread.id,
+            messageIds: context.compactMap { UUID(uuidString: $0.messageId) },
+            payload: payload
+        )
+    }
+
+    private func buildMemoryContext() -> [MemoryContextItem] {
+        let eligible = messages.filter { message in
+            !message.isGhostCard
+        }
+
+        let window = eligible.suffix(15)
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        return window.map { message in
+            MemoryContextItem(
+                messageId: message.id.uuidString,
+                role: message.creatorType.rawValue,
+                content: message.text,
+                createdAt: formatter.string(from: message.createdAt)
+            )
+        }
     }
 
     private func restoreDraftIfNeeded() {
@@ -665,6 +928,49 @@ private func acceptMemento(_ m: MementoViewModel) {
         let pending = transmissions.filter { $0.status == .pending }.count
         let failed = transmissions.filter { $0.status == .failed }.count
         cachedOutboxSummary = OutboxSummary(queued: queued, sending: sending, pending: pending, failed: failed)
+        if (failed == 0) && (queued + sending + pending == 0) {
+            outboxBannerHeight = 0
+        }
+    }
+
+    private func refreshStarlightPending() {
+        guard starlightState != .flash else { return }
+        if let pendingSince = pendingChatSince() {
+            if starlightState == .idle {
+                starlightState = .pending
+            }
+            if starlightPendingSince == nil || pendingSince < (starlightPendingSince ?? pendingSince) {
+                starlightPendingSince = pendingSince
+            }
+        } else if starlightState == .pending {
+            starlightState = .idle
+            starlightPendingSince = nil
+        }
+    }
+
+    private func handleAssistantArrival() {
+        fireArrivalHaptic()
+        starlightFlashTask?.cancel()
+        starlightState = .flash
+        starlightPendingSince = nil
+        starlightFlashTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            guard !Task.isCancelled else { return }
+            starlightState = .idle
+        }
+    }
+
+    private func fireArrivalHaptic() {
+        guard PhysicalityManager.canFireHaptics() else { return }
+        let delta = starlightPendingSince.map { Date().timeIntervalSince($0) } ?? 0
+        if delta < 1.2 {
+            GhostCardHaptics.softImpact()
+            return
+        }
+
+        let scaled = min(max((delta - 1.2) / 4.0, 0.0), 1.0)
+        let intensity = min(1.2, 1.0 + (0.2 * scaled))
+        GhostCardHaptics.heartbeat(intensity: intensity)
     }
 
     private func pendingSince(_ tx: Transmission) -> Date? {
@@ -682,6 +988,13 @@ private func acceptMemento(_ m: MementoViewModel) {
         return since
     }
 
+    private func pendingChatSince() -> Date? {
+        transmissions
+            .filter { $0.status == .pending && $0.packet.packetType == "chat" }
+            .compactMap(pendingSince)
+            .min()
+    }
+
     private var hasLongPending: Bool {
         guard outboxSummary.pending > 0 else { return false }
         let now = Date()
@@ -694,12 +1007,12 @@ private func acceptMemento(_ m: MementoViewModel) {
 
     private func applyInitialScroll(proxy: ScrollViewProxy) {
         guard !initialScrollDone else { return }
-        guard !messages.isEmpty else { return }
+        guard !displayMessages.isEmpty else { return }
         initialScrollDone = true
 
         if let state = fetchReadState() {
             if let lastViewedId = state.lastViewedMessageId,
-               messages.contains(where: { $0.id == lastViewedId }) {
+               displayMessages.contains(where: { $0.id == lastViewedId }) {
                 autoScrollToLatest = false
                 showJumpToLatest = true
                 proxy.scrollTo(lastViewedId, anchor: .top)
@@ -717,7 +1030,7 @@ private func acceptMemento(_ m: MementoViewModel) {
             }
         }
 
-        if let last = messages.last {
+        if let last = displayMessages.last {
             autoScrollToLatest = true
             showNewMessagesPill = false
             proxy.scrollTo(last.id, anchor: .bottom)
@@ -726,13 +1039,13 @@ private func acceptMemento(_ m: MementoViewModel) {
 
     private func computeFirstUnreadMessageId(readUpToId: UUID?) -> UUID? {
         guard let readUpToId,
-              let idx = messages.firstIndex(where: { $0.id == readUpToId }) else {
+              let idx = displayMessages.firstIndex(where: { $0.id == readUpToId }) else {
             return nil
         }
 
-        let nextIndex = messages.index(after: idx)
-        guard nextIndex < messages.endIndex else { return nil }
-        return messages[nextIndex].id
+        let nextIndex = displayMessages.index(after: idx)
+        guard nextIndex < displayMessages.endIndex else { return nil }
+        return displayMessages[nextIndex].id
     }
 
     private func fetchReadState() -> ThreadReadState? {
@@ -743,13 +1056,13 @@ private func acceptMemento(_ m: MementoViewModel) {
 
     private func unreadCount(readUpToId: UUID?) -> Int? {
         guard let readUpToId,
-              let idx = messages.firstIndex(where: { $0.id == readUpToId }) else {
+              let idx = displayMessages.firstIndex(where: { $0.id == readUpToId }) else {
             return nil
         }
 
-        let nextIndex = messages.index(after: idx)
-        guard nextIndex < messages.endIndex else { return nil }
-        return messages.distance(from: nextIndex, to: messages.endIndex)
+        let nextIndex = displayMessages.index(after: idx)
+        guard nextIndex < displayMessages.endIndex else { return nil }
+        return displayMessages.distance(from: nextIndex, to: displayMessages.endIndex)
     }
 
     private func refreshNewMessagesPill(forceShow: Bool = false, state: ThreadReadState? = nil) {
@@ -790,7 +1103,7 @@ private func acceptMemento(_ m: MementoViewModel) {
     }
 
     private func updateAutoScroll(frames: [UUID: CGRect]) {
-        guard let last = messages.last,
+        guard let last = displayMessages.last,
               let frame = frames[last.id],
               scrollViewportHeight > 0 else { return }
 
@@ -820,54 +1133,116 @@ private struct MessageFramePreferenceKey: PreferenceKey {
 
 private struct MessageBubble: View {
     let message: Message
+    @Binding var handleAscendTrigger: Bool
+    @Environment(\.modelContext) private var modelContext
     @State private var showingClaims = false
+    @State private var editorMode: MemoryEditorMode?
+    @State private var showDeleteConfirm = false
+    @State private var showErrorAlert = false
+    @State private var errorMessage: String = ""
+    @State private var activeExportSheet: ExportSheet?
+
+    private let eventStore = EKEventStore()
+
+    init(message: Message, handleAscendTrigger: Binding<Bool> = .constant(false)) {
+        self.message = message
+        self._handleAscendTrigger = handleAscendTrigger
+    }
 
     var body: some View {
-        HStack {
-            if message.creatorType == .user { Spacer(minLength: 40) }
-
-            VStack(alignment: .leading, spacing: 0) {
-                Text(message.text)
-                    .padding(10)
-                    .background(message.creatorType == .user ? Color.gray.opacity(0.2) : Color.blue.opacity(0.15))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-
-                if message.creatorType == .assistant && hasClaimsBadge {
-                    Button {
-                        showingClaims = true
-                    } label: {
-                        Text("Evidence (\(message.claimsCount))")
-                            .font(.caption)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.gray.opacity(0.15))
-                            .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.top, 6)
-                    .padding(.horizontal, 10)
-                    .sheet(isPresented: $showingClaims) {
-                        EvidenceClaimsSheet(message: message)
+        if message.isGhostCard, let ghostCard = buildGhostCardModel() {
+            GhostCardComponent(card: ghostCard, externalAscendTrigger: $handleAscendTrigger)
+                .accessibilityIdentifier("ghost_overlay")
+                .accessibilityElement(children: .contain)
+                .sheet(item: $editorMode) { mode in
+                    MemoryEditorSheet(mode: mode) { updated in
+                        if let updated {
+                            let previousMemoryId = message.ghostMemoryId
+                            upsertMemoryArtifact(from: updated, memoryId: updated.id)
+                            message.ghostMemoryId = updated.id
+                            message.ghostFactNull = false
+                            message.ghostSnippet = updated.snippet ?? message.ghostSnippet
+                            message.ghostRigorLevelRaw = updated.rigorLevel ?? message.ghostRigorLevelRaw
+                            message.ghostMoodAnchor = updated.moodAnchor ?? message.ghostMoodAnchor
+                            GhostCardReceipt.fireCanonizationIfNeeded(
+                                modelContext: modelContext,
+                                previousMemoryId: previousMemoryId,
+                                newMemoryId: message.ghostMemoryId,
+                                factNull: message.ghostFactNull,
+                                ghostKind: message.ghostKind
+                            )
+                            try? modelContext.save()
+                        }
                     }
                 }
+                .sheet(item: $activeExportSheet) { sheet in
+                    switch sheet {
+                    case .reminder(let reminder):
+                        ReminderSaveView(reminder: reminder, eventStore: eventStore) { _ in }
+                    case .calendar(let event):
+                        EventEditView(eventStore: eventStore, event: event) { _ in }
+                    }
+                }
+                .alert("Confirm Delete", isPresented: $showDeleteConfirm) {
+                    Button("Delete", role: .destructive) {
+                        Task { await performDelete(confirm: true) }
+                    }
+                    Button("Cancel", role: .cancel) { }
+                } message: {
+                    Text("This memory affects safety boundaries. Confirm to delete it.")
+                }
+                .alert("Action Failed", isPresented: $showErrorAlert) {
+                    Button("OK", role: .cancel) { }
+                } message: {
+                    Text(errorMessage)
+                }
+        } else {
+            HStack {
+                if message.creatorType == .user { Spacer(minLength: 40) }
 
-                if message.creatorType == .assistant, let capture = message.captureSuggestion {
-                    CaptureSuggestionCard(message: message, suggestion: capture)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(message.text)
+                        .padding(10)
+                        .background(message.creatorType == .user ? Color.gray.opacity(0.2) : Color.blue.opacity(0.15))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                    if message.creatorType == .assistant && hasClaimsBadge {
+                        Button {
+                            showingClaims = true
+                        } label: {
+                            Text("Evidence (\(message.claimsCount))")
+                                .font(.caption)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.gray.opacity(0.15))
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
                         .padding(.top, 6)
                         .padding(.horizontal, 10)
-                }
-                
-                // Evidence UI (PR #8) - only show for assistant messages with evidence
-                if message.creatorType == .assistant && hasEvidence {
-                    EvidenceView(
-                        message: message,
-                        urlOpener: SystemURLOpener()
-                    )
-                    .padding(.horizontal, 10)
-                }
-            }
+                        .sheet(isPresented: $showingClaims) {
+                            EvidenceClaimsSheet(message: message)
+                        }
+                    }
 
-            if message.creatorType != .user { Spacer(minLength: 40) }
+                    if message.creatorType == .assistant, let capture = message.captureSuggestion {
+                        CaptureSuggestionCard(message: message, suggestion: capture)
+                            .padding(.top, 6)
+                            .padding(.horizontal, 10)
+                    }
+
+                    // Evidence UI (PR #8) - only show for assistant messages with evidence
+                    if message.creatorType == .assistant && hasEvidence {
+                        EvidenceView(
+                            message: message,
+                            urlOpener: SystemURLOpener()
+                        )
+                        .padding(.horizontal, 10)
+                    }
+                }
+
+                if message.creatorType != .user { Spacer(minLength: 40) }
+            }
         }
     }
     
@@ -878,4 +1253,337 @@ private struct MessageBubble: View {
     private var hasClaimsBadge: Bool {
         message.claimsCount > 0 || message.claimsTruncated
     }
+
+    private enum ExportSheet: Identifiable {
+        case reminder(reminder: EKReminder)
+        case calendar(event: EKEvent)
+
+        var id: String {
+            switch self {
+            case .reminder:
+                return "reminder"
+            case .calendar:
+                return "calendar"
+            }
+        }
+    }
+
+    private func buildGhostCardModel() -> GhostCardModel? {
+        guard let kind = message.ghostKind else { return nil }
+        let cta = message.ghostCTAState
+
+        let onEdit: (() -> Void)?
+        if cta.canEdit {
+            onEdit = { openEditor() }
+        } else {
+            onEdit = nil
+        }
+
+        let onForget: (() -> Void)?
+        if cta.canForget {
+            onForget = {
+                if cta.requiresConfirm {
+                    showDeleteConfirm = true
+                } else {
+                    Task { await performDelete(confirm: false) }
+                }
+            }
+        } else {
+            onForget = nil
+        }
+
+        let onAscend: (() async -> Bool)?
+        if kind == .journalMoment {
+            onAscend = { await donateJournalMoment() }
+        } else {
+            onAscend = nil
+        }
+
+        return GhostCardModel(
+            kind: kind,
+            title: nil,
+            body: nil,
+            summary: nil,
+            snippet: message.ghostSnippet,
+            memoryId: message.ghostMemoryId,
+            rigorLevel: message.ghostRigorLevel,
+            moodAnchor: message.moodAnchor,
+            factNull: message.ghostFactNull,
+            captureSuggestion: message.captureSuggestion,
+            hapticKey: message.ghostMemoryId ?? message.id.uuidString,
+            actions: GhostCardActions(
+                onEdit: onEdit,
+                onForget: onForget,
+                onAscend: onAscend,
+                onAddToCalendar: {
+                    KeyboardDismiss.dismiss()
+                    Task { await presentEventEditor() }
+                },
+                onAddToReminder: {
+                    KeyboardDismiss.dismiss()
+                    Task { await presentReminderEditor() }
+                },
+                onGoToThread: nil
+            )
+        )
+    }
+
+    private func openEditor() {
+        KeyboardDismiss.dismiss()
+        if let memoryId = message.ghostMemoryId {
+            editorMode = .edit(
+                memoryId: memoryId,
+                initialText: message.ghostSnippet ?? ""
+            )
+        } else {
+            editorMode = .create(
+                threadId: message.thread.id.uuidString,
+                messageId: message.ghostTriggerMessageId,
+                initialText: ""
+            )
+        }
+    }
+
+    private func performDelete(confirm: Bool) async {
+        guard let memoryId = message.ghostMemoryId else {
+            if message.ghostFactNull {
+                return
+            }
+            deleteLocalMessage()
+            return
+        }
+
+        do {
+            let client = SolServerClient()
+            try await client.deleteMemory(memoryId: memoryId, confirm: confirm ? true : nil)
+            deleteLocalMessage()
+            deleteMemoryArtifact(memoryId: memoryId)
+        } catch {
+            errorMessage = "Unable to delete memory."
+            showErrorAlert = true
+        }
+    }
+
+    private func deleteLocalMessage() {
+        modelContext.delete(message)
+        try? modelContext.save()
+    }
+
+    private func deleteMemoryArtifact(memoryId: String) {
+        let descriptor = FetchDescriptor<MemoryArtifact>(predicate: #Predicate { $0.memoryId == memoryId })
+        if let artifact = try? modelContext.fetch(descriptor).first {
+            modelContext.delete(artifact)
+            try? modelContext.save()
+        }
+    }
+
+    private func upsertMemoryArtifact(from dto: MemoryItemDTO, memoryId: String) {
+        let descriptor = FetchDescriptor<MemoryArtifact>(predicate: #Predicate { $0.memoryId == memoryId })
+        let existing = (try? modelContext.fetch(descriptor))?.first
+
+        if let existing {
+            existing.threadId = dto.threadId
+            existing.triggerMessageId = dto.triggerMessageId
+            existing.typeRaw = dto.type ?? existing.typeRaw
+            existing.snippet = dto.snippet ?? existing.snippet
+            existing.moodAnchor = dto.moodAnchor ?? existing.moodAnchor
+            existing.rigorLevelRaw = dto.rigorLevel ?? existing.rigorLevelRaw
+            existing.tagsCsv = dto.tags?.joined(separator: ",") ?? existing.tagsCsv
+            existing.fidelityRaw = dto.fidelity ?? existing.fidelityRaw
+            existing.transitionToHazyAt = dto.transitionToHazyAt.flatMap { ISO8601DateFormatter().date(from: $0) }
+            existing.updatedAt = dto.updatedAt.flatMap { ISO8601DateFormatter().date(from: $0) } ?? Date()
+            try? modelContext.save()
+            return
+        }
+
+        let createdAt = dto.createdAt.flatMap { ISO8601DateFormatter().date(from: $0) }
+        let artifact = MemoryArtifact(
+            memoryId: memoryId,
+            threadId: dto.threadId,
+            triggerMessageId: dto.triggerMessageId,
+            typeRaw: dto.type ?? "memory",
+            snippet: dto.snippet,
+            moodAnchor: dto.moodAnchor,
+            rigorLevelRaw: dto.rigorLevel,
+            tagsCsv: dto.tags?.joined(separator: ","),
+            fidelityRaw: dto.fidelity,
+            transitionToHazyAt: dto.transitionToHazyAt.flatMap { ISO8601DateFormatter().date(from: $0) },
+            createdAt: createdAt,
+            updatedAt: createdAt
+        )
+        modelContext.insert(artifact)
+        try? modelContext.save()
+    }
+
+    private func donateJournalMoment() async -> Bool {
+        guard let summary = message.ghostSnippet, !summary.isEmpty else { return false }
+        let memoryId = message.ghostMemoryId
+        let location = memoryId.flatMap { lookupMemoryLocation(memoryId: $0) }
+
+        let moodLabel = message.ghostMoodAnchor
+        let success = await JournalDonationService.shared.donateMoment(
+            summaryText: summary,
+            location: location,
+            moodAnchor: moodLabel
+        )
+
+        if success, let memoryId {
+            markAscended(memoryId: memoryId)
+            recordJournalCapture(memoryId: memoryId, location: location, moodAnchor: moodLabel)
+        }
+
+        return success
+    }
+
+    private func lookupMemoryLocation(memoryId: String) -> CLLocationCoordinate2D? {
+        let descriptor = FetchDescriptor<MemoryArtifact>(predicate: #Predicate { $0.memoryId == memoryId })
+        guard let artifact = try? modelContext.fetch(descriptor).first else { return nil }
+        guard let lat = artifact.locationLatitude, let lon = artifact.locationLongitude else { return nil }
+        return CLLocationCoordinate2D(latitude: lat, longitude: lon)
+    }
+
+    private func markAscended(memoryId: String) {
+        let descriptor = FetchDescriptor<MemoryArtifact>(predicate: #Predicate { $0.memoryId == memoryId })
+        if let artifact = try? modelContext.fetch(descriptor).first {
+            artifact.ascendedAt = Date()
+            try? modelContext.save()
+        }
+    }
+
+    private func recordJournalCapture(
+        memoryId: String,
+        location: CLLocationCoordinate2D?,
+        moodAnchor: String?
+    ) {
+        let suggestionId = "journal_\(memoryId)"
+        let descriptor = FetchDescriptor<CapturedSuggestion>(predicate: #Predicate { $0.suggestionId == suggestionId })
+        let existing = (try? modelContext.fetch(descriptor))?.first
+
+        if let existing {
+            existing.capturedAt = Date()
+            existing.destination = "journal"
+            existing.locationLatitude = location?.latitude
+            existing.locationLongitude = location?.longitude
+            existing.sentimentLabel = moodAnchor
+            try? modelContext.save()
+            return
+        }
+
+        let record = CapturedSuggestion(
+            suggestionId: suggestionId,
+            capturedAt: Date(),
+            destination: "journal",
+            messageId: message.id,
+            locationLatitude: location?.latitude,
+            locationLongitude: location?.longitude,
+            sentimentLabel: moodAnchor
+        )
+        modelContext.insert(record)
+        try? modelContext.save()
+    }
+
+    @MainActor
+    private func presentReminderEditor() async {
+        guard let suggestion = message.captureSuggestion else { return }
+        guard await requestReminderAccess() else { return }
+
+        let reminder = EKReminder(eventStore: eventStore)
+        reminder.title = suggestion.title
+        reminder.notes = suggestion.body
+        reminder.calendar = eventStore.defaultCalendarForNewReminders()
+
+        if let alarmDate = parseSuggestedDate(suggestion.suggestedDate) {
+            reminder.addAlarm(EKAlarm(absoluteDate: alarmDate))
+        }
+
+        activeExportSheet = .reminder(reminder: reminder)
+    }
+
+    @MainActor
+    private func presentEventEditor() async {
+        guard let suggestion = message.captureSuggestion else { return }
+        guard let startDate = parseSuggestedStartAt(suggestion.suggestedStartAt) else { return }
+
+        guard await requestEventAccess() else { return }
+
+        let event = EKEvent(eventStore: eventStore)
+        event.title = suggestion.title
+        event.notes = suggestion.body
+        event.calendar = eventStore.defaultCalendarForNewEvents
+        event.startDate = startDate
+        event.endDate = startDate.addingTimeInterval(3600)
+
+        activeExportSheet = .calendar(event: event)
+    }
+
+    @MainActor
+    private func requestEventAccess() async -> Bool {
+        if #available(iOS 17.0, *) {
+            do {
+                return try await eventStore.requestWriteOnlyAccessToEvents()
+            } catch {
+                errorMessage = "Calendar access failed."
+                showErrorAlert = true
+                return false
+            }
+        }
+        errorMessage = "Calendar access is unavailable on this iOS version."
+        showErrorAlert = true
+        return false
+    }
+
+    @MainActor
+    private func requestReminderAccess() async -> Bool {
+        if #available(iOS 17.0, *) {
+            do {
+                return try await eventStore.requestFullAccessToReminders()
+            } catch {
+                errorMessage = "Reminders access failed."
+                showErrorAlert = true
+                return false
+            }
+        }
+        errorMessage = "Reminders access is unavailable on this iOS version."
+        showErrorAlert = true
+        return false
+    }
+
+    private func parseSuggestedDate(_ raw: String?) -> Date? {
+        guard let raw else { return nil }
+        let parts = raw.split(separator: "-")
+        guard parts.count == 3,
+              let year = Int(parts[0]),
+              let month = Int(parts[1]),
+              let day = Int(parts[2]) else {
+            return nil
+        }
+
+        var components = DateComponents()
+        components.year = year
+        components.month = month
+        components.day = day
+        components.hour = 12
+        return Calendar.current.date(from: components)
+    }
+
+    private func parseSuggestedStartAt(_ raw: String?) -> Date? {
+        guard let raw else { return nil }
+        if let date = Self.iso8601WithFractional.date(from: raw) {
+            return date
+        }
+        return Self.iso8601Basic.date(from: raw)
+    }
+
+    private static let iso8601Basic: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+
+    private static let iso8601WithFractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
 }

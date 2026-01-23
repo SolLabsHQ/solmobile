@@ -15,9 +15,10 @@ final class AppModel {
     let unreadTracker: UnreadTrackerActor
 
     init() {
-        container = ModelContainerFactory.makeContainer(
-            isInMemoryOnly: ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
-        )
+        UITestNetworkStub.enableIfNeeded()
+        let useInMemory = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+            || UITestNetworkStub.isEnabled
+        container = ModelContainerFactory.makeContainer(isInMemoryOnly: useInMemory)
         outboxService = OutboxService(container: container)
         unreadTracker = UnreadTrackerActor(container: container)
 
