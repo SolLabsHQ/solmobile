@@ -734,13 +734,18 @@ nonisolated final class TransmissionActions {
 
         let previousMemoryId = assistantMessage.ghostMemoryId
         assistantMessage.applyOutputEnvelopeMeta(outputEnvelope)
-        GhostCardReceipt.fireCanonizationIfNeeded(
-            modelContext: modelContext,
-            previousMemoryId: previousMemoryId,
-            newMemoryId: assistantMessage.ghostMemoryId,
-            factNull: assistantMessage.ghostFactNull,
-            ghostKind: assistantMessage.ghostKind
-        )
+        let newMemoryId = assistantMessage.ghostMemoryId
+        let factNull = assistantMessage.ghostFactNull
+        let ghostKind = assistantMessage.ghostKind
+        Task { @MainActor in
+            GhostCardReceipt.fireCanonizationIfNeeded(
+                modelContext: modelContext,
+                previousMemoryId: previousMemoryId,
+                newMemoryId: newMemoryId,
+                factNull: factNull,
+                ghostKind: ghostKind
+            )
+        }
 
         thread.messages.append(assistantMessage)
         thread.lastActiveAt = Date()

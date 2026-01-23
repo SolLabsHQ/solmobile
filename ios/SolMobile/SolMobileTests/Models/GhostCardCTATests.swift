@@ -53,7 +53,7 @@ final class GhostCardCTATests: SwiftDataTestBase {
         let descriptor = FetchDescriptor<GhostCardLedger>(predicate: #Predicate { $0.key == "mem-123" })
         let firstFetch = try context.fetch(descriptor)
         XCTAssertEqual(firstFetch.count, 1)
-        XCTAssertTrue(firstFetch.first?.canonizationHapticFired ?? false)
+        XCTAssertTrue(firstFetch.first?.canonizationHapticFired == true)
 
         GhostCardReceipt.fireCanonizationIfNeeded(
             modelContext: context,
@@ -65,7 +65,7 @@ final class GhostCardCTATests: SwiftDataTestBase {
 
         let secondFetch = try context.fetch(descriptor)
         XCTAssertEqual(secondFetch.count, 1)
-        XCTAssertTrue(secondFetch.first?.canonizationHapticFired ?? false)
+        XCTAssertTrue(secondFetch.first?.canonizationHapticFired == true)
     }
 
     func test_canonizationReceipt_skipsFactNull() throws {

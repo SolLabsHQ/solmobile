@@ -50,7 +50,7 @@ enum GhostCardReceipt {
             predicate: #Predicate { $0.key == newMemoryId }
         )
         if let ledger = try? modelContext.fetch(descriptor).first {
-            guard ledger.canonizationHapticFired != true else { return }
+            guard !ledger.canonizationHapticFired else { return }
             ledger.canonizationHapticFired = true
         } else {
             let ledger = GhostCardLedger(
