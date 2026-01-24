@@ -10,6 +10,14 @@ import os
 struct SettingsView: View {
     // Persisted dev knob (UserDefaults via @AppStorage)
     @AppStorage(SolServerBaseURL.storageKey) private var solserverBaseURL: String = SolServerBaseURL.defaultBaseURLString
+    @AppStorage(JournalStyleSettings.offersEnabledKey) private var journalOffersEnabled: Bool = true
+    @AppStorage(JournalStyleSettings.cooldownMinutesKey) private var journalCooldownMinutes: Int = 60
+    @AppStorage(JournalStyleSettings.avoidPeakOverwhelmKey) private var journalAvoidPeakOverwhelm: Bool = true
+    @AppStorage(JournalStyleSettings.defaultModeKey) private var journalDefaultMode: String = JournalDraftMode.assist.rawValue
+    @AppStorage(JournalStyleSettings.maxLinesDefaultKey) private var journalMaxLinesDefault: Int = 12
+    @AppStorage(JournalStyleSettings.toneNotesKey) private var journalToneNotes: String = "Warm, grounded, concise."
+    @AppStorage(JournalStyleSettings.cpbIdKey) private var journalCpbId: String = ""
+    @AppStorage(AppleIntelligenceSettings.enabledKey) private var appleIntelligenceEnabled: Bool = false
 
     // Light tracing for debugging (non-sensitive)
     private let log = Logger(subsystem: "com.sollabshq.solmobile", category: "Settings")
@@ -449,6 +457,42 @@ struct SettingsView: View {
                     lastHealthCheck = nil
                     lastHealthCheckError = nil
                     lastHealthCheckAt = nil
+                }
+
+                Section("Journaling") {
+                    Toggle("Journal offers enabled", isOn: $journalOffersEnabled)
+
+                    Stepper(value: $journalCooldownMinutes, in: 0...1440, step: 15) {
+                        Text("Cooldown \(journalCooldownMinutes) min")
+                    }
+
+                    Toggle("Avoid peak overwhelm", isOn: $journalAvoidPeakOverwhelm)
+
+                    Picker("Default mode", selection: $journalDefaultMode) {
+                        ForEach(JournalDraftMode.allCases, id: \.rawValue) { mode in
+                            Text(mode.rawValue.capitalized).tag(mode.rawValue)
+                        }
+                    }
+
+                    Stepper(value: $journalMaxLinesDefault, in: 1...50, step: 1) {
+                        Text("Max lines \(journalMaxLinesDefault)")
+                    }
+
+                    TextField("Tone notes", text: $journalToneNotes, axis: .vertical)
+                        .lineLimit(3, reservesSpace: true)
+
+                    TextField("Journal style CPB ID (optional)", text: $journalCpbId)
+
+                    Text("Cooldown applies to new offers. Tone notes are used for assist drafts.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Apple Intelligence") {
+                    Toggle("Device hints (trace only)", isOn: $appleIntelligenceEnabled)
+                    Text("Runs in background and sends mechanism-only hints.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 Section("Data Management") {

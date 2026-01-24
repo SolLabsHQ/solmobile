@@ -221,7 +221,7 @@ struct ThreadDetailView: View {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 10) {
                             ForEach(displayMessages) { msg in
-                                MessageBubble(message: msg)
+                                MessageBubble(message: msg, scrollViewportHeight: scrollViewportHeight)
                                     .id(msg.id)
                                     .background(GeometryReader { geo in
                                         Color.clear.preference(
@@ -347,11 +347,15 @@ struct ThreadDetailView: View {
             // pinned above the composer so it develops in place (Spirit Fade) without a layout pop.
             if let ghost = latestGhostMessage, ghostOverlayMode == .full {
                 MuseOverlayHost(
-                    canAscend: ghost.ghostKind == .journalMoment,
+                    canAscend: ghost.isAscendEligible && JournalDonationService.isJournalAvailable,
                     onDismiss: { dismissGhostOverlay(ghost) },
                     onAscend: { ghostHandleAscendTrigger = true }
                 ) {
-                    MessageBubble(message: ghost, handleAscendTrigger: $ghostHandleAscendTrigger)
+                    MessageBubble(
+                        message: ghost,
+                        scrollViewportHeight: scrollViewportHeight,
+                        handleAscendTrigger: $ghostHandleAscendTrigger
+                    )
                 }
                 .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 .animation(.easeIn(duration: 1.2), value: ghost.id)
@@ -1131,8 +1135,22 @@ private struct MessageFramePreferenceKey: PreferenceKey {
     }
 }
 
+enum JournalPresentationState: Equatable {
+    case idle
+    case alert(message: String, showShareSheet: Bool)
+    case shareSheet
+
+    static func nextStateOnAlertDismiss(_ state: JournalPresentationState) -> JournalPresentationState {
+        if case let .alert(_, showShareSheet) = state, showShareSheet {
+            return .shareSheet
+        }
+        return .idle
+    }
+}
+
 private struct MessageBubble: View {
     let message: Message
+    let scrollViewportHeight: CGFloat
     @Binding var handleAscendTrigger: Bool
     @Environment(\.modelContext) private var modelContext
     @State private var showingClaims = false
@@ -1141,11 +1159,20 @@ private struct MessageBubble: View {
     @State private var showErrorAlert = false
     @State private var errorMessage: String = ""
     @State private var activeExportSheet: ExportSheet?
+    @State private var activeDraft: JournalDraftEditorPayload?
+    @State private var activeDraftOffer: JournalOffer?
+    @State private var showOfferTuning = false
+    @State private var suppressJournalOffer = false
+    @State private var journalPresentation: JournalPresentationState = .idle
+    @State private var journalShareItems: [Any] = []
+    @State private var journalShareCompletion: ((Bool) -> Void)?
+    @State private var journalOfferVisible = false
 
     private let eventStore = EKEventStore()
 
-    init(message: Message, handleAscendTrigger: Binding<Bool> = .constant(false)) {
+    init(message: Message, scrollViewportHeight: CGFloat, handleAscendTrigger: Binding<Bool> = .constant(false)) {
         self.message = message
+        self.scrollViewportHeight = scrollViewportHeight
         self._handleAscendTrigger = handleAscendTrigger
     }
 
@@ -1182,6 +1209,19 @@ private struct MessageBubble: View {
                     case .calendar(let event):
                         EventEditView(eventStore: eventStore, event: event) { _ in }
                     }
+                }
+                .sheet(isPresented: showJournalShareSheet) {
+                    ShareSheetView(activityItems: journalShareItems) { completed in
+                        journalPresentation = .idle
+                        let completion = journalShareCompletion
+                        journalShareCompletion = nil
+                        completion?(completed)
+                    }
+                }
+                .alert("Journal Export", isPresented: showJournalAlert) {
+                    Button("OK", role: .cancel) { }
+                } message: {
+                    Text(journalAlertMessage)
                 }
                 .alert("Confirm Delete", isPresented: $showDeleteConfirm) {
                     Button("Delete", role: .destructive) {
@@ -1231,6 +1271,50 @@ private struct MessageBubble: View {
                             .padding(.horizontal, 10)
                     }
 
+                    if let offer = visibleJournalOffer {
+                        JournalOfferCard(
+                            offer: offer,
+                            onAssist: { handleOfferAccepted(offer: offer, mode: .assist) },
+                            onVerbatim: { handleOfferAccepted(offer: offer, mode: .verbatim) },
+                            onDecline: { handleOfferDeclined(offer: offer) },
+                            onTune: { showOfferTuning = true }
+                        )
+                        .padding(.top, 8)
+                        .padding(.horizontal, 10)
+                        .background(
+                            GeometryReader { geo in
+                                Color.clear
+                                    .onAppear {
+                                        updateJournalOfferVisibility(frame: geo.frame(in: .named("threadScroll")), offer: offer)
+                                    }
+                                    .onChange(of: geo.frame(in: .named("threadScroll"))) { _, newFrame in
+                                        updateJournalOfferVisibility(frame: newFrame, offer: offer)
+                                    }
+                            }
+                        )
+                        .confirmationDialog("Offer tuning", isPresented: $showOfferTuning, titleVisibility: .visible) {
+                            Button("Disable offers", role: .destructive) {
+                                handleOfferTuning(
+                                    offer: offer,
+                                    tuning: JournalOfferEventTuning(newCooldownMinutes: nil, avoidPeakOverwhelm: nil, offersEnabled: false)
+                                )
+                            }
+                            Button("Cooldown 30 minutes") {
+                                handleOfferTuning(
+                                    offer: offer,
+                                    tuning: JournalOfferEventTuning(newCooldownMinutes: 30, avoidPeakOverwhelm: nil, offersEnabled: nil)
+                                )
+                            }
+                            Button("Cooldown 120 minutes") {
+                                handleOfferTuning(
+                                    offer: offer,
+                                    tuning: JournalOfferEventTuning(newCooldownMinutes: 120, avoidPeakOverwhelm: nil, offersEnabled: nil)
+                                )
+                            }
+                            Button("Cancel", role: .cancel) { }
+                        }
+                    }
+
                     // Evidence UI (PR #8) - only show for assistant messages with evidence
                     if message.creatorType == .assistant && hasEvidence {
                         EvidenceView(
@@ -1243,6 +1327,18 @@ private struct MessageBubble: View {
 
                 if message.creatorType != .user { Spacer(minLength: 40) }
             }
+            .sheet(item: $activeDraft) { payload in
+                JournalDraftEditorView(
+                    payload: payload,
+                    onComplete: { context in
+                        handleDraftSaved(context: context, offer: activeDraftOffer, payload: payload)
+                    },
+                    onCancel: {
+                        activeDraft = nil
+                        activeDraftOffer = nil
+                    }
+                )
+            }
         }
     }
     
@@ -1253,6 +1349,21 @@ private struct MessageBubble: View {
     private var hasClaimsBadge: Bool {
         message.claimsCount > 0 || message.claimsTruncated
     }
+
+    private var visibleJournalOffer: JournalOffer? {
+        guard !suppressJournalOffer else { return nil }
+        guard message.creatorType == .assistant else { return nil }
+        guard let offer = message.journalOffer, offer.offerEligible else { return nil }
+        guard JournalStyleSettings.offersEnabled else { return nil }
+        guard !JournalStyleSettings.isCooldownActive() else { return nil }
+        return offer
+    }
+
+    private static let traceTimestampFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
 
     private enum ExportSheet: Identifiable {
         case reminder(reminder: EKReminder)
@@ -1268,9 +1379,317 @@ private struct MessageBubble: View {
         }
     }
 
+    private var journalAlertMessage: String {
+        if case let .alert(message, _) = journalPresentation {
+            return message
+        }
+        return ""
+    }
+
+    private var showJournalAlert: Binding<Bool> {
+        Binding(
+            get: {
+                if case .alert = journalPresentation {
+                    return true
+                }
+                return false
+            },
+            set: { newValue in
+                guard !newValue else { return }
+                journalPresentation = JournalPresentationState.nextStateOnAlertDismiss(journalPresentation)
+            }
+        )
+    }
+
+    private var showJournalShareSheet: Binding<Bool> {
+        Binding(
+            get: {
+                if case .shareSheet = journalPresentation {
+                    return true
+                }
+                return false
+            },
+            set: { newValue in
+                if !newValue {
+                    journalPresentation = .idle
+                }
+            }
+        )
+    }
+
+    private func handleOfferShownIfNeeded(offer: JournalOffer) {
+        guard message.journalOfferShownAt == nil else { return }
+        message.journalOfferShownAt = Date()
+        JournalStyleSettings.markOfferShown()
+        try? modelContext.save()
+
+        let event = makeJournalOfferEvent(
+            type: .journalOfferShown,
+            offer: offer,
+            cooldownActive: false
+        )
+        postTraceEvent(.journalOffer(event))
+    }
+
+    private func updateJournalOfferVisibility(frame: CGRect, offer: JournalOffer) {
+        guard !journalOfferVisible else { return }
+        let viewportHeight = scrollViewportHeight
+        guard viewportHeight > 0 else { return }
+        guard frame.maxY > 0, frame.minY < viewportHeight else { return }
+        journalOfferVisible = true
+        handleOfferShownIfNeeded(offer: offer)
+    }
+
+    private func handleOfferAccepted(offer: JournalOffer, mode: JournalDraftMode) {
+        handleOfferShownIfNeeded(offer: offer)
+        suppressJournalOffer = true
+
+        let action: JournalOfferUserAction = (mode == .assist) ? .edit : .save
+        let accepted = makeJournalOfferEvent(
+            type: .journalOfferAccepted,
+            offer: offer,
+            modeSelected: mode,
+            userAction: action,
+            cooldownActive: JournalStyleSettings.isCooldownActive()
+        )
+        postTraceEvent(.journalOffer(accepted))
+
+        switch mode {
+        case .assist:
+            let requestId = UUID().uuidString
+            let cpbId = JournalStyleSettings.cpbId
+            let cpbRefs = cpbId.map { [JournalDraftCpbRef(cpbId: $0, type: .journalStyle)] }
+            let request = JournalDraftRequest(
+                requestId: requestId,
+                threadId: message.thread.id.uuidString,
+                mode: .assist,
+                evidenceSpan: offer.evidenceSpan,
+                cpbRefs: cpbRefs,
+                preferences: JournalDraftPreferences(
+                    maxLines: JournalStyleSettings.maxLinesDefault,
+                    includeTagsSuggested: true
+                )
+            )
+
+            let startNs = DispatchTime.now().uptimeNanoseconds
+            Task {
+                do {
+                    let draft = try await SolServerClient().createJournalDraft(request: request)
+                    let elapsedMs = Int(Double(DispatchTime.now().uptimeNanoseconds - startNs) / 1_000_000.0)
+                    let refs = JournalOfferEventRefs(
+                        cpbId: cpbId,
+                        draftId: draft.draftId,
+                        entryId: nil,
+                        requestId: requestId
+                    )
+                    let generated = makeJournalOfferEvent(
+                        type: .journalDraftGenerated,
+                        offer: offer,
+                        modeSelected: .assist,
+                        latencyMs: elapsedMs,
+                        refs: refs
+                    )
+                    postTraceEvent(.journalOffer(generated))
+
+                    let payload = JournalDraftEditorPayload(
+                        id: draft.draftId,
+                        mode: draft.mode,
+                        title: draft.title,
+                        body: draft.body,
+                        tagsSuggested: draft.tagsSuggested ?? [],
+                        evidenceSpan: offer.evidenceSpan,
+                        draftId: draft.draftId,
+                        requestId: requestId
+                    )
+                    await MainActor.run {
+                        activeDraftOffer = offer
+                        activeDraft = payload
+                    }
+                } catch {
+                    await MainActor.run {
+                        errorMessage = "Unable to create journal draft."
+                        showErrorAlert = true
+                        suppressJournalOffer = false
+                    }
+                }
+            }
+        case .verbatim:
+            guard let payload = buildVerbatimDraftPayload(for: offer) else { return }
+            activeDraftOffer = offer
+            activeDraft = payload
+        }
+    }
+
+    private func handleOfferDeclined(offer: JournalOffer) {
+        handleOfferShownIfNeeded(offer: offer)
+        suppressJournalOffer = true
+        let declined = makeJournalOfferEvent(
+            type: .journalOfferDeclined,
+            offer: offer,
+            userAction: .notNow,
+            cooldownActive: JournalStyleSettings.isCooldownActive()
+        )
+        postTraceEvent(.journalOffer(declined))
+    }
+
+    private func handleOfferTuning(offer: JournalOffer, tuning: JournalOfferEventTuning) {
+        handleOfferShownIfNeeded(offer: offer)
+        suppressJournalOffer = true
+
+        if let offersEnabled = tuning.offersEnabled {
+            JournalStyleSettings.setOffersEnabled(offersEnabled)
+        }
+        if let newCooldown = tuning.newCooldownMinutes {
+            JournalStyleSettings.setCooldownMinutes(newCooldown)
+        }
+        if let avoid = tuning.avoidPeakOverwhelm {
+            JournalStyleSettings.setAvoidPeakOverwhelm(avoid)
+        }
+
+        let tuned = makeJournalOfferEvent(
+            type: .journalOfferMutedOrTuned,
+            offer: offer,
+            userAction: .disableOrTune,
+            tuning: tuning
+        )
+        postTraceEvent(.journalOffer(tuned))
+    }
+
+    private func handleDraftSaved(
+        context: JournalDraftSaveContext,
+        offer: JournalOffer?,
+        payload: JournalDraftEditorPayload
+    ) {
+        guard let offer else { return }
+
+        let cpbId = JournalStyleSettings.cpbId
+        let refs = JournalOfferEventRefs(
+            cpbId: cpbId,
+            draftId: payload.draftId,
+            entryId: nil,
+            requestId: payload.requestId
+        )
+
+        if context.didEdit {
+            let edited = makeJournalOfferEvent(
+                type: .journalEntryEditedBeforeSave,
+                offer: offer,
+                modeSelected: payload.mode,
+                refs: refs
+            )
+            postTraceEvent(.journalOffer(edited))
+        }
+
+        let saved = makeJournalOfferEvent(
+            type: .journalEntrySaved,
+            offer: offer,
+            modeSelected: payload.mode,
+            refs: refs
+        )
+        postTraceEvent(.journalOffer(saved))
+    }
+
+    private func postTraceEvent(_ event: TraceEvent) {
+        Task {
+            let request = TraceEventsRequest(
+                requestId: UUID().uuidString,
+                localUserUuid: LocalIdentity.localUserUuid(),
+                events: [event]
+            )
+            try? await SolServerClient().postTraceEvents(request: request)
+        }
+    }
+
+    private func makeJournalOfferEvent(
+        type: JournalOfferEventType,
+        offer: JournalOffer,
+        modeSelected: JournalDraftMode? = nil,
+        userAction: JournalOfferUserAction? = nil,
+        cooldownActive: Bool? = nil,
+        latencyMs: Int? = nil,
+        refs: JournalOfferEventRefs? = nil,
+        tuning: JournalOfferEventTuning? = nil
+    ) -> JournalOfferEvent {
+        JournalOfferEvent(
+            eventId: UUID().uuidString,
+            eventType: type,
+            ts: Self.traceTimestampFormatter.string(from: Date()),
+            threadId: message.thread.id.uuidString,
+            momentId: offer.momentId,
+            evidenceSpan: offer.evidenceSpan,
+            phaseAtOffer: offer.phase,
+            modeSelected: modeSelected,
+            userAction: userAction,
+            cooldownActive: cooldownActive,
+            latencyMs: latencyMs,
+            refs: refs,
+            tuning: tuning
+        )
+    }
+
+    private func buildVerbatimDraftPayload(for offer: JournalOffer) -> JournalDraftEditorPayload? {
+        guard let spanMessages = resolveEvidenceSpanMessages(span: offer.evidenceSpan) else {
+            errorMessage = "Unable to locate the journal span."
+            showErrorAlert = true
+            suppressJournalOffer = false
+            return nil
+        }
+
+        let userMessages = spanMessages.filter { $0.creatorType == .user }
+        guard !userMessages.isEmpty else {
+            errorMessage = "No user messages found for this span."
+            showErrorAlert = true
+            suppressJournalOffer = false
+            return nil
+        }
+
+        let title = makeDraftTitle(from: userMessages.first?.text ?? "")
+        let body = userMessages.map { $0.text }.joined(separator: "\n\n")
+        let draftId = "local-\(UUID().uuidString)"
+
+        return JournalDraftEditorPayload(
+            id: draftId,
+            mode: .verbatim,
+            title: title,
+            body: body,
+            tagsSuggested: [],
+            evidenceSpan: offer.evidenceSpan,
+            draftId: nil,
+            requestId: nil
+        )
+    }
+
+    private func resolveEvidenceSpanMessages(span: JournalEvidenceSpan) -> [Message]? {
+        let threadId = message.thread.id
+        let descriptor = FetchDescriptor<Message>(
+            predicate: #Predicate<Message> { $0.thread.id == threadId },
+            sortBy: [SortDescriptor(\Message.createdAt, order: .forward)]
+        )
+        guard let allMessages = try? modelContext.fetch(descriptor) else { return nil }
+
+        let startIndex = allMessages.firstIndex { $0.resolvedServerMessageId == span.startMessageId }
+        let endIndex = allMessages.firstIndex { $0.resolvedServerMessageId == span.endMessageId }
+
+        guard let startIndex, let endIndex else { return nil }
+        let lower = min(startIndex, endIndex)
+        let upper = max(startIndex, endIndex)
+        return Array(allMessages[lower...upper])
+    }
+
+    private func makeDraftTitle(from text: String) -> String {
+        let words = text.split(separator: " ")
+        let prefix = words.prefix(6).joined(separator: " ")
+        let title = words.count > 6 ? "\(prefix)..." : String(prefix)
+        if title.isEmpty {
+            return "Journal Entry"
+        }
+        return String(title.prefix(200))
+    }
+
     private func buildGhostCardModel() -> GhostCardModel? {
         guard let kind = message.ghostKind else { return nil }
         let cta = message.ghostCTAState
+        let canAscend = message.isAscendEligible && JournalDonationService.isJournalAvailable
 
         let onEdit: (() -> Void)?
         if cta.canEdit {
@@ -1293,7 +1712,7 @@ private struct MessageBubble: View {
         }
 
         let onAscend: (() async -> Bool)?
-        if kind == .journalMoment {
+        if canAscend {
             onAscend = { await donateJournalMoment() }
         } else {
             onAscend = nil
@@ -1421,18 +1840,79 @@ private struct MessageBubble: View {
         let location = memoryId.flatMap { lookupMemoryLocation(memoryId: $0) }
 
         let moodLabel = message.ghostMoodAnchor
-        let success = await JournalDonationService.shared.donateMoment(
-            summaryText: summary,
-            location: location,
-            moodAnchor: moodLabel
-        )
+        guard JournalDonationService.isJournalAvailable else {
+            journalPresentation = .alert(message: "Journal isn't available on this device.", showShareSheet: false)
+            return false
+        }
 
-        if success, let memoryId {
+        if JournalDonationService.supportsDirectDonation {
+            let result = await JournalDonationService.shared.donateMoment(
+                summaryText: summary,
+                location: location,
+                moodAnchor: moodLabel
+            )
+
+            switch result {
+            case .success:
+                if let memoryId {
+                    markAscended(memoryId: memoryId)
+                    recordJournalCapture(memoryId: memoryId, location: location, moodAnchor: moodLabel)
+                }
+                return true
+            case .notAuthorized, .failed:
+                let completed = await exportJournalViaShareSheet(
+                    title: "Journal",
+                    body: summary,
+                    showAlert: true,
+                    alertMessage: "Journal export failed. You can share a copy instead."
+                )
+                if completed, let memoryId {
+                    markAscended(memoryId: memoryId)
+                    recordJournalCapture(memoryId: memoryId, location: location, moodAnchor: moodLabel)
+                }
+                return completed
+            case .unavailable:
+                break
+            }
+        }
+
+        let completed = await exportJournalViaShareSheet(title: "Journal", body: summary)
+        if completed, let memoryId {
             markAscended(memoryId: memoryId)
             recordJournalCapture(memoryId: memoryId, location: location, moodAnchor: moodLabel)
         }
+        return completed
+    }
 
-        return success
+    @MainActor
+    private func exportJournalViaShareSheet(
+        title: String,
+        body: String,
+        showAlert: Bool = false,
+        alertMessage: String? = nil
+    ) async -> Bool {
+        await withCheckedContinuation { continuation in
+            let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmedBody = body.trimmingCharacters(in: .whitespacesAndNewlines)
+            let text: String
+            if trimmedTitle.isEmpty {
+                text = trimmedBody
+            } else if trimmedBody.isEmpty {
+                text = trimmedTitle
+            } else {
+                text = "\(trimmedTitle)\n\n\(trimmedBody)"
+            }
+
+            journalShareItems = [text]
+            journalShareCompletion = { completed in
+                continuation.resume(returning: completed)
+            }
+            if showAlert, let alertMessage {
+                journalPresentation = .alert(message: alertMessage, showShareSheet: true)
+            } else {
+                journalPresentation = .shareSheet
+            }
+        }
     }
 
     private func lookupMemoryLocation(memoryId: String) -> CLLocationCoordinate2D? {

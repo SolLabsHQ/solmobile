@@ -121,6 +121,8 @@ struct ChatPollResponse {
     let serverStatus: String?
     let statusCode: Int
     let responseInfo: ResponseInfo?
+    let userMessageId: String?
+    let assistantMessageId: String?
 
     let threadMemento: ThreadMementoDTO?
     
@@ -131,6 +133,34 @@ struct ChatPollResponse {
 
     // OutputEnvelope (PR #23)
     let outputEnvelope: OutputEnvelopeDTO?
+
+    init(
+        pending: Bool,
+        assistant: String?,
+        serverStatus: String?,
+        statusCode: Int,
+        responseInfo: ResponseInfo?,
+        userMessageId: String? = nil,
+        assistantMessageId: String? = nil,
+        threadMemento: ThreadMementoDTO?,
+        evidenceSummary: EvidenceSummaryDTO?,
+        evidence: EvidenceDTO?,
+        evidenceWarnings: [EvidenceWarningDTO]?,
+        outputEnvelope: OutputEnvelopeDTO?
+    ) {
+        self.pending = pending
+        self.assistant = assistant
+        self.serverStatus = serverStatus
+        self.statusCode = statusCode
+        self.responseInfo = responseInfo
+        self.userMessageId = userMessageId
+        self.assistantMessageId = assistantMessageId
+        self.threadMemento = threadMemento
+        self.evidenceSummary = evidenceSummary
+        self.evidence = evidence
+        self.evidenceWarnings = evidenceWarnings
+        self.outputEnvelope = outputEnvelope
+    }
 }
 
 enum TransportError: Error {
@@ -170,6 +200,8 @@ struct ChatResponse {
     let transmissionId: String?
     let pending: Bool
     let responseInfo: ResponseInfo?
+    let userMessageId: String?
+    let assistantMessageId: String?
 
     let threadMemento: ThreadMementoDTO?
     
@@ -180,6 +212,34 @@ struct ChatResponse {
 
     // OutputEnvelope (PR #23)
     let outputEnvelope: OutputEnvelopeDTO?
+
+    init(
+        text: String,
+        statusCode: Int,
+        transmissionId: String?,
+        pending: Bool,
+        responseInfo: ResponseInfo?,
+        userMessageId: String? = nil,
+        assistantMessageId: String? = nil,
+        threadMemento: ThreadMementoDTO?,
+        evidenceSummary: EvidenceSummaryDTO?,
+        evidence: EvidenceDTO?,
+        evidenceWarnings: [EvidenceWarningDTO]?,
+        outputEnvelope: OutputEnvelopeDTO?
+    ) {
+        self.text = text
+        self.statusCode = statusCode
+        self.transmissionId = transmissionId
+        self.pending = pending
+        self.responseInfo = responseInfo
+        self.userMessageId = userMessageId
+        self.assistantMessageId = assistantMessageId
+        self.threadMemento = threadMemento
+        self.evidenceSummary = evidenceSummary
+        self.evidence = evidence
+        self.evidenceWarnings = evidenceWarnings
+        self.outputEnvelope = outputEnvelope
+    }
 }
 
 
@@ -687,10 +747,22 @@ nonisolated final class TransmissionActions {
         return RetryPolicy.classify(statusCode: nil, body: nil, headers: nil, error: error)
     }
 
+    private func applyServerMessageId(_ serverMessageId: String?, to message: Message) {
+        guard let serverMessageId, !serverMessageId.isEmpty else { return }
+        message.serverMessageId = serverMessageId
+    }
+
+    private func updateUserMessageServerId(messageIds: [UUID], serverMessageId: String?) {
+        guard let firstId = messageIds.first else { return }
+        guard let message = try? fetchMessage(id: firstId) else { return }
+        applyServerMessageId(serverMessageId, to: message)
+    }
+
     private func appendAssistantMessageIfPossible(
         threadId: UUID,
         assistantText: String?,
         transmissionId: String?,
+        assistantMessageId: String?,
         evidence: EvidenceDTO?,
         outputEnvelope: OutputEnvelopeDTO?,
         runId: String,
@@ -698,6 +770,7 @@ nonisolated final class TransmissionActions {
         via: String
     ) {
         guard let thread = try? fetchThread(id: threadId) else { return }
+        let previousMessage = thread.messages.last
 
         let text: String
         if let assistantText, !assistantText.isEmpty {
@@ -716,6 +789,7 @@ nonisolated final class TransmissionActions {
             text: text,
             transmissionId: transmissionId
         )
+        applyServerMessageId(assistantMessageId ?? transmissionId, to: assistantMessage)
 
         let evidenceModels: (captures: [Capture], supports: [ClaimSupport], claims: [ClaimMapEntry])
 
@@ -751,6 +825,10 @@ nonisolated final class TransmissionActions {
         thread.lastActiveAt = Date()
 
         modelContext.insert(assistantMessage)
+
+        if let previousMessage {
+            AppleIntelligenceObserver.shared.observeMessage(previousMessage)
+        }
 
         if assistantMessage.isGhostCard {
             upsertMemoryArtifact(from: assistantMessage)
@@ -944,6 +1022,8 @@ nonisolated final class TransmissionActions {
                 applyDraftMemento(runId: runId, freshTx: freshTx, txId: sel.txId, m: m, via: "send")
             }
 
+            updateUserMessageServerId(messageIds: sel.messageIds, serverMessageId: response.userMessageId)
+
             if response.pending || response.statusCode == 202 {
                 freshTx.status = .pending
                 outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(sel.txId), privacy: .public) to=pending reason=pending")
@@ -964,6 +1044,7 @@ nonisolated final class TransmissionActions {
                 threadId: sel.threadId,
                 assistantText: response.text,
                 transmissionId: response.transmissionId,
+                assistantMessageId: response.assistantMessageId,
                 evidence: response.evidence,
                 outputEnvelope: response.outputEnvelope,
                 runId: runId,
@@ -1321,10 +1402,13 @@ nonisolated final class TransmissionActions {
                 return
             }
 
+            updateUserMessageServerId(messageIds: freshTx.packet.messageIds, serverMessageId: poll.userMessageId)
+
             appendAssistantMessageIfPossible(
                 threadId: sel.threadId,
                 assistantText: poll.assistant,
                 transmissionId: serverTxId,
+                assistantMessageId: poll.assistantMessageId,
                 evidence: poll.evidence,
                 outputEnvelope: poll.outputEnvelope,
                 runId: runId,
