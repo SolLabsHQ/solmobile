@@ -38,6 +38,26 @@ nonisolated private func timeWithSeconds(_ d: Date) -> String {
 
 // MARK: - ThreadMemento formatting
 
+private struct JournalOfferSnapshot: Codable, Sendable {
+    let momentId: String
+    let momentType: String
+    let phase: String
+    let confidence: String
+    let evidenceSpan: JournalEvidenceSpan
+    let why: [String]?
+    let offerEligible: Bool
+
+    init(from offer: JournalOffer) {
+        self.momentId = offer.momentId
+        self.momentType = offer.momentType
+        self.phase = offer.phase
+        self.confidence = offer.confidence
+        self.evidenceSpan = offer.evidenceSpan
+        self.why = offer.why
+        self.offerEligible = offer.offerEligible
+    }
+}
+
 /// ThreadMemento is a navigation artifact returned by SolServer.
 /// It is not durable knowledge; the client may choose to Accept / Decline / Revoke.
 nonisolated private enum ThreadMementoFormatter {
@@ -125,6 +145,7 @@ struct ChatPollResponse {
     let assistantMessageId: String?
 
     let threadMemento: ThreadMementoDTO?
+    let journalOffer: JournalOffer?
     
     // Evidence fields (PR #7.1 / PR #8)
     let evidenceSummary: EvidenceSummaryDTO?
@@ -143,6 +164,7 @@ struct ChatPollResponse {
         userMessageId: String? = nil,
         assistantMessageId: String? = nil,
         threadMemento: ThreadMementoDTO?,
+        journalOffer: JournalOffer?,
         evidenceSummary: EvidenceSummaryDTO?,
         evidence: EvidenceDTO?,
         evidenceWarnings: [EvidenceWarningDTO]?,
@@ -156,6 +178,7 @@ struct ChatPollResponse {
         self.userMessageId = userMessageId
         self.assistantMessageId = assistantMessageId
         self.threadMemento = threadMemento
+        self.journalOffer = journalOffer
         self.evidenceSummary = evidenceSummary
         self.evidence = evidence
         self.evidenceWarnings = evidenceWarnings
@@ -204,6 +227,7 @@ struct ChatResponse {
     let assistantMessageId: String?
 
     let threadMemento: ThreadMementoDTO?
+    let journalOffer: JournalOffer?
     
     // Evidence fields (PR #7.1 / PR #8)
     let evidenceSummary: EvidenceSummaryDTO?
@@ -222,6 +246,7 @@ struct ChatResponse {
         userMessageId: String? = nil,
         assistantMessageId: String? = nil,
         threadMemento: ThreadMementoDTO?,
+        journalOffer: JournalOffer?,
         evidenceSummary: EvidenceSummaryDTO?,
         evidence: EvidenceDTO?,
         evidenceWarnings: [EvidenceWarningDTO]?,
@@ -235,6 +260,7 @@ struct ChatResponse {
         self.userMessageId = userMessageId
         self.assistantMessageId = assistantMessageId
         self.threadMemento = threadMemento
+        self.journalOffer = journalOffer
         self.evidenceSummary = evidenceSummary
         self.evidence = evidence
         self.evidenceWarnings = evidenceWarnings
@@ -754,8 +780,11 @@ nonisolated final class TransmissionActions {
 
     private func updateUserMessageServerId(messageIds: [UUID], serverMessageId: String?) {
         guard let firstId = messageIds.first else { return }
-        guard let message = try? fetchMessage(id: firstId) else { return }
-        applyServerMessageId(serverMessageId, to: message)
+        Task { @MainActor in
+            guard let message = try? fetchMessage(id: firstId) else { return }
+            applyServerMessageId(serverMessageId, to: message)
+            AppleIntelligenceObserver.shared.observeMessage(message)
+        }
     }
 
     private func appendAssistantMessageIfPossible(
@@ -764,6 +793,7 @@ nonisolated final class TransmissionActions {
         transmissionId: String?,
         assistantMessageId: String?,
         evidence: EvidenceDTO?,
+        journalOffer: JournalOffer?,
         outputEnvelope: OutputEnvelopeDTO?,
         runId: String,
         txId: UUID,
@@ -826,8 +856,21 @@ nonisolated final class TransmissionActions {
 
         modelContext.insert(assistantMessage)
 
+        if assistantMessage.journalOfferJson == nil, let offer = journalOffer {
+            let assistantMessageId = assistantMessage.id
+            Task { @MainActor in
+                guard let message = try? fetchMessage(id: assistantMessageId) else { return }
+                let snapshot = JournalOfferSnapshot(from: offer)
+                message.journalOfferJson = try? JSONEncoder().encode(snapshot)
+            }
+        }
+
         if let previousMessage {
-            AppleIntelligenceObserver.shared.observeMessage(previousMessage)
+            let previousMessageId = previousMessage.id
+            Task { @MainActor in
+                guard let message = try? fetchMessage(id: previousMessageId) else { return }
+                AppleIntelligenceObserver.shared.observeMessage(message)
+            }
         }
 
         if assistantMessage.isGhostCard {
@@ -1046,6 +1089,7 @@ nonisolated final class TransmissionActions {
                 transmissionId: response.transmissionId,
                 assistantMessageId: response.assistantMessageId,
                 evidence: response.evidence,
+                journalOffer: response.journalOffer,
                 outputEnvelope: response.outputEnvelope,
                 runId: runId,
                 txId: sel.txId,
@@ -1410,6 +1454,7 @@ nonisolated final class TransmissionActions {
                 transmissionId: serverTxId,
                 assistantMessageId: poll.assistantMessageId,
                 evidence: poll.evidence,
+                journalOffer: poll.journalOffer,
                 outputEnvelope: poll.outputEnvelope,
                 runId: runId,
                 txId: sel.txId,
