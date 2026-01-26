@@ -18,6 +18,8 @@ struct SettingsView: View {
     @AppStorage(JournalStyleSettings.toneNotesKey) private var journalToneNotes: String = "Warm, grounded, concise."
     @AppStorage(JournalStyleSettings.cpbIdKey) private var journalCpbId: String = ""
     @AppStorage(AppleIntelligenceSettings.enabledKey) private var appleIntelligenceEnabled: Bool = false
+    @AppStorage(ThreadContextSettings.modeKey) private var threadContextMode: String = ThreadContextSettings.Mode.auto.rawValue
+    @AppStorage(ThreadContextSettings.showKey) private var showThreadContext: Bool = false
 
     // Light tracing for debugging (non-sensitive)
     private let log = Logger(subsystem: "com.sollabshq.solmobile", category: "Settings")
@@ -491,6 +493,20 @@ struct SettingsView: View {
                 Section("Apple Intelligence") {
                     Toggle("Device hints (trace only)", isOn: $appleIntelligenceEnabled)
                     Text("Runs in background and sends mechanism-only hints.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Thread context") {
+                    Toggle("Show Thread context (debug)", isOn: $showThreadContext)
+
+                    Picker("Mode", selection: $threadContextMode) {
+                        Text("Auto").tag(ThreadContextSettings.Mode.auto.rawValue)
+                        Text("Off").tag(ThreadContextSettings.Mode.off.rawValue)
+                    }
+                    .pickerStyle(.segmented)
+
+                    Text("Auto shows server-provided thread context snapshots.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

@@ -52,6 +52,7 @@ struct Response: Codable {
 
     // Present when SolServer auto-saves a ThreadMemento (Option 1).
     let threadMemento: ThreadMementoDTO?
+    let journalOffer: JournalOfferRecord?
     
     // Evidence fields (PR #7.1 / PR #8)
     let evidenceSummary: EvidenceSummaryDTO  // Always present in successful responses
@@ -71,6 +72,7 @@ struct Response: Codable {
         case assistantMessageId
         case messageId
         case threadMemento
+        case journalOffer
         case evidenceSummary
         case evidence
         case evidenceWarnings
@@ -80,6 +82,7 @@ struct Response: Codable {
         case userMessageId = "user_message_id"
         case messageId = "message_id"
         case assistantMessageId = "assistant_message_id"
+        case journalOffer = "journal_offer"
     }
 
     init(from decoder: Decoder) throws {
@@ -95,6 +98,8 @@ struct Response: Codable {
         pending = try container.decodeIfPresent(Bool.self, forKey: .pending)
         status = try container.decodeIfPresent(String.self, forKey: .status)
         threadMemento = try container.decodeIfPresent(ThreadMementoDTO.self, forKey: .threadMemento)
+        journalOffer = try container.decodeIfPresent(JournalOfferRecord.self, forKey: .journalOffer)
+            ?? legacy.decodeIfPresent(JournalOfferRecord.self, forKey: .journalOffer)
         evidenceSummary = try container.decode(EvidenceSummaryDTO.self, forKey: .evidenceSummary)
         evidence = try container.decodeIfPresent(EvidenceDTO.self, forKey: .evidence)
         evidenceWarnings = try container.decodeIfPresent([EvidenceWarningDTO].self, forKey: .evidenceWarnings)
@@ -123,6 +128,7 @@ struct Response: Codable {
         try container.encode(evidenceSummary, forKey: .evidenceSummary)
         try container.encodeIfPresent(evidence, forKey: .evidence)
         try container.encodeIfPresent(evidenceWarnings, forKey: .evidenceWarnings)
+        try container.encodeIfPresent(journalOffer, forKey: .journalOffer)
     }
 }
 
@@ -142,6 +148,7 @@ struct TransmissionResponse: Codable {
 
     // Present once the transmission is completed and the server has a memento snapshot.
     let threadMemento: ThreadMementoDTO?
+    let journalOffer: JournalOfferRecord?
 
     enum CodingKeys: String, CodingKey {
         case ok
@@ -153,12 +160,14 @@ struct TransmissionResponse: Codable {
         case assistantMessageId
         case messageId
         case threadMemento
+        case journalOffer
     }
 
     enum LegacyCodingKeys: String, CodingKey {
         case userMessageId = "user_message_id"
         case messageId = "message_id"
         case assistantMessageId = "assistant_message_id"
+        case journalOffer = "journal_offer"
     }
 
     init(from decoder: Decoder) throws {
@@ -171,6 +180,8 @@ struct TransmissionResponse: Codable {
         assistant = try container.decodeIfPresent(String.self, forKey: .assistant)
         outputEnvelope = try container.decodeIfPresent(OutputEnvelopeDTO.self, forKey: .outputEnvelope)
         threadMemento = try container.decodeIfPresent(ThreadMementoDTO.self, forKey: .threadMemento)
+        journalOffer = try container.decodeIfPresent(JournalOfferRecord.self, forKey: .journalOffer)
+            ?? legacy.decodeIfPresent(JournalOfferRecord.self, forKey: .journalOffer)
 
         userMessageId = try container.decodeIfPresent(String.self, forKey: .userMessageId)
             ?? container.decodeIfPresent(String.self, forKey: .messageId)
@@ -190,6 +201,7 @@ struct TransmissionResponse: Codable {
         try container.encodeIfPresent(userMessageId, forKey: .userMessageId)
         try container.encodeIfPresent(assistantMessageId, forKey: .assistantMessageId)
         try container.encodeIfPresent(threadMemento, forKey: .threadMemento)
+        try container.encodeIfPresent(journalOffer, forKey: .journalOffer)
     }
 }
 
@@ -771,6 +783,7 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
                 userMessageId: decoded?.userMessageId,
                 assistantMessageId: decoded?.assistantMessageId,
                 threadMemento: decoded?.threadMemento,
+                journalOffer: decoded?.journalOffer?.asJournalOffer(),
                 evidenceSummary: decoded?.evidenceSummary,
                 evidence: decoded?.evidence,
                 evidenceWarnings: decoded?.evidenceWarnings,
@@ -792,6 +805,7 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
             userMessageId: decoded.userMessageId,
             assistantMessageId: decoded.assistantMessageId,
             threadMemento: decoded.threadMemento,
+            journalOffer: decoded.journalOffer?.asJournalOffer(),
             evidenceSummary: decoded.evidenceSummary,
             evidence: decoded.evidence,
             evidenceWarnings: decoded.evidenceWarnings,
@@ -829,6 +843,7 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
             userMessageId: nil,
             assistantMessageId: nil,
             threadMemento: nil,
+            journalOffer: nil,
             evidenceSummary: nil,
             evidence: nil,
             evidenceWarnings: nil,
@@ -859,6 +874,7 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
             userMessageId: decoded.userMessageId,
             assistantMessageId: decoded.assistantMessageId,
             threadMemento: decoded.threadMemento,
+            journalOffer: decoded.journalOffer?.asJournalOffer(),
             evidenceSummary: nil,  // Poll endpoint doesn't return evidence for MVP
             evidence: nil,
             evidenceWarnings: nil,

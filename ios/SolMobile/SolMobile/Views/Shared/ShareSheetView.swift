@@ -7,15 +7,15 @@ import SwiftUI
 
 struct ShareSheetView: UIViewControllerRepresentable {
     let activityItems: [Any]
-    let completion: (Bool) -> Void
+    let completion: (Bool, String?) -> Void
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
         let controller = UIActivityViewController(
             activityItems: activityItems,
             applicationActivities: nil
         )
-        controller.completionWithItemsHandler = { _, completed, _, _ in
-            completion(completed)
+        controller.completionWithItemsHandler = { activityType, completed, _, _ in
+            completion(completed, activityType?.rawValue)
         }
         return controller
     }

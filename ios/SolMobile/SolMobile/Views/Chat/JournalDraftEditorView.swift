@@ -99,7 +99,7 @@ struct JournalDraftEditorView: View {
                 }
             }
             .sheet(isPresented: $showShareSheet) {
-                ShareSheetView(activityItems: shareItems) { completed in
+                ShareSheetView(activityItems: shareItems) { completed, _ in
                     showShareSheet = false
                     guard completed else { return }
                     completeExport()
