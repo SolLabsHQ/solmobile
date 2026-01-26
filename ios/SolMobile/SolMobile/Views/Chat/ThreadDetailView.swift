@@ -16,6 +16,8 @@ struct ThreadDetailView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.outboxService) private var outboxService
     @Environment(\.unreadTracker) private var unreadTracker
+    @AppStorage(ThreadContextSettings.modeKey) private var threadContextMode: String = ThreadContextSettings.Mode.auto.rawValue
+    @AppStorage(ThreadContextSettings.showKey) private var showThreadContext: Bool = false
     @ObservedObject private var budgetStore = BudgetStore.shared
     @Bindable var thread: ConversationThread
     @Query private var messages: [Message]
@@ -50,7 +52,7 @@ struct ThreadDetailView: View {
     @State private var showRecoveryPill: Bool = false
     @State private var recoveryPillTask: Task<Void, Never>? = nil
 
-    // ThreadMemento (navigation artifact): model-proposed snapshot returned by SolServer.
+    // ThreadMemento (navigation artifact): server-proposed snapshot (draft or latest thread context).
     // We store acceptance state locally (UserDefaults) so it survives view reloads.
     @State private var acceptedMemento: MementoViewModel? = nil
     @State private var mementoRefreshToken: Int = 0
@@ -58,6 +60,7 @@ struct ThreadDetailView: View {
     // Transient toast for lightweight feedback (Accept/Decline/Undo).
     @State private var toastMessage: String? = nil
     @State private var toastToken: Int = 0
+    @State private var threadContextDismissed: Bool = false
 
     // Composer draft persistence (ADR-021).
     @State private var composerText: String = ""
@@ -192,11 +195,17 @@ struct ThreadDetailView: View {
                     .padding(.top, 8)
             }
 
-            // Pending ThreadMemento draft from latest server response.
+            // Thread context or pending ThreadMemento draft from latest server response.
             if let pending = pendingMementoCandidate {
-                mementoPendingCard(pending)
-                    .padding(.horizontal, 10)
-                    .padding(.top, 8)
+                Group {
+                    if pending.kind == .latest {
+                        mementoContextCard(pending)
+                    } else {
+                        mementoPendingCard(pending)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.top, 8)
             }
 
             // Mini toast: short-lived feedback for memento actions.
@@ -474,6 +483,14 @@ struct ThreadDetailView: View {
                 .accessibilityIdentifier("save_to_memory_button")
             }
         }
+        .onChange(of: showThreadContext) { _, newValue in
+            if newValue {
+                threadContextDismissed = false
+            }
+        }
+        .onChange(of: thread.id) { _, _ in
+            threadContextDismissed = false
+        }
     }
 
     private func send(_ text: String) {
@@ -630,10 +647,34 @@ struct ThreadDetailView: View {
 
     // MARK: - ThreadMemento UI + state
 
+    private static let mementoLatestPrefix = "memento_latest_"
+
+    private enum MementoKind: Equatable {
+        case latest
+        case draft
+    }
+
     private struct MementoViewModel: Equatable {
         let id: String
         let summary: String
         let createdAtISO: String?
+        let kind: MementoKind
+    }
+
+    private var resolvedThreadContextMode: ThreadContextSettings.Mode {
+        ThreadContextSettings.normalized(threadContextMode)
+    }
+
+    private var isThreadContextEnabled: Bool {
+        resolvedThreadContextMode == .auto
+    }
+
+    private var shouldShowThreadContext: Bool {
+        isThreadContextEnabled && showThreadContext && !threadContextDismissed
+    }
+
+    private func isThreadContextMementoId(_ id: String) -> Bool {
+        id.hasPrefix(Self.mementoLatestPrefix)
     }
 
     private var mementoDefaultsKeyCurrent: String {
@@ -712,6 +753,33 @@ struct ThreadDetailView: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
+    private func mementoContextCard(_ m: MementoViewModel) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: "sparkles")
+                Text("Thread context (debug)")
+                    .font(.footnote)
+                Spacer()
+            }
+
+            Text(m.summary)
+                .font(.footnote)
+                .textSelection(.enabled)
+        }
+        .padding(10)
+        .background(.thinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .gesture(
+            DragGesture()
+                .onEnded { value in
+                    guard value.translation.height < -60 else { return }
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        threadContextDismissed = true
+                    }
+                }
+        )
+    }
+
     private func loadAcceptedMementoFromDefaults() {
         guard let raw = UserDefaults.standard.dictionary(forKey: mementoDefaultsKeyCurrent) else {
             acceptedMemento = nil
@@ -722,8 +790,8 @@ struct ThreadDetailView: View {
         let summary = raw["summary"] as? String ?? ""
         let createdAtISO = raw["createdAtISO"] as? String
 
-        if !id.isEmpty, !summary.isEmpty {
-            acceptedMemento = MementoViewModel(id: id, summary: summary, createdAtISO: createdAtISO)
+        if !id.isEmpty, !summary.isEmpty, !isThreadContextMementoId(id) {
+            acceptedMemento = MementoViewModel(id: id, summary: summary, createdAtISO: createdAtISO, kind: .draft)
         } else {
             acceptedMemento = nil
         }
@@ -743,67 +811,75 @@ struct ThreadDetailView: View {
         }
     }
 
-private func acceptMemento(_ m: MementoViewModel) {
-    // Move current -> prev for Undo.
-    if let current = UserDefaults.standard.dictionary(forKey: mementoDefaultsKeyCurrent) {
-        UserDefaults.standard.set(current, forKey: mementoDefaultsKeyPrev)
-    }
-
-    // Optimistic local accept so the UI updates immediately.
-    UserDefaults.standard.set(
-        ["id": m.id, "summary": m.summary, "createdAtISO": m.createdAtISO as Any],
-        forKey: mementoDefaultsKeyCurrent
-    )
-
-    // Mark this draft id as dismissed so we don’t re-show it.
-    UserDefaults.standard.set(m.id, forKey: mementoDefaultsKeyDismissed)
-
-    acceptedMemento = m
-
-    // Submit to SolServer (throws on transport issues). We still keep the optimistic UI.
-    let transport = SolServerClient()
-    Task {
-        let actions = TransmissionActions(modelContext: modelContext, transport: transport)
-
-        do {
-            let result = try await actions.decideThreadMemento(
-                threadId: thread.id,
-                mementoId: m.id,
-                decision: .accept
-            )
-
-            // Server may return a different id for the accepted artifact.
-            if let applied = result.memento, result.applied {
-                let patched = MementoViewModel(id: applied.id, summary: m.summary, createdAtISO: applied.createdAt)
-
-                UserDefaults.standard.set(
-                    ["id": patched.id, "summary": patched.summary, "createdAtISO": patched.createdAtISO as Any],
-                    forKey: mementoDefaultsKeyCurrent
-                )
-
-                await MainActor.run {
-                    acceptedMemento = patched
-                    showToast("Accepted")
-                }
-
-                viewLog.info("[memento] accept applied serverId=\(applied.id, privacy: .public)")
-            } else if result.reason == "already_accepted" {
-                await MainActor.run { showToast("Already accepted") }
-                viewLog.info("[memento] accept already_accepted")
-            } else {
-                await MainActor.run { showToast("Accept not applied") }
-                viewLog.info("[memento] accept not_applied reason=\(result.reason ?? "-", privacy: .public)")
-            }
-        } catch {
-            await MainActor.run { showToast("Accept failed") }
-            viewLog.error("[memento] accept failed err=\(String(describing: error), privacy: .public)")
+    private func acceptMemento(_ m: MementoViewModel) {
+        guard !isThreadContextMementoId(m.id) else {
+            viewLog.info("[memento] accept blocked for thread context id=\(m.id, privacy: .public)")
+            return
+        }
+        // Move current -> prev for Undo.
+        if let current = UserDefaults.standard.dictionary(forKey: mementoDefaultsKeyCurrent) {
+            UserDefaults.standard.set(current, forKey: mementoDefaultsKeyPrev)
         }
 
-        await MainActor.run { mementoRefreshToken &+= 1 }
+        // Optimistic local accept so the UI updates immediately.
+        UserDefaults.standard.set(
+            ["id": m.id, "summary": m.summary, "createdAtISO": m.createdAtISO as Any],
+            forKey: mementoDefaultsKeyCurrent
+        )
+
+        // Mark this draft id as dismissed so we don’t re-show it.
+        UserDefaults.standard.set(m.id, forKey: mementoDefaultsKeyDismissed)
+
+        acceptedMemento = m
+
+        // Submit to SolServer (throws on transport issues). We still keep the optimistic UI.
+        let transport = SolServerClient()
+        Task {
+            let actions = TransmissionActions(modelContext: modelContext, transport: transport)
+
+            do {
+                let result = try await actions.decideThreadMemento(
+                    threadId: thread.id,
+                    mementoId: m.id,
+                    decision: .accept
+                )
+
+                // Server may return a different id for the accepted artifact.
+                if let applied = result.memento, result.applied {
+                    let patched = MementoViewModel(id: applied.id, summary: m.summary, createdAtISO: applied.createdAt, kind: .draft)
+
+                    UserDefaults.standard.set(
+                        ["id": patched.id, "summary": patched.summary, "createdAtISO": patched.createdAtISO as Any],
+                        forKey: mementoDefaultsKeyCurrent
+                    )
+
+                    await MainActor.run {
+                        acceptedMemento = patched
+                        showToast("Accepted")
+                    }
+
+                    viewLog.info("[memento] accept applied serverId=\(applied.id, privacy: .public)")
+                } else if result.reason == "already_accepted" {
+                    await MainActor.run { showToast("Already accepted") }
+                    viewLog.info("[memento] accept already_accepted")
+                } else {
+                    await MainActor.run { showToast("Accept not applied") }
+                    viewLog.info("[memento] accept not_applied reason=\(result.reason ?? "-", privacy: .public)")
+                }
+            } catch {
+                await MainActor.run { showToast("Accept failed") }
+                viewLog.error("[memento] accept failed err=\(String(describing: error), privacy: .public)")
+            }
+
+            await MainActor.run { mementoRefreshToken &+= 1 }
+        }
     }
-}
 
     private func declineMemento(_ m: MementoViewModel) {
+        guard !isThreadContextMementoId(m.id) else {
+            viewLog.info("[memento] decline blocked for thread context id=\(m.id, privacy: .public)")
+            return
+        }
         // Decline only dismisses this draft id. It does not change the accepted memento.
         UserDefaults.standard.set(m.id, forKey: mementoDefaultsKeyDismissed)
 
@@ -843,6 +919,10 @@ private func acceptMemento(_ m: MementoViewModel) {
         if let current = UserDefaults.standard.dictionary(forKey: mementoDefaultsKeyCurrent) {
 
             let id = current["id"] as? String ?? ""
+            guard !isThreadContextMementoId(id) else {
+                viewLog.info("[memento] undo blocked for thread context id=\(id, privacy: .public)")
+                return
+            }
 
             // Submit to SolServer and clear the local draft fields so the banner disappears immediately.
             let transport = SolServerClient()
@@ -878,8 +958,8 @@ private func acceptMemento(_ m: MementoViewModel) {
         _ = mementoRefreshToken
 
         // v0: best effort.
-        // Look at the latest Transmission for this thread and read the server-proposed ThreadMemento draft
-        // that `TransmissionActions` persisted from the SolServer response.
+        // Look at the latest Transmission for this thread and read the server-proposed ThreadMemento
+        // that `TransmissionActions` persisted from the SolServer response (draft or latest context).
         guard let latest = transmissions.first else {
             return nil
         }
@@ -893,11 +973,17 @@ private func acceptMemento(_ m: MementoViewModel) {
             return nil
         }
 
+        let kind: MementoKind = isThreadContextMementoId(id) ? .latest : .draft
         let extracted = MementoViewModel(
             id: id,
             summary: summary,
-            createdAtISO: latest.serverThreadMementoCreatedAtISO
+            createdAtISO: latest.serverThreadMementoCreatedAtISO,
+            kind: kind
         )
+
+        if extracted.kind == .latest {
+            return shouldShowThreadContext ? extracted : nil
+        }
 
         // Do not show if the user already accepted/declined this id.
         let dismissedId = UserDefaults.standard.string(forKey: mementoDefaultsKeyDismissed)
@@ -1165,10 +1251,11 @@ private struct MessageBubble: View {
     @State private var suppressJournalOffer = false
     @State private var journalPresentation: JournalPresentationState = .idle
     @State private var journalShareItems: [Any] = []
-    @State private var journalShareCompletion: ((Bool) -> Void)?
+    @State private var journalShareCompletion: ((Bool, String?) -> Void)?
     @State private var journalOfferVisible = false
 
     private let eventStore = EKEventStore()
+    private let log = Logger(subsystem: "com.sollabshq.solmobile", category: "MessageBubble")
 
     init(message: Message, scrollViewportHeight: CGFloat, handleAscendTrigger: Binding<Bool> = .constant(false)) {
         self.message = message
@@ -1211,11 +1298,11 @@ private struct MessageBubble: View {
                     }
                 }
                 .sheet(isPresented: showJournalShareSheet) {
-                    ShareSheetView(activityItems: journalShareItems) { completed in
+                    ShareSheetView(activityItems: journalShareItems) { completed, activityType in
                         journalPresentation = .idle
                         let completion = journalShareCompletion
                         journalShareCompletion = nil
-                        completion?(completed)
+                        completion?(completed, activityType)
                     }
                 }
                 .alert("Journal Export", isPresented: showJournalAlert) {
@@ -1364,6 +1451,11 @@ private struct MessageBubble: View {
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter
     }()
+
+    private struct ShareOutcome {
+        let completed: Bool
+        let destination: String?
+    }
 
     private enum ExportSheet: Identifiable {
         case reminder(reminder: EKReminder)
@@ -1514,9 +1606,9 @@ private struct MessageBubble: View {
                 }
             }
         case .verbatim:
-            guard let payload = buildVerbatimDraftPayload(for: offer) else { return }
-            activeDraftOffer = offer
-            activeDraft = payload
+            Task {
+                await handleVerbatimShare(offer: offer)
+            }
         }
     }
 
@@ -1591,12 +1683,38 @@ private struct MessageBubble: View {
 
     private func postTraceEvent(_ event: TraceEvent) {
         Task {
+            let requestId = UUID().uuidString
+            let eventId = traceEventId(from: event)
+            let eventType = traceEventType(from: event)
             let request = TraceEventsRequest(
-                requestId: UUID().uuidString,
+                requestId: requestId,
                 localUserUuid: LocalIdentity.localUserUuid(),
                 events: [event]
             )
-            try? await SolServerClient().postTraceEvents(request: request)
+            do {
+                try await SolServerClient().postTraceEvents(request: request)
+                log.debug("trace.post.succeeded requestId=\(requestId, privacy: .public) eventId=\(eventId ?? "nil", privacy: .public) eventType=\(eventType ?? "unknown", privacy: .public)")
+            } catch {
+                log.debug("trace.post.failed requestId=\(requestId, privacy: .public) eventId=\(eventId ?? "nil", privacy: .public) eventType=\(eventType ?? "unknown", privacy: .public) error=\(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
+    private func traceEventId(from event: TraceEvent) -> String? {
+        switch event {
+        case .journalOffer(let offerEvent):
+            return offerEvent.eventId
+        case .deviceMuseObservation(let observation):
+            return observation.observationId
+        }
+    }
+
+    private func traceEventType(from event: TraceEvent) -> String? {
+        switch event {
+        case .journalOffer(let offerEvent):
+            return offerEvent.eventType.rawValue
+        case .deviceMuseObservation:
+            return "device_muse_observation"
         }
     }
 
@@ -1625,6 +1743,25 @@ private struct MessageBubble: View {
             refs: refs,
             tuning: tuning
         )
+    }
+
+    @MainActor
+    private func handleVerbatimShare(offer: JournalOffer) async {
+        guard let payload = buildVerbatimDraftPayload(for: offer) else { return }
+        let outcome = await exportJournalViaShareSheet(title: payload.title, body: payload.body)
+        let event = makeJournalOfferEvent(
+            type: .journalEntrySaved,
+            offer: offer,
+            modeSelected: .verbatim,
+            userAction: .save
+        )
+        if outcome.completed {
+            postTraceEvent(.journalOffer(event))
+        }
+
+        if !outcome.completed {
+            suppressJournalOffer = false
+        }
     }
 
     private func buildVerbatimDraftPayload(for offer: JournalOffer) -> JournalDraftEditorPayload? {
@@ -1860,28 +1997,28 @@ private struct MessageBubble: View {
                 }
                 return true
             case .notAuthorized, .failed:
-                let completed = await exportJournalViaShareSheet(
+                let outcome = await exportJournalViaShareSheet(
                     title: "Journal",
                     body: summary,
                     showAlert: true,
                     alertMessage: "Journal export failed. You can share a copy instead."
                 )
-                if completed, let memoryId {
+                if outcome.completed, let memoryId {
                     markAscended(memoryId: memoryId)
                     recordJournalCapture(memoryId: memoryId, location: location, moodAnchor: moodLabel)
                 }
-                return completed
+                return outcome.completed
             case .unavailable:
                 break
             }
         }
 
-        let completed = await exportJournalViaShareSheet(title: "Journal", body: summary)
-        if completed, let memoryId {
+        let outcome = await exportJournalViaShareSheet(title: "Journal", body: summary)
+        if outcome.completed, let memoryId {
             markAscended(memoryId: memoryId)
             recordJournalCapture(memoryId: memoryId, location: location, moodAnchor: moodLabel)
         }
-        return completed
+        return outcome.completed
     }
 
     @MainActor
@@ -1890,7 +2027,7 @@ private struct MessageBubble: View {
         body: String,
         showAlert: Bool = false,
         alertMessage: String? = nil
-    ) async -> Bool {
+    ) async -> ShareOutcome {
         await withCheckedContinuation { continuation in
             let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
             let trimmedBody = body.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1904,8 +2041,8 @@ private struct MessageBubble: View {
             }
 
             journalShareItems = [text]
-            journalShareCompletion = { completed in
-                continuation.resume(returning: completed)
+            journalShareCompletion = { completed, destination in
+                continuation.resume(returning: ShareOutcome(completed: completed, destination: destination))
             }
             if showAlert, let alertMessage {
                 journalPresentation = .alert(message: alertMessage, showShareSheet: true)
