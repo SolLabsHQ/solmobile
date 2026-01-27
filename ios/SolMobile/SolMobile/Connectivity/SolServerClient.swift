@@ -469,6 +469,8 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
             return
         }
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        // SolServer staging accepts x-sol-api-key; send both for compatibility.
+        req.setValue(token, forHTTPHeaderField: "x-sol-api-key")
     }
 
     private func applyUserIdHeader(_ req: inout URLRequest) {

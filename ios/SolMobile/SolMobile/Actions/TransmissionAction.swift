@@ -1348,6 +1348,7 @@ nonisolated final class TransmissionActions {
             )
 
             outboxLog.error("processQueue run=\(runId, privacy: .public) event=terminal_max_attempts tx=\(short(txId), privacy: .public) attempts=\(sendAttemptCount, privacy: .public)")
+            try? modelContext.save()
             return true
         }
 
