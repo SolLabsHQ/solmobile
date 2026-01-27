@@ -38,7 +38,7 @@ nonisolated private func timeWithSeconds(_ d: Date) -> String {
 
 // MARK: - ThreadMemento formatting
 
-private struct JournalOfferSnapshot: Codable, Sendable {
+nonisolated private struct JournalOfferSnapshot: Codable, Sendable {
     let momentId: String
     let momentType: String
     let phase: String
@@ -500,6 +500,7 @@ nonisolated final class TransmissionActions {
             return
         }
 
+        var appendedMessages: [Message] = []
         for sel in pending {
             guard let tx = try? fetchTransmission(id: sel.txId) else { continue }
             let now = Date()
@@ -520,9 +521,15 @@ nonisolated final class TransmissionActions {
                 continue
             }
 
-            await pollOnce(runId: runId, sel: sel, attempts: attempts)
+            if let appended = await pollOnce(runId: runId, sel: sel, attempts: attempts) {
+                appendedMessages.append(appended)
+            }
         }
 
+        DebugModelValidators.assertMessagesHaveThread(
+            appendedMessages,
+            context: "TransmissionActions.pollPending.beforeSave"
+        )
         try? modelContext.save()
     }
 
@@ -778,15 +785,21 @@ nonisolated final class TransmissionActions {
         message.serverMessageId = serverMessageId
     }
 
-    private func updateUserMessageServerId(messageIds: [UUID], serverMessageId: String?) {
+    private func updateUserMessageServerId(
+        messageIds: [UUID],
+        serverMessageId: String?,
+        fallbackServerMessageId: String?
+    ) {
         guard let firstId = messageIds.first else { return }
+        let resolvedServerMessageId = serverMessageId ?? fallbackServerMessageId
         Task { @MainActor in
             guard let message = try? fetchMessage(id: firstId) else { return }
-            applyServerMessageId(serverMessageId, to: message)
+            applyServerMessageId(resolvedServerMessageId, to: message)
             AppleIntelligenceObserver.shared.observeMessage(message)
         }
     }
 
+    @discardableResult
     private func appendAssistantMessageIfPossible(
         threadId: UUID,
         assistantText: String?,
@@ -798,8 +811,8 @@ nonisolated final class TransmissionActions {
         runId: String,
         txId: UUID,
         via: String
-    ) {
-        guard let thread = try? fetchThread(id: threadId) else { return }
+    ) -> Message? {
+        guard let thread = try? fetchThread(id: threadId) else { return nil }
         let previousMessage = thread.messages.last
 
         let text: String
@@ -819,17 +832,20 @@ nonisolated final class TransmissionActions {
             text: text,
             transmissionId: transmissionId
         )
+        DebugModelValidators.assertMessageHasThread(
+            assistantMessage,
+            context: "TransmissionActions.appendAssistantMessageIfPossible.afterInit"
+        )
         applyServerMessageId(assistantMessageId ?? transmissionId, to: assistantMessage)
 
         let evidenceModels: (captures: [Capture], supports: [ClaimSupport], claims: [ClaimMapEntry])
-
         do {
             evidenceModels = try assistantMessage.buildEvidenceModels(from: evidence)
         } catch {
             outboxLog.error(
                 "processQueue run=\(runId, privacy: .public) event=evidence_mapping_failed tx=\(short(txId), privacy: .public) err=\(String(describing: error), privacy: .public)"
             )
-            return
+            return nil
         }
 
         assistantMessage.hasEvidence = !evidenceModels.captures.isEmpty
@@ -857,12 +873,21 @@ nonisolated final class TransmissionActions {
         modelContext.insert(assistantMessage)
 
         if assistantMessage.journalOfferJson == nil, let offer = journalOffer {
-            let assistantMessageId = assistantMessage.id
-            Task { @MainActor in
-                guard let message = try? fetchMessage(id: assistantMessageId) else { return }
-                let snapshot = JournalOfferSnapshot(from: offer)
-                message.journalOfferJson = try? JSONEncoder().encode(snapshot)
+            let snapshot = JournalOfferSnapshot(from: offer)
+            assistantMessage.journalOfferJson = try? JSONEncoder().encode(snapshot)
+            if assistantMessage.journalOfferJson == nil {
+                outboxLog.error(
+                    "processQueue run=\(runId, privacy: .public) event=journal_offer_encode_failed tx=\(short(txId), privacy: .public)"
+                )
+            } else {
+                outboxLog.info(
+                    "processQueue run=\(runId, privacy: .public) event=journal_offer_attached tx=\(short(txId), privacy: .public) eligible=\(offer.offerEligible, privacy: .public) moment=\(offer.momentId, privacy: .public)"
+                )
             }
+        } else if assistantMessage.journalOfferJson == nil {
+            outboxLog.debug(
+                "processQueue run=\(runId, privacy: .public) event=journal_offer_missing tx=\(short(txId), privacy: .public)"
+            )
         }
 
         if let previousMessage {
@@ -901,6 +926,7 @@ nonisolated final class TransmissionActions {
         DraftStore(modelContext: modelContext).deleteDraft(threadId: threadId)
 
         outboxLog.info("processQueue run=\(runId, privacy: .public) event=assistant_appended tx=\(short(txId), privacy: .public) via=\(via, privacy: .public)")
+        return assistantMessage
     }
 
     private func upsertMemoryArtifact(from message: Message) {
@@ -951,6 +977,7 @@ nonisolated final class TransmissionActions {
         guard let tx = try? fetchTransmission(id: sel.txId) else { return }
 
         let startNs = DispatchTime.now().uptimeNanoseconds
+        var appendedMessage: Message?
 
         if await isBudgetBlockedNow() {
             tx.status = .failed
@@ -1065,7 +1092,11 @@ nonisolated final class TransmissionActions {
                 applyDraftMemento(runId: runId, freshTx: freshTx, txId: sel.txId, m: m, via: "send")
             }
 
-            updateUserMessageServerId(messageIds: sel.messageIds, serverMessageId: response.userMessageId)
+            updateUserMessageServerId(
+                messageIds: sel.messageIds,
+                serverMessageId: response.userMessageId,
+                fallbackServerMessageId: response.transmissionId
+            )
 
             if response.pending || response.statusCode == 202 {
                 freshTx.status = .pending
@@ -1078,12 +1109,12 @@ nonisolated final class TransmissionActions {
                     threadId: sel.threadId
                 )
                 let pendingAttempts = sortedAttempts(freshTx.deliveryAttempts)
-                await pollOnce(runId: runId, sel: pendingSelection, attempts: pendingAttempts)
+                _ = await pollOnce(runId: runId, sel: pendingSelection, attempts: pendingAttempts)
                 try? modelContext.save()
                 return
             }
 
-            appendAssistantMessageIfPossible(
+            appendedMessage = appendAssistantMessageIfPossible(
                 threadId: sel.threadId,
                 assistantText: response.text,
                 transmissionId: response.transmissionId,
@@ -1134,6 +1165,12 @@ nonisolated final class TransmissionActions {
             outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(sel.txId), privacy: .public) to=\(outcome, privacy: .public) http=\(code, privacy: .public)")
         }
 
+        if let appendedMessage {
+            DebugModelValidators.assertMessageHasThread(
+                appendedMessage,
+                context: "TransmissionActions.sendOnce.beforeSave"
+            )
+        }
         try? modelContext.save()
     }
 
@@ -1225,7 +1262,7 @@ nonisolated final class TransmissionActions {
                     threadId: sel.threadId
                 )
                 let pendingAttempts = sortedAttempts(freshTx.deliveryAttempts)
-                await pollOnce(runId: runId, sel: pendingSelection, attempts: pendingAttempts)
+                _ = await pollOnce(runId: runId, sel: pendingSelection, attempts: pendingAttempts)
                 try? modelContext.save()
                 return
             }
@@ -1388,7 +1425,7 @@ nonisolated final class TransmissionActions {
         runId: String,
         sel: PendingSelection,
         attempts: [DeliveryAttempt]
-    ) async {
+    ) async -> Message? {
         guard let last = activePollAttempt(attempts),
               let serverTxId = last.transmissionId,
               !serverTxId.isEmpty else {
@@ -1397,12 +1434,12 @@ nonisolated final class TransmissionActions {
                 tx.lastError = "Missing server transmission id for pending poll"
                 outboxLog.error("processQueue run=\(runId, privacy: .public) event=poll_missing_id tx=\(short(sel.txId), privacy: .public)")
             }
-            return
+            return nil
         }
 
         outboxLog.info("processQueue run=\(runId, privacy: .public) event=poll_ready tx=\(short(sel.txId), privacy: .public) serverTx=\(shortOrDash(serverTxId), privacy: .public)")
 
-        guard let tx = try? fetchTransmission(id: sel.txId) else { return }
+        guard let tx = try? fetchTransmission(id: sel.txId) else { return nil }
 
         let attemptId = UUID()
         let diagnostics = DiagnosticsContext(
@@ -1416,12 +1453,12 @@ nonisolated final class TransmissionActions {
                 outboxLog.error("processQueue run=\(runId, privacy: .public) event=poll_unavailable tx=\(short(sel.txId), privacy: .public)")
                 tx.status = .failed
                 tx.lastError = "Transport does not support polling"
-                return
+                return nil
             }
 
             let poll = try await watcher.poll(transmissionId: serverTxId, diagnostics: diagnostics)
 
-            guard let freshTx = try? fetchTransmission(id: sel.txId) else { return }
+            guard let freshTx = try? fetchTransmission(id: sel.txId) else { return nil }
 
             recordAttempt(
                 tx: freshTx,
@@ -1443,12 +1480,16 @@ nonisolated final class TransmissionActions {
             if poll.pending {
                 freshTx.status = .pending
                 outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(sel.txId), privacy: .public) to=pending reason=pending_poll")
-                return
+                return nil
             }
 
-            updateUserMessageServerId(messageIds: freshTx.packet.messageIds, serverMessageId: poll.userMessageId)
+            updateUserMessageServerId(
+                messageIds: freshTx.packet.messageIds,
+                serverMessageId: poll.userMessageId,
+                fallbackServerMessageId: serverTxId
+            )
 
-            appendAssistantMessageIfPossible(
+            let appended = appendAssistantMessageIfPossible(
                 threadId: sel.threadId,
                 assistantText: poll.assistant,
                 transmissionId: serverTxId,
@@ -1463,10 +1504,11 @@ nonisolated final class TransmissionActions {
 
             freshTx.status = .succeeded
             outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(sel.txId), privacy: .public) to=succeeded reason=poll_complete")
+            return appended
         } catch {
             outboxLog.error("processQueue run=\(runId, privacy: .public) event=poll_failed tx=\(short(sel.txId), privacy: .public) err=\(String(describing: error), privacy: .public)")
 
-            guard let freshTx = try? fetchTransmission(id: sel.txId) else { return }
+            guard let freshTx = try? fetchTransmission(id: sel.txId) else { return nil }
 
             let decision = retryDecision(for: error)
             let errorInfo = httpErrorInfo(from: error)
@@ -1489,6 +1531,7 @@ nonisolated final class TransmissionActions {
             let outcome = decision.retryable ? "pending" : "failed"
             outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(sel.txId), privacy: .public) to=\(outcome, privacy: .public) reason=poll_failed")
         }
+        return nil
     }
 
     /// Submit a ThreadMemento decision to SolServer and clear matching local draft fields so UI updates immediately.

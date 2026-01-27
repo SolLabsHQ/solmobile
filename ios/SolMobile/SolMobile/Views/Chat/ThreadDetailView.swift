@@ -499,6 +499,7 @@ struct ThreadDetailView: View {
         composerText = ""
 
         let m = Message(thread: thread, creatorType: .user, text: text)
+        DebugModelValidators.assertMessageHasThread(m, context: "ThreadDetailView.send.beforeInsert")
         thread.messages.append(m)
         thread.lastActiveAt = Date()
         modelContext.insert(m)
@@ -1253,6 +1254,7 @@ private struct MessageBubble: View {
     @State private var journalShareItems: [Any] = []
     @State private var journalShareCompletion: ((Bool, String?) -> Void)?
     @State private var journalOfferVisible = false
+    @State private var journalOfferGateLogged = false
 
     private let eventStore = EKEventStore()
     private let log = Logger(subsystem: "com.sollabshq.solmobile", category: "MessageBubble")
@@ -1426,6 +1428,12 @@ private struct MessageBubble: View {
                     }
                 )
             }
+            .onAppear {
+                logJournalOfferGateIfNeeded()
+            }
+            .onChange(of: message.journalOfferJson) { _ in
+                logJournalOfferGateIfNeeded()
+            }
         }
     }
     
@@ -1444,6 +1452,16 @@ private struct MessageBubble: View {
         guard JournalStyleSettings.offersEnabled else { return nil }
         guard !JournalStyleSettings.isCooldownActive() else { return nil }
         return offer
+    }
+
+    private func logJournalOfferGateIfNeeded() {
+        guard !journalOfferGateLogged else { return }
+        guard let offer = message.journalOffer else { return }
+        journalOfferGateLogged = true
+        let cooldownActive = JournalStyleSettings.isCooldownActive()
+        log.info(
+            "journal_offer_gate msg=\(message.id.uuidString, privacy: .public) eligible=\(offer.offerEligible, privacy: .public) offersEnabled=\(JournalStyleSettings.offersEnabled, privacy: .public) cooldownActive=\(cooldownActive, privacy: .public) suppressed=\(suppressJournalOffer, privacy: .public)"
+        )
     }
 
     private static let traceTimestampFormatter: ISO8601DateFormatter = {

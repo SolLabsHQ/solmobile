@@ -317,7 +317,7 @@ final class AppleIntelligenceObserver {
 
     @MainActor
     private func fetchMessage(id: UUID) -> Message? {
-        let container = ModelContainerFactory.makeContainer()
+        let container = ModelContainerFactory.shared
         let context = ModelContext(container)
         let descriptor = FetchDescriptor<Message>(
             predicate: #Predicate { $0.id == id }
