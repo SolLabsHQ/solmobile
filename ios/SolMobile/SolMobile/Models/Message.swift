@@ -21,6 +21,9 @@ final class Message {
     // Only present for assistant messages that came from server
     var transmissionId: String?
 
+    // Stable server message ID from server responses.
+    var serverMessageId: String?
+
     // OutputEnvelope metadata (PR #23)
     var evidenceMetaVersion: String?
     var evidencePackId: String?
@@ -48,6 +51,10 @@ final class Message {
     var ghostFactNull: Bool = false
     var ghostMoodAnchor: String?
 
+    // Journal offer payload + shown timestamp (PR10).
+    var journalOfferJson: Data?
+    var journalOfferShownAt: Date?
+
     var thread: ConversationThread
     
     // Evidence ownership (cascade delete)
@@ -68,12 +75,15 @@ final class Message {
         createdAt: Date = Date(),
         pinned: Bool? = nil,
         transmissionId: String? = nil,
+        serverMessageId: String? = nil,
         evidenceMetaVersion: String? = nil,
         evidencePackId: String? = nil,
         usedEvidenceIdsCsv: String? = nil,
         claimsCount: Int = 0,
         claimsJson: Data? = nil,
         claimsTruncated: Bool = false,
+        journalOfferJson: Data? = nil,
+        journalOfferShownAt: Date? = nil,
         captureSuggestionJson: Data? = nil,
         captureSuggestionId: String? = nil,
         captureSuggestionTypeRaw: String? = nil,
@@ -99,12 +109,15 @@ final class Message {
         self.createdAt = createdAt
         self.pinned = pinned ?? thread.pinned
         self.transmissionId = transmissionId
+        self.serverMessageId = serverMessageId
         self.evidenceMetaVersion = evidenceMetaVersion
         self.evidencePackId = evidencePackId
         self.usedEvidenceIdsCsv = usedEvidenceIdsCsv
         self.claimsCount = claimsCount
         self.claimsJson = claimsJson
         self.claimsTruncated = claimsTruncated
+        self.journalOfferJson = journalOfferJson
+        self.journalOfferShownAt = journalOfferShownAt
         self.captureSuggestionJson = captureSuggestionJson
         self.captureSuggestionId = captureSuggestionId
         self.captureSuggestionTypeRaw = captureSuggestionTypeRaw
@@ -139,6 +152,11 @@ extension Message {
         ProcessInfo.processInfo.environment["XCTestBundlePath"] != nil
     }
     #endif
+
+    var resolvedServerMessageId: String? {
+        guard let id = serverMessageId, !id.isEmpty else { return nil }
+        return id
+    }
 
     /// Validate evidence relationships at encode-time
     /// Throws structured errors for orphaned references

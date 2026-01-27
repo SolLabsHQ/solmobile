@@ -8,6 +8,7 @@
 import XCTest
 @testable import SolMobile
 
+@MainActor
 final class SolServerClientDecodingTests: XCTestCase {
 
     func test_threadMementoDTO_decodes_from_solserver_shape() throws {

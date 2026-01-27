@@ -41,7 +41,7 @@ final class StorageCleanupScheduler {
         schedule()
 
         let cleanupTask = Task { @MainActor in
-            let container = ModelContainerFactory.makeContainer()
+            let container = ModelContainerFactory.shared
             let service = StorageCleanupService(modelContext: ModelContext(container))
             do {
                 _ = try service.runCleanup()

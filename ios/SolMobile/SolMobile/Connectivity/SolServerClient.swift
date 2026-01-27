@@ -47,14 +47,89 @@ struct Response: Codable {
     let idempotentReplay: Bool?
     let pending: Bool?
     let status: String?
+    let userMessageId: String?
+    let assistantMessageId: String?
 
     // Present when SolServer auto-saves a ThreadMemento (Option 1).
     let threadMemento: ThreadMementoDTO?
+    let journalOffer: JournalOfferRecord?
     
     // Evidence fields (PR #7.1 / PR #8)
     let evidenceSummary: EvidenceSummaryDTO  // Always present in successful responses
     let evidence: EvidenceDTO?  // Omitted when none
     let evidenceWarnings: [EvidenceWarningDTO]?  // Omitted when none
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case transmissionId
+        case modeDecision
+        case assistant
+        case outputEnvelope
+        case idempotentReplay
+        case pending
+        case status
+        case userMessageId
+        case assistantMessageId
+        case messageId
+        case threadMemento
+        case journalOffer
+        case evidenceSummary
+        case evidence
+        case evidenceWarnings
+    }
+
+    enum LegacyCodingKeys: String, CodingKey {
+        case userMessageId = "user_message_id"
+        case messageId = "message_id"
+        case assistantMessageId = "assistant_message_id"
+        case journalOffer = "journal_offer"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let legacy = try decoder.container(keyedBy: LegacyCodingKeys.self)
+
+        ok = try container.decode(Bool.self, forKey: .ok)
+        transmissionId = try container.decodeIfPresent(String.self, forKey: .transmissionId)
+        modeDecision = try container.decodeIfPresent(ModeDecision.self, forKey: .modeDecision)
+        assistant = try container.decodeIfPresent(String.self, forKey: .assistant)
+        outputEnvelope = try container.decodeIfPresent(OutputEnvelopeDTO.self, forKey: .outputEnvelope)
+        idempotentReplay = try container.decodeIfPresent(Bool.self, forKey: .idempotentReplay)
+        pending = try container.decodeIfPresent(Bool.self, forKey: .pending)
+        status = try container.decodeIfPresent(String.self, forKey: .status)
+        threadMemento = try container.decodeIfPresent(ThreadMementoDTO.self, forKey: .threadMemento)
+        journalOffer = try container.decodeIfPresent(JournalOfferRecord.self, forKey: .journalOffer)
+            ?? legacy.decodeIfPresent(JournalOfferRecord.self, forKey: .journalOffer)
+        evidenceSummary = try container.decode(EvidenceSummaryDTO.self, forKey: .evidenceSummary)
+        evidence = try container.decodeIfPresent(EvidenceDTO.self, forKey: .evidence)
+        evidenceWarnings = try container.decodeIfPresent([EvidenceWarningDTO].self, forKey: .evidenceWarnings)
+
+        userMessageId = try container.decodeIfPresent(String.self, forKey: .userMessageId)
+            ?? container.decodeIfPresent(String.self, forKey: .messageId)
+            ?? legacy.decodeIfPresent(String.self, forKey: .userMessageId)
+            ?? legacy.decodeIfPresent(String.self, forKey: .messageId)
+        assistantMessageId = try container.decodeIfPresent(String.self, forKey: .assistantMessageId)
+            ?? legacy.decodeIfPresent(String.self, forKey: .assistantMessageId)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(ok, forKey: .ok)
+        try container.encodeIfPresent(transmissionId, forKey: .transmissionId)
+        try container.encodeIfPresent(modeDecision, forKey: .modeDecision)
+        try container.encodeIfPresent(assistant, forKey: .assistant)
+        try container.encodeIfPresent(outputEnvelope, forKey: .outputEnvelope)
+        try container.encodeIfPresent(idempotentReplay, forKey: .idempotentReplay)
+        try container.encodeIfPresent(pending, forKey: .pending)
+        try container.encodeIfPresent(status, forKey: .status)
+        try container.encodeIfPresent(userMessageId, forKey: .userMessageId)
+        try container.encodeIfPresent(assistantMessageId, forKey: .assistantMessageId)
+        try container.encodeIfPresent(threadMemento, forKey: .threadMemento)
+        try container.encode(evidenceSummary, forKey: .evidenceSummary)
+        try container.encodeIfPresent(evidence, forKey: .evidence)
+        try container.encodeIfPresent(evidenceWarnings, forKey: .evidenceWarnings)
+        try container.encodeIfPresent(journalOffer, forKey: .journalOffer)
+    }
 }
 
 struct TransmissionDTO: Codable {
@@ -68,9 +143,66 @@ struct TransmissionResponse: Codable {
     let pending: Bool?
     let assistant: String?
     let outputEnvelope: OutputEnvelopeDTO?
+    let userMessageId: String?
+    let assistantMessageId: String?
 
     // Present once the transmission is completed and the server has a memento snapshot.
     let threadMemento: ThreadMementoDTO?
+    let journalOffer: JournalOfferRecord?
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case transmission
+        case pending
+        case assistant
+        case outputEnvelope
+        case userMessageId
+        case assistantMessageId
+        case messageId
+        case threadMemento
+        case journalOffer
+    }
+
+    enum LegacyCodingKeys: String, CodingKey {
+        case userMessageId = "user_message_id"
+        case messageId = "message_id"
+        case assistantMessageId = "assistant_message_id"
+        case journalOffer = "journal_offer"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let legacy = try decoder.container(keyedBy: LegacyCodingKeys.self)
+
+        ok = try container.decode(Bool.self, forKey: .ok)
+        transmission = try container.decode(TransmissionDTO.self, forKey: .transmission)
+        pending = try container.decodeIfPresent(Bool.self, forKey: .pending)
+        assistant = try container.decodeIfPresent(String.self, forKey: .assistant)
+        outputEnvelope = try container.decodeIfPresent(OutputEnvelopeDTO.self, forKey: .outputEnvelope)
+        threadMemento = try container.decodeIfPresent(ThreadMementoDTO.self, forKey: .threadMemento)
+        journalOffer = try container.decodeIfPresent(JournalOfferRecord.self, forKey: .journalOffer)
+            ?? legacy.decodeIfPresent(JournalOfferRecord.self, forKey: .journalOffer)
+
+        userMessageId = try container.decodeIfPresent(String.self, forKey: .userMessageId)
+            ?? container.decodeIfPresent(String.self, forKey: .messageId)
+            ?? legacy.decodeIfPresent(String.self, forKey: .userMessageId)
+            ?? legacy.decodeIfPresent(String.self, forKey: .messageId)
+        assistantMessageId = try container.decodeIfPresent(String.self, forKey: .assistantMessageId)
+            ?? legacy.decodeIfPresent(String.self, forKey: .assistantMessageId)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(ok, forKey: .ok)
+        try container.encode(transmission, forKey: .transmission)
+        try container.encodeIfPresent(pending, forKey: .pending)
+        try container.encodeIfPresent(assistant, forKey: .assistant)
+        try container.encodeIfPresent(outputEnvelope, forKey: .outputEnvelope)
+        try container.encodeIfPresent(userMessageId, forKey: .userMessageId)
+        try container.encodeIfPresent(assistantMessageId, forKey: .assistantMessageId)
+        try container.encodeIfPresent(threadMemento, forKey: .threadMemento)
+        try container.encodeIfPresent(journalOffer, forKey: .journalOffer)
+    }
 }
 
 private struct MementoDecisionRequest: Codable {
@@ -187,6 +319,7 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
     ) async throws -> (Data, HTTPURLResponse, ResponseInfo) {
         var authorizedReq = req
         applyUserIdHeader(&authorizedReq)
+        applyLocalUserUuidHeader(&authorizedReq)
         applyAuthHeader(&authorizedReq)
 
         if AppEnvironment.current.requiresHTTPS,
@@ -336,6 +469,8 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
             return
         }
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        // SolServer staging accepts x-sol-api-key; send both for compatibility.
+        req.setValue(token, forHTTPHeaderField: "x-sol-api-key")
     }
 
     private func applyUserIdHeader(_ req: inout URLRequest) {
@@ -346,6 +481,13 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
             return
         }
         req.setValue(UserIdentity.resolvedId(), forHTTPHeaderField: "x-sol-user-id")
+    }
+
+    private func applyLocalUserUuidHeader(_ req: inout URLRequest) {
+        if req.value(forHTTPHeaderField: "x-sol-local-user-uuid") != nil {
+            return
+        }
+        req.setValue(LocalIdentity.localUserUuid(), forHTTPHeaderField: "x-sol-local-user-uuid")
     }
 
     private func require2xx(_ http: HTTPURLResponse, data: Data, responseInfo: ResponseInfo) throws {
@@ -566,6 +708,30 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
         return try JSONDecoder().decode(MemoryBatchDeleteResponse.self, from: data)
     }
 
+    // MARK: - Journal drafts + trace events (PR10)
+
+    func createJournalDraft(request: JournalDraftRequest) async throws -> JournalDraftEnvelope {
+        var req = URLRequest(url: baseURL.appendingPathComponent("/v1/journal/drafts"))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONEncoder().encode(request)
+
+        let (data, http, responseInfo) = try await requestJSON(req)
+        try require2xx(http, data: data, responseInfo: responseInfo)
+        return try JSONDecoder().decode(JournalDraftEnvelope.self, from: data)
+    }
+
+    func postTraceEvents(request: TraceEventsRequest) async throws {
+        var req = URLRequest(url: baseURL.appendingPathComponent("/v1/trace/events"))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONEncoder().encode(request)
+
+        let (data, http, responseInfo) = try await requestJSON(req)
+        try require2xx(http, data: data, responseInfo: responseInfo)
+        _ = data
+    }
+
     // MARK: - ChatTransport / Outbox integration
 
     func send(envelope: PacketEnvelope, diagnostics: DiagnosticsContext? = nil) async throws -> ChatResponse {
@@ -616,7 +782,10 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
                 transmissionId: txId,
                 pending: true,
                 responseInfo: responseInfo,
+                userMessageId: decoded?.userMessageId,
+                assistantMessageId: decoded?.assistantMessageId,
                 threadMemento: decoded?.threadMemento,
+                journalOffer: decoded?.journalOffer?.asJournalOffer(),
                 evidenceSummary: decoded?.evidenceSummary,
                 evidence: decoded?.evidence,
                 evidenceWarnings: decoded?.evidenceWarnings,
@@ -635,7 +804,10 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
             transmissionId: txId,
             pending: decoded.pending ?? false,
             responseInfo: responseInfo,
+            userMessageId: decoded.userMessageId,
+            assistantMessageId: decoded.assistantMessageId,
             threadMemento: decoded.threadMemento,
+            journalOffer: decoded.journalOffer?.asJournalOffer(),
             evidenceSummary: decoded.evidenceSummary,
             evidence: decoded.evidence,
             evidenceWarnings: decoded.evidenceWarnings,
@@ -670,7 +842,10 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
             transmissionId: txId,
             pending: true,
             responseInfo: responseInfo,
+            userMessageId: nil,
+            assistantMessageId: nil,
             threadMemento: nil,
+            journalOffer: nil,
             evidenceSummary: nil,
             evidence: nil,
             evidenceWarnings: nil,
@@ -698,7 +873,10 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
             serverStatus: decoded.transmission.status,
             statusCode: http.statusCode,
             responseInfo: responseInfo,
+            userMessageId: decoded.userMessageId,
+            assistantMessageId: decoded.assistantMessageId,
             threadMemento: decoded.threadMemento,
+            journalOffer: decoded.journalOffer?.asJournalOffer(),
             evidenceSummary: nil,  // Poll endpoint doesn't return evidence for MVP
             evidence: nil,
             evidenceWarnings: nil,

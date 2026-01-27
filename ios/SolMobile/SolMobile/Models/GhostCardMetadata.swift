@@ -91,6 +91,10 @@ extension Message {
         GhostKind.resolve(ghostKindRaw: ghostKindRaw, ghostTypeRaw: ghostTypeRaw)
     }
 
+    var isAscendEligible: Bool {
+        ghostKindRaw == GhostKind.journalMoment.rawValue
+    }
+
     var ghostRigorLevel: GhostRigorLevel? {
         guard let raw = ghostRigorLevelRaw else { return nil }
         return GhostRigorLevel(rawValue: raw)

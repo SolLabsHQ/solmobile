@@ -38,6 +38,26 @@ nonisolated private func timeWithSeconds(_ d: Date) -> String {
 
 // MARK: - ThreadMemento formatting
 
+nonisolated private struct JournalOfferSnapshot: Codable, Sendable {
+    let momentId: String
+    let momentType: String
+    let phase: String
+    let confidence: String
+    let evidenceSpan: JournalEvidenceSpan
+    let why: [String]?
+    let offerEligible: Bool
+
+    init(from offer: JournalOffer) {
+        self.momentId = offer.momentId
+        self.momentType = offer.momentType
+        self.phase = offer.phase
+        self.confidence = offer.confidence
+        self.evidenceSpan = offer.evidenceSpan
+        self.why = offer.why
+        self.offerEligible = offer.offerEligible
+    }
+}
+
 /// ThreadMemento is a navigation artifact returned by SolServer.
 /// It is not durable knowledge; the client may choose to Accept / Decline / Revoke.
 nonisolated private enum ThreadMementoFormatter {
@@ -121,8 +141,11 @@ struct ChatPollResponse {
     let serverStatus: String?
     let statusCode: Int
     let responseInfo: ResponseInfo?
+    let userMessageId: String?
+    let assistantMessageId: String?
 
     let threadMemento: ThreadMementoDTO?
+    let journalOffer: JournalOffer?
     
     // Evidence fields (PR #7.1 / PR #8)
     let evidenceSummary: EvidenceSummaryDTO?
@@ -131,6 +154,36 @@ struct ChatPollResponse {
 
     // OutputEnvelope (PR #23)
     let outputEnvelope: OutputEnvelopeDTO?
+
+    init(
+        pending: Bool,
+        assistant: String?,
+        serverStatus: String?,
+        statusCode: Int,
+        responseInfo: ResponseInfo?,
+        userMessageId: String? = nil,
+        assistantMessageId: String? = nil,
+        threadMemento: ThreadMementoDTO?,
+        journalOffer: JournalOffer?,
+        evidenceSummary: EvidenceSummaryDTO?,
+        evidence: EvidenceDTO?,
+        evidenceWarnings: [EvidenceWarningDTO]?,
+        outputEnvelope: OutputEnvelopeDTO?
+    ) {
+        self.pending = pending
+        self.assistant = assistant
+        self.serverStatus = serverStatus
+        self.statusCode = statusCode
+        self.responseInfo = responseInfo
+        self.userMessageId = userMessageId
+        self.assistantMessageId = assistantMessageId
+        self.threadMemento = threadMemento
+        self.journalOffer = journalOffer
+        self.evidenceSummary = evidenceSummary
+        self.evidence = evidence
+        self.evidenceWarnings = evidenceWarnings
+        self.outputEnvelope = outputEnvelope
+    }
 }
 
 enum TransportError: Error {
@@ -170,8 +223,11 @@ struct ChatResponse {
     let transmissionId: String?
     let pending: Bool
     let responseInfo: ResponseInfo?
+    let userMessageId: String?
+    let assistantMessageId: String?
 
     let threadMemento: ThreadMementoDTO?
+    let journalOffer: JournalOffer?
     
     // Evidence fields (PR #7.1 / PR #8)
     let evidenceSummary: EvidenceSummaryDTO?
@@ -180,6 +236,36 @@ struct ChatResponse {
 
     // OutputEnvelope (PR #23)
     let outputEnvelope: OutputEnvelopeDTO?
+
+    init(
+        text: String,
+        statusCode: Int,
+        transmissionId: String?,
+        pending: Bool,
+        responseInfo: ResponseInfo?,
+        userMessageId: String? = nil,
+        assistantMessageId: String? = nil,
+        threadMemento: ThreadMementoDTO?,
+        journalOffer: JournalOffer?,
+        evidenceSummary: EvidenceSummaryDTO?,
+        evidence: EvidenceDTO?,
+        evidenceWarnings: [EvidenceWarningDTO]?,
+        outputEnvelope: OutputEnvelopeDTO?
+    ) {
+        self.text = text
+        self.statusCode = statusCode
+        self.transmissionId = transmissionId
+        self.pending = pending
+        self.responseInfo = responseInfo
+        self.userMessageId = userMessageId
+        self.assistantMessageId = assistantMessageId
+        self.threadMemento = threadMemento
+        self.journalOffer = journalOffer
+        self.evidenceSummary = evidenceSummary
+        self.evidence = evidence
+        self.evidenceWarnings = evidenceWarnings
+        self.outputEnvelope = outputEnvelope
+    }
 }
 
 
@@ -414,6 +500,7 @@ nonisolated final class TransmissionActions {
             return
         }
 
+        var appendedMessages: [Message] = []
         for sel in pending {
             guard let tx = try? fetchTransmission(id: sel.txId) else { continue }
             let now = Date()
@@ -434,9 +521,15 @@ nonisolated final class TransmissionActions {
                 continue
             }
 
-            await pollOnce(runId: runId, sel: sel, attempts: attempts)
+            if let appended = await pollOnce(runId: runId, sel: sel, attempts: attempts) {
+                appendedMessages.append(appended)
+            }
         }
 
+        DebugModelValidators.assertMessagesHaveThread(
+            appendedMessages,
+            context: "TransmissionActions.pollPending.beforeSave"
+        )
         try? modelContext.save()
     }
 
@@ -687,17 +780,40 @@ nonisolated final class TransmissionActions {
         return RetryPolicy.classify(statusCode: nil, body: nil, headers: nil, error: error)
     }
 
+    private func applyServerMessageId(_ serverMessageId: String?, to message: Message) {
+        guard let serverMessageId, !serverMessageId.isEmpty else { return }
+        message.serverMessageId = serverMessageId
+    }
+
+    private func updateUserMessageServerId(
+        messageIds: [UUID],
+        serverMessageId: String?,
+        fallbackServerMessageId: String?
+    ) {
+        guard let firstId = messageIds.first else { return }
+        let resolvedServerMessageId = serverMessageId ?? fallbackServerMessageId
+        Task { @MainActor in
+            guard let message = try? fetchMessage(id: firstId) else { return }
+            applyServerMessageId(resolvedServerMessageId, to: message)
+            AppleIntelligenceObserver.shared.observeMessage(message)
+        }
+    }
+
+    @discardableResult
     private func appendAssistantMessageIfPossible(
         threadId: UUID,
         assistantText: String?,
         transmissionId: String?,
+        assistantMessageId: String?,
         evidence: EvidenceDTO?,
+        journalOffer: JournalOffer?,
         outputEnvelope: OutputEnvelopeDTO?,
         runId: String,
         txId: UUID,
         via: String
-    ) {
-        guard let thread = try? fetchThread(id: threadId) else { return }
+    ) -> Message? {
+        guard let thread = try? fetchThread(id: threadId) else { return nil }
+        let previousMessage = thread.messages.last
 
         let text: String
         if let assistantText, !assistantText.isEmpty {
@@ -716,16 +832,20 @@ nonisolated final class TransmissionActions {
             text: text,
             transmissionId: transmissionId
         )
+        DebugModelValidators.assertMessageHasThread(
+            assistantMessage,
+            context: "TransmissionActions.appendAssistantMessageIfPossible.afterInit"
+        )
+        applyServerMessageId(assistantMessageId ?? transmissionId, to: assistantMessage)
 
         let evidenceModels: (captures: [Capture], supports: [ClaimSupport], claims: [ClaimMapEntry])
-
         do {
             evidenceModels = try assistantMessage.buildEvidenceModels(from: evidence)
         } catch {
             outboxLog.error(
                 "processQueue run=\(runId, privacy: .public) event=evidence_mapping_failed tx=\(short(txId), privacy: .public) err=\(String(describing: error), privacy: .public)"
             )
-            return
+            return nil
         }
 
         assistantMessage.hasEvidence = !evidenceModels.captures.isEmpty
@@ -751,6 +871,32 @@ nonisolated final class TransmissionActions {
         thread.lastActiveAt = Date()
 
         modelContext.insert(assistantMessage)
+
+        if assistantMessage.journalOfferJson == nil, let offer = journalOffer {
+            let snapshot = JournalOfferSnapshot(from: offer)
+            assistantMessage.journalOfferJson = try? JSONEncoder().encode(snapshot)
+            if assistantMessage.journalOfferJson == nil {
+                outboxLog.error(
+                    "processQueue run=\(runId, privacy: .public) event=journal_offer_encode_failed tx=\(short(txId), privacy: .public)"
+                )
+            } else {
+                outboxLog.info(
+                    "processQueue run=\(runId, privacy: .public) event=journal_offer_attached tx=\(short(txId), privacy: .public) eligible=\(offer.offerEligible, privacy: .public) moment=\(offer.momentId, privacy: .public)"
+                )
+            }
+        } else if assistantMessage.journalOfferJson == nil {
+            outboxLog.debug(
+                "processQueue run=\(runId, privacy: .public) event=journal_offer_missing tx=\(short(txId), privacy: .public)"
+            )
+        }
+
+        if let previousMessage {
+            let previousMessageId = previousMessage.id
+            Task { @MainActor in
+                guard let message = try? fetchMessage(id: previousMessageId) else { return }
+                AppleIntelligenceObserver.shared.observeMessage(message)
+            }
+        }
 
         if assistantMessage.isGhostCard {
             upsertMemoryArtifact(from: assistantMessage)
@@ -780,6 +926,7 @@ nonisolated final class TransmissionActions {
         DraftStore(modelContext: modelContext).deleteDraft(threadId: threadId)
 
         outboxLog.info("processQueue run=\(runId, privacy: .public) event=assistant_appended tx=\(short(txId), privacy: .public) via=\(via, privacy: .public)")
+        return assistantMessage
     }
 
     private func upsertMemoryArtifact(from message: Message) {
@@ -830,6 +977,7 @@ nonisolated final class TransmissionActions {
         guard let tx = try? fetchTransmission(id: sel.txId) else { return }
 
         let startNs = DispatchTime.now().uptimeNanoseconds
+        var appendedMessage: Message?
 
         if await isBudgetBlockedNow() {
             tx.status = .failed
@@ -944,6 +1092,12 @@ nonisolated final class TransmissionActions {
                 applyDraftMemento(runId: runId, freshTx: freshTx, txId: sel.txId, m: m, via: "send")
             }
 
+            updateUserMessageServerId(
+                messageIds: sel.messageIds,
+                serverMessageId: response.userMessageId,
+                fallbackServerMessageId: response.transmissionId
+            )
+
             if response.pending || response.statusCode == 202 {
                 freshTx.status = .pending
                 outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(sel.txId), privacy: .public) to=pending reason=pending")
@@ -955,16 +1109,18 @@ nonisolated final class TransmissionActions {
                     threadId: sel.threadId
                 )
                 let pendingAttempts = sortedAttempts(freshTx.deliveryAttempts)
-                await pollOnce(runId: runId, sel: pendingSelection, attempts: pendingAttempts)
+                _ = await pollOnce(runId: runId, sel: pendingSelection, attempts: pendingAttempts)
                 try? modelContext.save()
                 return
             }
 
-            appendAssistantMessageIfPossible(
+            appendedMessage = appendAssistantMessageIfPossible(
                 threadId: sel.threadId,
                 assistantText: response.text,
                 transmissionId: response.transmissionId,
+                assistantMessageId: response.assistantMessageId,
                 evidence: response.evidence,
+                journalOffer: response.journalOffer,
                 outputEnvelope: response.outputEnvelope,
                 runId: runId,
                 txId: sel.txId,
@@ -1009,6 +1165,12 @@ nonisolated final class TransmissionActions {
             outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(sel.txId), privacy: .public) to=\(outcome, privacy: .public) http=\(code, privacy: .public)")
         }
 
+        if let appendedMessage {
+            DebugModelValidators.assertMessageHasThread(
+                appendedMessage,
+                context: "TransmissionActions.sendOnce.beforeSave"
+            )
+        }
         try? modelContext.save()
     }
 
@@ -1100,7 +1262,7 @@ nonisolated final class TransmissionActions {
                     threadId: sel.threadId
                 )
                 let pendingAttempts = sortedAttempts(freshTx.deliveryAttempts)
-                await pollOnce(runId: runId, sel: pendingSelection, attempts: pendingAttempts)
+                _ = await pollOnce(runId: runId, sel: pendingSelection, attempts: pendingAttempts)
                 try? modelContext.save()
                 return
             }
@@ -1186,6 +1348,7 @@ nonisolated final class TransmissionActions {
             )
 
             outboxLog.error("processQueue run=\(runId, privacy: .public) event=terminal_max_attempts tx=\(short(txId), privacy: .public) attempts=\(sendAttemptCount, privacy: .public)")
+            try? modelContext.save()
             return true
         }
 
@@ -1263,7 +1426,7 @@ nonisolated final class TransmissionActions {
         runId: String,
         sel: PendingSelection,
         attempts: [DeliveryAttempt]
-    ) async {
+    ) async -> Message? {
         guard let last = activePollAttempt(attempts),
               let serverTxId = last.transmissionId,
               !serverTxId.isEmpty else {
@@ -1272,12 +1435,12 @@ nonisolated final class TransmissionActions {
                 tx.lastError = "Missing server transmission id for pending poll"
                 outboxLog.error("processQueue run=\(runId, privacy: .public) event=poll_missing_id tx=\(short(sel.txId), privacy: .public)")
             }
-            return
+            return nil
         }
 
         outboxLog.info("processQueue run=\(runId, privacy: .public) event=poll_ready tx=\(short(sel.txId), privacy: .public) serverTx=\(shortOrDash(serverTxId), privacy: .public)")
 
-        guard let tx = try? fetchTransmission(id: sel.txId) else { return }
+        guard let tx = try? fetchTransmission(id: sel.txId) else { return nil }
 
         let attemptId = UUID()
         let diagnostics = DiagnosticsContext(
@@ -1291,12 +1454,12 @@ nonisolated final class TransmissionActions {
                 outboxLog.error("processQueue run=\(runId, privacy: .public) event=poll_unavailable tx=\(short(sel.txId), privacy: .public)")
                 tx.status = .failed
                 tx.lastError = "Transport does not support polling"
-                return
+                return nil
             }
 
             let poll = try await watcher.poll(transmissionId: serverTxId, diagnostics: diagnostics)
 
-            guard let freshTx = try? fetchTransmission(id: sel.txId) else { return }
+            guard let freshTx = try? fetchTransmission(id: sel.txId) else { return nil }
 
             recordAttempt(
                 tx: freshTx,
@@ -1318,14 +1481,22 @@ nonisolated final class TransmissionActions {
             if poll.pending {
                 freshTx.status = .pending
                 outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(sel.txId), privacy: .public) to=pending reason=pending_poll")
-                return
+                return nil
             }
 
-            appendAssistantMessageIfPossible(
+            updateUserMessageServerId(
+                messageIds: freshTx.packet.messageIds,
+                serverMessageId: poll.userMessageId,
+                fallbackServerMessageId: serverTxId
+            )
+
+            let appended = appendAssistantMessageIfPossible(
                 threadId: sel.threadId,
                 assistantText: poll.assistant,
                 transmissionId: serverTxId,
+                assistantMessageId: poll.assistantMessageId,
                 evidence: poll.evidence,
+                journalOffer: poll.journalOffer,
                 outputEnvelope: poll.outputEnvelope,
                 runId: runId,
                 txId: sel.txId,
@@ -1334,10 +1505,11 @@ nonisolated final class TransmissionActions {
 
             freshTx.status = .succeeded
             outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(sel.txId), privacy: .public) to=succeeded reason=poll_complete")
+            return appended
         } catch {
             outboxLog.error("processQueue run=\(runId, privacy: .public) event=poll_failed tx=\(short(sel.txId), privacy: .public) err=\(String(describing: error), privacy: .public)")
 
-            guard let freshTx = try? fetchTransmission(id: sel.txId) else { return }
+            guard let freshTx = try? fetchTransmission(id: sel.txId) else { return nil }
 
             let decision = retryDecision(for: error)
             let errorInfo = httpErrorInfo(from: error)
@@ -1360,6 +1532,7 @@ nonisolated final class TransmissionActions {
             let outcome = decision.retryable ? "pending" : "failed"
             outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(sel.txId), privacy: .public) to=\(outcome, privacy: .public) reason=poll_failed")
         }
+        return nil
     }
 
     /// Submit a ThreadMemento decision to SolServer and clear matching local draft fields so UI updates immediately.

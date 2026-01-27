@@ -10,6 +10,7 @@ import Security
 
 enum KeychainKeys {
     static let stagingApiKey = "api_key.staging"
+    static let localUserUuid = "local_user_uuid"
 }
 
 enum KeychainStore {

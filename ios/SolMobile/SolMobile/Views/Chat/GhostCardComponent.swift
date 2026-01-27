@@ -164,7 +164,7 @@ struct GhostCardComponent: View {
             }
             .overlay(alignment: .bottomLeading) {
                 if showAscendReceipt {
-                    Text("Moment donated to iOS Journal")
+                    Text("Moment exported")
                         .font(.caption)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
@@ -275,10 +275,12 @@ struct GhostCardComponent: View {
             }
         case .journalMoment:
             HStack(spacing: 12) {
-                Button("Ascend") {
-                    Task { await performAscend() }
+                if card.actions.onAscend != nil {
+                    Button("Ascend") {
+                        Task { await performAscend() }
+                    }
+                    .frame(minHeight: 44)
                 }
-                .frame(minHeight: 44)
 
                 if let onForget = card.actions.onForget {
                     Button("Forget", role: .destructive) {
@@ -394,7 +396,7 @@ struct GhostCardComponent: View {
     }
 
     private func performAscend() async {
-        guard !isAscending else { return }
+        guard !isAscending, let onAscend = card.actions.onAscend else { return }
         isAscending = true
 
         if PhysicalityManager.isPhysicalityEnabled && !reduceMotion {
@@ -411,11 +413,10 @@ struct GhostCardComponent: View {
             }
         }
 
-        let success = await (card.actions.onAscend?() ?? false)
+        let success = await onAscend()
 
         if success {
-            let intensity = PhysicalityManager.heartbeatIntensity(for: card.moodAnchor)
-            GhostCardHaptics.heartbeat(intensity: intensity)
+            GhostCardHaptics.releaseTick()
             showAscendReceipt = true
             markAscended()
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {

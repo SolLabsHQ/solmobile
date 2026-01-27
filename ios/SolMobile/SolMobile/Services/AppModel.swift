@@ -19,6 +19,11 @@ final class AppModel {
         let useInMemory = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
             || UITestNetworkStub.isEnabled
         container = ModelContainerFactory.makeContainer(isInMemoryOnly: useInMemory)
+        if !useInMemory {
+            var descriptor = FetchDescriptor<ConversationThread>()
+            descriptor.fetchLimit = 1
+            _ = try? ModelContext(container).fetch(descriptor)
+        }
         outboxService = OutboxService(container: container)
         unreadTracker = UnreadTrackerActor(container: container)
 
