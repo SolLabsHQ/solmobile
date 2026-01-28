@@ -39,9 +39,14 @@ final class SSEStatusStore: ObservableObject {
     @Published private(set) var lastEventAt: Date? = nil
     @Published private(set) var transmissionStages: [String: TransmissionStage] = [:]
     @Published private(set) var latestStageByThread: [String: TransmissionStage] = [:]
+    @Published private(set) var isWorking: Bool = false
+    @Published private(set) var workingTimedOut: Bool = false
 
     private let syncPendingDelay: TimeInterval = 60
+    private let workingTimeoutDelay: TimeInterval = 60
     private var pendingTask: Task<Void, Never>?
+    private var workingTimeoutTask: Task<Void, Never>?
+    private var workingSince: Date?
 
     func markConnecting() {
         state = .connecting
@@ -80,6 +85,15 @@ final class SSEStatusStore: ObservableObject {
         if let threadId = envelope.subject.threadId, !threadId.isEmpty {
             latestStageByThread[threadId] = stage
         }
+
+        switch envelope.kind {
+        case .txAccepted, .runStarted:
+            markWorking()
+        case .assistantFinalReady, .assistantFailed:
+            clearWorking()
+        case .ping:
+            break
+        }
     }
 
     func latestStage(forThreadId threadId: String) -> TransmissionStage? {
@@ -104,6 +118,38 @@ final class SSEStatusStore: ObservableObject {
     private func cancelPendingTask() {
         pendingTask?.cancel()
         pendingTask = nil
+    }
+
+    private func markWorking() {
+        if !isWorking {
+            isWorking = true
+            workingTimedOut = false
+            workingSince = Date()
+            scheduleWorkingTimeout()
+        }
+    }
+
+    private func clearWorking() {
+        isWorking = false
+        workingTimedOut = false
+        workingSince = nil
+        cancelWorkingTimeout()
+    }
+
+    private func scheduleWorkingTimeout() {
+        cancelWorkingTimeout()
+        workingTimeoutTask = Task { [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(nanoseconds: UInt64(self.workingTimeoutDelay * 1_000_000_000))
+            guard self.isWorking else { return }
+            self.workingTimedOut = true
+            self.isWorking = false
+        }
+    }
+
+    private func cancelWorkingTimeout() {
+        workingTimeoutTask?.cancel()
+        workingTimeoutTask = nil
     }
 
     private func parseFailureDetail(from payload: [String: JSONValue]) -> FailureDetail {

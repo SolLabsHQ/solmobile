@@ -398,6 +398,15 @@ struct ThreadDetailView: View {
             updateOutboxSummary()
             refreshStarlightPending()
         }
+        .onChange(of: sseStatus.isWorking) { _, _ in
+            refreshStarlightFromSSE()
+        }
+        .onChange(of: sseStatus.workingTimedOut) { _, timedOut in
+            if timedOut {
+                starlightState = .idle
+                starlightPendingSince = nil
+            }
+        }
         .onChange(of: latestAssistantMessageId) { _, newId in
             guard seededAssistantArrival else {
                 seededAssistantArrival = true
@@ -1077,6 +1086,23 @@ struct ThreadDetailView: View {
                 starlightPendingSince = pendingSince
             }
         } else if starlightState == .pending {
+            starlightState = .idle
+            starlightPendingSince = nil
+        }
+    }
+
+    private func refreshStarlightFromSSE() {
+        guard starlightState != .flash else { return }
+        if sseStatus.isWorking {
+            if starlightState == .idle {
+                starlightState = .pending
+            }
+            if starlightPendingSince == nil {
+                starlightPendingSince = Date()
+            }
+            return
+        }
+        if pendingChatSince() == nil && starlightState == .pending {
             starlightState = .idle
             starlightPendingSince = nil
         }
