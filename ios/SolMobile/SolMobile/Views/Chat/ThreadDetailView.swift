@@ -19,6 +19,7 @@ struct ThreadDetailView: View {
     @AppStorage(ThreadContextSettings.modeKey) private var threadContextMode: String = ThreadContextSettings.Mode.auto.rawValue
     @AppStorage(ThreadContextSettings.showKey) private var showThreadContext: Bool = false
     @ObservedObject private var budgetStore = BudgetStore.shared
+    @ObservedObject private var sseStatus = SSEStatusStore.shared
     @Bindable var thread: ConversationThread
     @Query private var messages: [Message]
     @Query private var transmissions: [Transmission]
@@ -588,8 +589,40 @@ struct ThreadDetailView: View {
         }
     }
 
+    private var latestSSEStage: SSEStatusStore.TransmissionStage? {
+        sseStatus.latestStage(forThreadId: thread.id.uuidString)
+    }
+
+    private var sseFailureDetail: SSEStatusStore.FailureDetail? {
+        sseStatus.failureDetail(forThreadId: thread.id.uuidString)
+    }
+
     private var outboxBanner: AnyView? {
         let s = outboxSummary
+
+        if let failure = sseFailureDetail,
+           latestSSEStage?.kind == .assistantFailed {
+            let detail = failure.detail ?? "Request failed."
+            let codeSuffix = failure.code.map { " (\($0))" } ?? ""
+            return AnyView(
+                HStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle")
+                    Text("\(detail)\(codeSuffix)")
+                        .font(.footnote)
+                    Spacer()
+                    if failure.retryable == true {
+                        Button("Retry") {
+                            viewLog.info("[retry] sse failure retry tapped")
+                            outboxService?.retryFailed()
+                        }
+                        .font(.footnote)
+                    }
+                }
+                    .padding(10)
+                    .background(.thinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            )
+        }
 
         if s.failed > 0 {
             return AnyView(
@@ -616,9 +649,29 @@ struct ThreadDetailView: View {
             )
         }
 
+        if sseStatus.syncPending {
+            return AnyView(
+                HStack(spacing: 10) {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                    Text("Sync pending — reconnecting…")
+                        .font(.footnote)
+                    Spacer()
+                }
+                    .padding(10)
+                    .background(.thinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            )
+        }
+
         if s.queued + s.sending + s.pending > 0 {
             let statusText: String
-            if hasLongPending {
+            if let stage = latestSSEStage, stage.kind == .runStarted {
+                statusText = "Thinking…"
+            } else if let stage = latestSSEStage, stage.kind == .txAccepted {
+                statusText = "Sent/Queued…"
+            } else if s.sending > 0 {
+                statusText = "Sending…"
+            } else if hasLongPending {
                 statusText = "Still processing… pending \(s.pending), queued \(s.queued), sending \(s.sending)"
             } else {
                 statusText = "Outbox: queued \(s.queued), pending \(s.pending), sending \(s.sending)"
@@ -835,7 +888,7 @@ struct ThreadDetailView: View {
 
         // Submit to SolServer (throws on transport issues). We still keep the optimistic UI.
         let transport = SolServerClient()
-        Task {
+        Task { @MainActor in
             let actions = TransmissionActions(modelContext: modelContext, transport: transport)
 
             do {
@@ -854,25 +907,23 @@ struct ThreadDetailView: View {
                         forKey: mementoDefaultsKeyCurrent
                     )
 
-                    await MainActor.run {
-                        acceptedMemento = patched
-                        showToast("Accepted")
-                    }
+                    acceptedMemento = patched
+                    showToast("Accepted")
 
                     viewLog.info("[memento] accept applied serverId=\(applied.id, privacy: .public)")
                 } else if result.reason == "already_accepted" {
-                    await MainActor.run { showToast("Already accepted") }
+                    showToast("Already accepted")
                     viewLog.info("[memento] accept already_accepted")
                 } else {
-                    await MainActor.run { showToast("Accept not applied") }
+                    showToast("Accept not applied")
                     viewLog.info("[memento] accept not_applied reason=\(result.reason ?? "-", privacy: .public)")
                 }
             } catch {
-                await MainActor.run { showToast("Accept failed") }
+                showToast("Accept failed")
                 viewLog.error("[memento] accept failed err=\(String(describing: error), privacy: .public)")
             }
 
-            await MainActor.run { mementoRefreshToken &+= 1 }
+            mementoRefreshToken &+= 1
         }
     }
 
@@ -886,22 +937,18 @@ struct ThreadDetailView: View {
 
         // Submit to SolServer and clear the local draft fields so the banner disappears immediately.
         let transport = SolServerClient()
-        Task {
+        Task { @MainActor in
             let actions = TransmissionActions(modelContext: modelContext, transport: transport)
             do {
                 let result = try await actions.decideThreadMemento(threadId: thread.id, mementoId: m.id, decision: .decline)
 
-                await MainActor.run {
-                    showToast(result.applied ? "Declined" : "Decline saved")
-                    // Force re-evaluation (UserDefaults is not observed).
-                    mementoRefreshToken &+= 1
-                }
+                showToast(result.applied ? "Declined" : "Decline saved")
+                // Force re-evaluation (UserDefaults is not observed).
+                mementoRefreshToken &+= 1
             } catch {
-                await MainActor.run {
-                    showToast("Decline failed")
-                    // Force re-evaluation (UserDefaults is not observed).
-                    mementoRefreshToken &+= 1
-                }
+                showToast("Decline failed")
+                // Force re-evaluation (UserDefaults is not observed).
+                mementoRefreshToken &+= 1
 
                 viewLog.error("[memento] decline failed err=\(String(describing: error), privacy: .public)")
             }
@@ -927,22 +974,18 @@ struct ThreadDetailView: View {
 
             // Submit to SolServer and clear the local draft fields so the banner disappears immediately.
             let transport = SolServerClient()
-            Task {
+            Task { @MainActor in
                 let actions = TransmissionActions(modelContext: modelContext, transport: transport)
                 do {
                     let result = try await actions.decideThreadMemento(threadId: thread.id, mementoId: id, decision: .revoke)
 
-                    await MainActor.run {
-                        showToast(result.applied ? "Undone" : "Undo saved")
-                        // Force re-evaluation (UserDefaults is not observed).
-                        mementoRefreshToken &+= 1
-                    }
+                    showToast(result.applied ? "Undone" : "Undo saved")
+                    // Force re-evaluation (UserDefaults is not observed).
+                    mementoRefreshToken &+= 1
                 } catch {
-                    await MainActor.run {
-                        showToast("Undo failed")
-                        // Force re-evaluation (UserDefaults is not observed).
-                        mementoRefreshToken &+= 1
-                    }
+                    showToast("Undo failed")
+                    // Force re-evaluation (UserDefaults is not observed).
+                    mementoRefreshToken &+= 1
 
                     viewLog.error("[memento] revoke failed err=\(String(describing: error), privacy: .public)")
                 }

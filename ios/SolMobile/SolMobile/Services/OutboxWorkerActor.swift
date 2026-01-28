@@ -24,37 +24,56 @@ actor OutboxWorkerActor {
     }
 
     func processQueue(pollLimit: Int, pollFirst: Bool) async {
-        let engine = TransmissionActions(
-            modelContext: ModelContext(container),
-            transport: transport,
-            statusWatcher: statusWatcher
-        )
+        let engine = await MainActor.run {
+            TransmissionActions(
+                modelContext: ModelContext(container),
+                transport: transport,
+                statusWatcher: statusWatcher
+            )
+        }
         await engine.processQueue(pollLimit: pollLimit, pollFirst: pollFirst)
     }
 
-    func enqueueChat(threadId: UUID, messageId: UUID, messageText: String?, shouldFail: Bool) {
-        let engine = TransmissionActions(
-            modelContext: ModelContext(container),
-            transport: transport,
-            statusWatcher: statusWatcher
-        )
-        engine.enqueueChat(threadId: threadId, messageId: messageId, messageText: messageText, shouldFail: shouldFail)
+    func enqueueChat(threadId: UUID, messageId: UUID, messageText: String?, shouldFail: Bool) async {
+        let engine = await MainActor.run {
+            TransmissionActions(
+                modelContext: ModelContext(container),
+                transport: transport,
+                statusWatcher: statusWatcher
+            )
+        }
+        await engine.enqueueChat(threadId: threadId, messageId: messageId, messageText: messageText, shouldFail: shouldFail)
     }
 
-    func enqueueMemoryDistill(threadId: UUID, messageIds: [UUID], payload: MemoryDistillRequest) {
-        let engine = TransmissionActions(
-            modelContext: ModelContext(container),
-            transport: transport,
-            statusWatcher: statusWatcher
-        )
-        engine.enqueueMemoryDistill(threadId: threadId, messageIds: messageIds, payload: payload)
+    func enqueueMemoryDistill(threadId: UUID, messageIds: [UUID], payload: MemoryDistillRequest) async {
+        let engine = await MainActor.run {
+            TransmissionActions(
+                modelContext: ModelContext(container),
+                transport: transport,
+                statusWatcher: statusWatcher
+            )
+        }
+        await engine.enqueueMemoryDistill(threadId: threadId, messageIds: messageIds, payload: payload)
     }
-    func retryFailed() {
-        let engine = TransmissionActions(
-            modelContext: ModelContext(container),
-            transport: transport,
-            statusWatcher: statusWatcher
-        )
-        engine.retryFailed()
+    func retryFailed() async {
+        let engine = await MainActor.run {
+            TransmissionActions(
+                modelContext: ModelContext(container),
+                transport: transport,
+                statusWatcher: statusWatcher
+            )
+        }
+        await engine.retryFailed()
+    }
+
+    func pollTransmission(serverTransmissionId: String, reason: String) async {
+        let engine = await MainActor.run {
+            TransmissionActions(
+                modelContext: ModelContext(container),
+                transport: transport,
+                statusWatcher: statusWatcher
+            )
+        }
+        await engine.pollTransmission(serverTransmissionId: serverTransmissionId, reason: reason)
     }
 }

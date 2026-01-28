@@ -27,6 +27,9 @@ final class AppModel {
         outboxService = OutboxService(container: container)
         unreadTracker = UnreadTrackerActor(container: container)
 
+        SSEService.shared.bind(outboxService: outboxService)
+        SSEService.shared.start()
+
         outboxService.start()
         OutboxRefreshScheduler.shared.register { [weak outboxService] in
             await outboxService?.runBackgroundRefresh()
