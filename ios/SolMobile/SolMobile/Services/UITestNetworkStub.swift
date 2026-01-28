@@ -6,36 +6,36 @@
 import Foundation
 
 enum UITestNetworkStub {
-    private static let argument = "-ui_test_stub_network"
+    nonisolated private static let argument = "-ui_test_stub_network"
 
-    static var isEnabled: Bool {
+    nonisolated static var isEnabled: Bool {
         ProcessInfo.processInfo.arguments.contains(argument)
     }
 
-    static func enableIfNeeded() {
+    nonisolated static func enableIfNeeded() {
         guard isEnabled else { return }
         URLProtocol.registerClass(UITestURLProtocol.self)
     }
 }
 
-final class UITestURLProtocol: URLProtocol {
+nonisolated final class UITestURLProtocol: URLProtocol {
     private static let contentType = "application/json; charset=utf-8"
     private static let defaultSnippet = "Remembered for later."
     private static let defaultMemoryId = "mem-123"
 
-    private static var lastDistillTransmissionId: String = UUID().uuidString.lowercased()
+    nonisolated(unsafe) private static var lastDistillTransmissionId: String = UUID().uuidString.lowercased()
 
-    override class func canInit(with request: URLRequest) -> Bool {
+    override nonisolated class func canInit(with request: URLRequest) -> Bool {
         guard UITestNetworkStub.isEnabled else { return false }
         guard let url = request.url else { return false }
         return url.path.hasPrefix("/v1/")
     }
 
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+    override nonisolated class func canonicalRequest(for request: URLRequest) -> URLRequest {
         request
     }
 
-    override func startLoading() {
+    override nonisolated func startLoading() {
         guard let url = request.url else {
             finishWithError(code: 400, body: "{\"error\":\"invalid_url\"}")
             return
@@ -63,7 +63,15 @@ final class UITestURLProtocol: URLProtocol {
         finishWithError(code: 404, body: "{\"error\":\"not_found\"}")
     }
 
-    override func stopLoading() {}
+    override nonisolated func stopLoading() {}
+
+    override nonisolated init(
+        request: URLRequest,
+        cachedResponse: CachedURLResponse?,
+        client: URLProtocolClient?
+    ) {
+        super.init(request: request, cachedResponse: cachedResponse, client: client)
+    }
 
     private func respondChat() {
         let response: [String: Any] = [

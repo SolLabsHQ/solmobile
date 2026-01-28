@@ -7,11 +7,11 @@
 
 import Foundation
 
-protocol TransmissionStatusWatcher {
+protocol TransmissionStatusWatcher: Sendable {
     func poll(transmissionId: String, diagnostics: DiagnosticsContext?) async throws -> ChatPollResponse
 }
 
-struct PollingTransmissionStatusWatcher: TransmissionStatusWatcher {
+struct PollingTransmissionStatusWatcher: TransmissionStatusWatcher, Sendable {
     let transport: any ChatTransportPolling
 
     func poll(transmissionId: String, diagnostics: DiagnosticsContext?) async throws -> ChatPollResponse {

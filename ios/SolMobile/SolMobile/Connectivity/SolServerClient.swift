@@ -223,20 +223,7 @@ private final class TaskIdBox {
     var value: Int = 0
 }
 
-final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision {
-    private enum UserIdentity {
-        static let storageKey = "sol.dev.user_id"
-
-        static func resolvedId() -> String {
-            if let existing = UserDefaults.standard.string(forKey: storageKey),
-               !existing.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                return existing
-            }
-            let created = UUID().uuidString.lowercased()
-            UserDefaults.standard.set(created, forKey: storageKey)
-            return created
-        }
-    }
+final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision, @unchecked Sendable {
     private let baseURLProvider: () -> URL
     var baseURL: URL { baseURLProvider() }
     private let session: URLSession

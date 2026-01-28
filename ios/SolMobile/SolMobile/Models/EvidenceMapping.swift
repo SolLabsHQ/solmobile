@@ -102,7 +102,7 @@ extension Message {
     }
 }
 
-private func normalizeCaptureSource(_ source: String) -> String {
+nonisolated private func normalizeCaptureSource(_ source: String) -> String {
     switch source {
     case "user_provided":
         return "user_provided"

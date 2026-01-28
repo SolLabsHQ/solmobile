@@ -98,7 +98,7 @@ struct DiagnosticsContext: Sendable {
     let localTransmissionId: UUID?
 }
 
-protocol ChatTransport {
+protocol ChatTransport: Sendable {
     func send(envelope: PacketEnvelope, diagnostics: DiagnosticsContext?) async throws -> ChatResponse
 }
 
@@ -131,7 +131,7 @@ struct ThreadMementoDecisionResult: Sendable {
     let memento: ThreadMementoDTO?
 }
 
-protocol ChatTransportMementoDecision {
+protocol ChatTransportMementoDecision: Sendable {
     func decideMemento(threadId: String, mementoId: String, decision: ThreadMementoDecision) async throws -> ThreadMementoDecisionResult
 }
 
@@ -272,7 +272,8 @@ struct ChatResponse {
 
 // MARK: - Outbox processor
 
-nonisolated final class TransmissionActions {
+@MainActor
+final class TransmissionActions {
 
     private let outboxLog = Logger(subsystem: "com.sollabshq.solmobile", category: "Outbox")
 
@@ -492,6 +493,19 @@ nonisolated final class TransmissionActions {
         await sendNextQueued(runId: runId)
         let trailingPollLimit = pollFirst ? 1 : pollLimit
         await pollPending(runId: runId, limit: trailingPollLimit)
+    }
+
+    func pollTransmission(serverTransmissionId: String, reason: String) async {
+        let runId = "sse-\(String(UUID().uuidString.prefix(8)))"
+        guard let tx = fetchTransmissionByServerId(serverTransmissionId) else {
+            outboxLog.debug("pollTransmission run=\(runId, privacy: .public) event=missing tx=\(shortOrDash(serverTransmissionId), privacy: .public) reason=\(reason, privacy: .public)")
+            return
+        }
+
+        let attempts = sortedAttempts(tx.deliveryAttempts)
+        let sel = PendingSelection(txId: tx.id, packetId: tx.packet.id, threadId: tx.packet.threadId)
+        _ = await pollOnce(runId: runId, sel: sel, attempts: attempts)
+        try? modelContext.save()
     }
 
     // Poll up to N pending transmissions (does not block sending).
@@ -792,11 +806,12 @@ nonisolated final class TransmissionActions {
     ) {
         guard let firstId = messageIds.first else { return }
         let resolvedServerMessageId = serverMessageId ?? fallbackServerMessageId
-        Task { @MainActor in
-            guard let message = try? fetchMessage(id: firstId) else { return }
-            applyServerMessageId(resolvedServerMessageId, to: message)
-            AppleIntelligenceObserver.shared.observeMessage(message)
+        let d = FetchDescriptor<Message>(predicate: #Predicate { $0.id == firstId })
+        guard let message = try? modelContext.fetch(d).first else { return }
+        if let resolvedServerMessageId, !resolvedServerMessageId.isEmpty {
+            message.serverMessageId = resolvedServerMessageId
         }
+        AppleIntelligenceObserver.shared.observeMessage(message)
     }
 
     @discardableResult
@@ -857,15 +872,13 @@ nonisolated final class TransmissionActions {
         let newMemoryId = assistantMessage.ghostMemoryId
         let factNull = assistantMessage.ghostFactNull
         let ghostKind = assistantMessage.ghostKind
-        Task { @MainActor in
-            GhostCardReceipt.fireCanonizationIfNeeded(
-                modelContext: modelContext,
-                previousMemoryId: previousMemoryId,
-                newMemoryId: newMemoryId,
-                factNull: factNull,
-                ghostKind: ghostKind
-            )
-        }
+        GhostCardReceipt.fireCanonizationIfNeeded(
+            modelContext: modelContext,
+            previousMemoryId: previousMemoryId,
+            newMemoryId: newMemoryId,
+            factNull: factNull,
+            ghostKind: ghostKind
+        )
 
         thread.messages.append(assistantMessage)
         thread.lastActiveAt = Date()
@@ -892,8 +905,8 @@ nonisolated final class TransmissionActions {
 
         if let previousMessage {
             let previousMessageId = previousMessage.id
-            Task { @MainActor in
-                guard let message = try? fetchMessage(id: previousMessageId) else { return }
+            let d = FetchDescriptor<Message>(predicate: #Predicate { $0.id == previousMessageId })
+            if let message = try? modelContext.fetch(d).first {
                 AppleIntelligenceObserver.shared.observeMessage(message)
             }
         }
@@ -1635,6 +1648,15 @@ nonisolated final class TransmissionActions {
     private func fetchTransmission(id: UUID) throws -> Transmission? {
         let d = FetchDescriptor<Transmission>(predicate: #Predicate { $0.id == id })
         return try modelContext.fetch(d).first
+    }
+
+    private func fetchTransmissionByServerId(_ transmissionId: String) -> Transmission? {
+        let d = FetchDescriptor<DeliveryAttempt>(
+            predicate: #Predicate { $0.transmissionId == transmissionId },
+            sortBy: [SortDescriptor(\DeliveryAttempt.createdAt, order: .reverse)]
+        )
+        guard let attempts = try? modelContext.fetch(d) else { return nil }
+        return attempts.first?.transmission
     }
 
     private func fetchMessage(id: UUID) throws -> Message? {

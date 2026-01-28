@@ -250,6 +250,7 @@ struct SettingsView: View {
             if KeychainStore.delete(key: KeychainKeys.stagingApiKey) {
                 stagingKeyStatus = "No key set"
                 stagingKeyError = nil
+                SSEService.shared.stop()
             } else {
                 stagingKeyStatus = "Save failed"
                 stagingKeyError = "Unable to clear key"
@@ -260,6 +261,7 @@ struct SettingsView: View {
         if KeychainStore.write(trimmed, key: KeychainKeys.stagingApiKey) {
             stagingKeyStatus = "Key saved"
             stagingKeyError = nil
+            SSEService.shared.refreshConnection()
         } else {
             stagingKeyStatus = "Save failed"
             stagingKeyError = "Unable to save key"

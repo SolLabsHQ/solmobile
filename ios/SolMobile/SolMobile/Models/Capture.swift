@@ -9,7 +9,7 @@ import Foundation
 import SwiftData
 
 // Bounds constants (match SolServer)
-enum EvidenceBounds {
+nonisolated enum EvidenceBounds {
     static let maxCaptures = 25
     static let maxSupports = 50
     static let maxClaims = 50
