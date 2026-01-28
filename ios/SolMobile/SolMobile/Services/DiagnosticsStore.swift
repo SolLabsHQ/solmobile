@@ -95,7 +95,7 @@ nonisolated struct DiagnosticsEntry: Identifiable, Codable {
 
     func exportText() -> String {
         var lines: [String] = []
-        lines.append("Time: \(DiagnosticsEntry.isoFormatter.string(from: timestamp))")
+        lines.append("Time: \(DiagnosticsEntry.formatTimestamp(timestamp))")
         lines.append("Request: \(method) \(url)")
 
         if let attemptId {
@@ -180,11 +180,11 @@ nonisolated struct DiagnosticsEntry: Identifiable, Codable {
         return lines.joined(separator: "\n")
     }
 
-    private static let isoFormatter: ISO8601DateFormatter = {
+    private static func formatTimestamp(_ date: Date) -> String {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter
-    }()
+        return formatter.string(from: date)
+    }
 }
 
 @MainActor
