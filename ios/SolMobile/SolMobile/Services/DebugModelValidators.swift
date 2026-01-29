@@ -18,7 +18,7 @@ nonisolated enum DebugModelValidators {
         line: UInt = #line
     ) {
         #if DEBUG
-        guard extractThread(from: message) != nil else {
+        guard threadOrNil(message) != nil else {
             log.error(
                 "BUG: Message.thread is nil at save time. context=\(context, privacy: .public) messageId=\(message.id.uuidString, privacy: .public) serverMessageId=\(String(describing: message.serverMessageId), privacy: .public) transmissionId=\(String(describing: message.transmissionId), privacy: .public) creator=\(message.creatorTypeRaw, privacy: .public) file=\(String(describing: file), privacy: .public) func=\(String(describing: function), privacy: .public) line=\(line, privacy: .public)"
             )
@@ -42,11 +42,11 @@ nonisolated enum DebugModelValidators {
         #endif
     }
 
-    #if DEBUG
     static func threadOrNil(_ message: Message) -> ConversationThread? {
         extractThread(from: message)
     }
 
+    #if DEBUG
     static func pruneOrphanMessages(
         modelContext: ModelContext,
         reason: String
@@ -65,6 +65,8 @@ nonisolated enum DebugModelValidators {
         }
     }
 
+    #endif
+
     private static func extractThread(from message: Message) -> ConversationThread? {
         let mirror = Mirror(reflecting: message)
         guard let child = mirror.children.first(where: { $0.label == "thread" }) else {
@@ -80,5 +82,4 @@ nonisolated enum DebugModelValidators {
         }
         return message.thread
     }
-    #endif
 }

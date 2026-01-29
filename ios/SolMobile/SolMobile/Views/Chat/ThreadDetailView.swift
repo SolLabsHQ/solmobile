@@ -526,6 +526,11 @@ struct ThreadDetailView: View {
         composerText = ""
 
         let m = Message(thread: resolvedThread, creatorType: .user, text: text)
+        guard DebugModelValidators.threadOrNil(m) != nil else {
+            showToast("Thread not ready. Try again.")
+            viewLog.error("[send] thread_nil_guard thread=\(resolvedThread.id.uuidString.prefix(8), privacy: .public) msg=\(m.id.uuidString.prefix(8), privacy: .public)")
+            return
+        }
         DebugModelValidators.assertMessageHasThread(m, context: "ThreadDetailView.send.beforeInsert")
         resolvedThread.messages.append(m)
         resolvedThread.lastActiveAt = Date()

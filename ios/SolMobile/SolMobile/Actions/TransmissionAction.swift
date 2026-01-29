@@ -856,6 +856,12 @@ final class TransmissionActions {
             text: text,
             transmissionId: transmissionId
         )
+        guard DebugModelValidators.threadOrNil(assistantMessage) != nil else {
+            outboxLog.error(
+                "processQueue run=\(runId, privacy: .public) event=thread_nil_guard tx=\(short(txId), privacy: .public) thread=\(short(threadId), privacy: .public)"
+            )
+            return nil
+        }
         DebugModelValidators.assertMessageHasThread(
             assistantMessage,
             context: "TransmissionActions.appendAssistantMessageIfPossible.afterInit"
