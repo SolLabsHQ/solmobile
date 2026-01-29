@@ -517,17 +517,33 @@ struct ThreadDetailView: View {
 
     private func send(_ text: String) {
         draftStore.forceSaveNow(threadId: thread.id, content: text)
+        guard let resolvedThread = resolveThreadForSend() else {
+            showToast("Thread not ready. Try again.")
+            viewLog.error("[send] thread_missing thread=\(thread.id.uuidString.prefix(8), privacy: .public)")
+            return
+        }
         pendingSendClear = true
         composerText = ""
 
-        let m = Message(thread: thread, creatorType: .user, text: text)
+        let m = Message(thread: resolvedThread, creatorType: .user, text: text)
         DebugModelValidators.assertMessageHasThread(m, context: "ThreadDetailView.send.beforeInsert")
-        thread.messages.append(m)
-        thread.lastActiveAt = Date()
+        resolvedThread.messages.append(m)
+        resolvedThread.lastActiveAt = Date()
         modelContext.insert(m)
 
         viewLog.info("[send] thread=\(thread.id.uuidString.prefix(8), privacy: .public) msg=\(m.id.uuidString.prefix(8), privacy: .public) len=\(text.count, privacy: .public)")
-        outboxService?.enqueueChat(thread: thread, userMessage: m)
+        outboxService?.enqueueChat(thread: resolvedThread, userMessage: m)
+    }
+
+    private func resolveThreadForSend() -> ConversationThread? {
+        let threadId = thread.id
+        let d = FetchDescriptor<ConversationThread>(
+            predicate: #Predicate<ConversationThread> { $0.id == threadId }
+        )
+        if let resolved = try? modelContext.fetch(d).first {
+            return resolved
+        }
+        return nil
     }
 
     private var draftStore: DraftStore {
@@ -1512,7 +1528,7 @@ private struct MessageBubble: View {
             .onAppear {
                 logJournalOfferGateIfNeeded()
             }
-            .onChange(of: message.journalOfferJson) { _ in
+            .onChange(of: message.journalOfferJson) { _, _ in
                 logJournalOfferGateIfNeeded()
             }
         }
