@@ -9,7 +9,7 @@ import SwiftData
 
 @MainActor
 final class StorageCleanupTests: SwiftDataTestBase {
-    private func skipIfIOS26() throws {
+    private nonisolated func skipIfIOS26() throws {
         if #available(iOS 26, *) {
             throw XCTSkip("SwiftData crash on iOS 26.x sim for cleanup deletes")
         }

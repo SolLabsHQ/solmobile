@@ -6,6 +6,7 @@
 import XCTest
 @testable import SolMobile
 
+@MainActor
 final class TraceEventsEncodingTests: XCTestCase {
     func test_deviceMuseObservation_isMechanismOnly() throws {
         let observation = DeviceMuseObservation(

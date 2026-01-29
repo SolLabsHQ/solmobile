@@ -20,7 +20,7 @@ final class DraftRecord {
     }
 }
 
-struct DraftSnapshot: Sendable {
+nonisolated struct DraftSnapshot: Sendable {
     let content: String
     let updatedAt: Date
 }

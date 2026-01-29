@@ -5,12 +5,12 @@
 
 import Foundation
 
-enum JournalDraftMode: String, Codable, CaseIterable {
+nonisolated enum JournalDraftMode: String, Codable, CaseIterable {
     case verbatim
     case assist
 }
 
-struct JournalEvidenceSpan: Codable, Hashable {
+nonisolated struct JournalEvidenceSpan: Codable, Hashable {
     let startMessageId: String
     let endMessageId: String
 
@@ -63,7 +63,7 @@ struct JournalEvidenceSpan: Codable, Hashable {
     }
 }
 
-struct JournalOffer: Codable, Hashable {
+nonisolated struct JournalOffer: Codable, Hashable {
     let momentId: String
     let momentType: String
     let phase: String
@@ -196,7 +196,7 @@ struct JournalOffer: Codable, Hashable {
     }
 }
 
-struct JournalOfferRecord: Codable, Hashable {
+nonisolated struct JournalOfferRecord: Codable, Hashable {
     let kind: String?
     let offerEligible: Bool
     let evidenceSpan: JournalEvidenceSpan?

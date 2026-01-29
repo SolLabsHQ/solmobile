@@ -8,6 +8,7 @@
 import XCTest
 @testable import SolMobile
 
+@MainActor
 final class RetryPolicyTests: XCTestCase {
     func test_driverBlock422_isTerminal() {
         let body = #"{"error":"driver_block_enforcement_failed"}"#

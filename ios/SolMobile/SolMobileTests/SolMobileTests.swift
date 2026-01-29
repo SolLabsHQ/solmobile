@@ -10,6 +10,7 @@ import XCTest
 
 /// Keep this file as a lightweight smoke test container.
 /// Real tests live under `SolMobileTests/` (Support/Mocks/Fixtures/Actions/Models/Connectivity).
+@MainActor
 final class SolMobileSmokeTests: XCTestCase {
 
     func testModuleLoadsAndCoreTypesLink() {

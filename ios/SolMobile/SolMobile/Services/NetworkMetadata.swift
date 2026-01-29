@@ -7,43 +7,50 @@
 
 import Foundation
 
-struct RedirectHop {
+nonisolated struct RedirectHop {
     let from: URL
     let to: URL
     let statusCode: Int
     let method: String?
 }
 
-struct ResponseInfo {
+nonisolated struct ResponseInfo {
     let statusCode: Int
     let headers: [String: String]
     let finalURL: URL?
     let redirectChain: [RedirectHop]
 }
 
-final class RedirectTracker: NSObject, URLSessionTaskDelegate {
+final class RedirectTracker: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.sollabshq.solmobile.redirect-tracker")
-    private var chains: [Int: [RedirectHop]] = [:]
+    private var chains: [String: [RedirectHop]] = [:]
     private let maxRedirects = 3
 
-    func recordRedirect(taskId: Int, from: URL, to: URL, statusCode: Int, method: String?) {
+    func recordRedirect(taskKey: String, from: URL, to: URL, statusCode: Int, method: String?) {
         queue.sync {
-            var chain = chains[taskId] ?? []
+            var chain = chains[taskKey] ?? []
             guard chain.count < maxRedirects else {
-                chains[taskId] = chain
+                chains[taskKey] = chain
                 return
             }
             chain.append(RedirectHop(from: from, to: to, statusCode: statusCode, method: method))
-            chains[taskId] = chain
+            chains[taskKey] = chain
         }
     }
 
-    func consumeChain(taskId: Int) -> [RedirectHop] {
+    func consumeChain(taskKey: String) -> [RedirectHop] {
         queue.sync {
-            let chain = chains[taskId] ?? []
-            chains[taskId] = nil
+            let chain = chains[taskKey] ?? []
+            chains[taskKey] = nil
             return chain
         }
+    }
+
+    private func taskKey(for task: URLSessionTask) -> String {
+        if let description = task.taskDescription, !description.isEmpty {
+            return description
+        }
+        return String(task.taskIdentifier)
     }
 
     func urlSession(
@@ -56,7 +63,7 @@ final class RedirectTracker: NSObject, URLSessionTaskDelegate {
         if let fromURL = response.url ?? task.currentRequest?.url,
            let toURL = request.url {
             recordRedirect(
-                taskId: task.taskIdentifier,
+                taskKey: taskKey(for: task),
                 from: fromURL,
                 to: toURL,
                 statusCode: response.statusCode,

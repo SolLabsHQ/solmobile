@@ -8,6 +8,7 @@
 import Foundation
 @testable import SolMobile
 
+@MainActor
 final class MockChatTransport: ChatTransportPolling, ChatTransportMementoDecision {
     func decideMemento(
         threadId: String,

@@ -250,13 +250,13 @@ extension Message {
 }
 
 // Evidence DTOs for outbound payloads (flat, contract-aligned)
-struct EvidencePayload: Codable {
+nonisolated struct EvidencePayload: Codable {
     let captures: [EvidencePayloadCaptureDTO]
     let supports: [EvidencePayloadClaimSupportDTO]
     let claims: [EvidencePayloadClaimMapEntryDTO]
 }
 
-struct EvidencePayloadCaptureDTO: Codable {
+nonisolated struct EvidencePayloadCaptureDTO: Codable {
     let captureId: String
     let kind: String
     let url: String
@@ -265,7 +265,7 @@ struct EvidencePayloadCaptureDTO: Codable {
     let source: String
 }
 
-struct EvidencePayloadClaimSupportDTO: Codable {
+nonisolated struct EvidencePayloadClaimSupportDTO: Codable {
     let supportId: String
     let type: String
     let captureId: String?
@@ -274,7 +274,7 @@ struct EvidencePayloadClaimSupportDTO: Codable {
     let createdAt: String
 }
 
-struct EvidencePayloadClaimMapEntryDTO: Codable {
+nonisolated struct EvidencePayloadClaimMapEntryDTO: Codable {
     let claimId: String
     let claimText: String
     let supportIds: [String]
@@ -419,6 +419,7 @@ extension EvidencePayload {
 
 extension Message {
     @available(*, deprecated, message: "Use makeEvidenceSnapshot() on the owning actor, then EvidencePayload.from(snapshot:).")
+    @MainActor
     func toEvidencePayload() throws -> EvidencePayload {
         let snapshot = try makeEvidenceSnapshot()
         return EvidencePayload.from(snapshot: snapshot)

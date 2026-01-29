@@ -6,6 +6,7 @@
 import XCTest
 @testable import SolMobile
 
+@MainActor
 final class HealthCheckPolicyTests: XCTestCase {
     func testHealthCheckSuccessIncludesAny2xx() {
         XCTAssertTrue(HealthCheckPolicy.isSuccess(status: 200))

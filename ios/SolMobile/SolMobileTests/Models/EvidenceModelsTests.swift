@@ -15,6 +15,7 @@ import XCTest
 import SwiftData
 @testable import SolMobile
 
+@MainActor
 final class EvidenceModelsTests: XCTestCase {
     
     // MARK: - Persistence and Relationships

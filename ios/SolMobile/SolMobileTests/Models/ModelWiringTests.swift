@@ -9,6 +9,7 @@ import XCTest
 import SwiftData
 @testable import SolMobile
 
+@MainActor
 final class ModelWiringTests: XCTestCase {
 
     @MainActor

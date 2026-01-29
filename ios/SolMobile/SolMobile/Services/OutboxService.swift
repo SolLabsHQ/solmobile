@@ -130,6 +130,14 @@ final class OutboxService {
         }
     }
 
+    func handleSSETransmissionUpdate(transmissionId: String, reason: String) {
+        outboxLog.info("sse event=transmission_update tx=\(transmissionId, privacy: .public) reason=\(reason, privacy: .public)")
+        Task { [weak self] in
+            guard let self else { return }
+            await self.worker.pollTransmission(serverTransmissionId: transmissionId, reason: reason)
+        }
+    }
+
     func runBackgroundRefresh() async {
         await runOnce(reason: .bgRefresh, useBackgroundTask: false)
     }

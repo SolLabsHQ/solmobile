@@ -19,6 +19,7 @@ struct ThreadDetailView: View {
     @AppStorage(ThreadContextSettings.modeKey) private var threadContextMode: String = ThreadContextSettings.Mode.auto.rawValue
     @AppStorage(ThreadContextSettings.showKey) private var showThreadContext: Bool = false
     @ObservedObject private var budgetStore = BudgetStore.shared
+    @ObservedObject private var sseStatus = SSEStatusStore.shared
     @Bindable var thread: ConversationThread
     @Query private var messages: [Message]
     @Query private var transmissions: [Transmission]
@@ -184,211 +185,223 @@ struct ThreadDetailView: View {
         }
     }
 
-    var body: some View {
-        ZStack(alignment: .bottom) {
-            VStack(spacing: 0) {
-
-            // Accepted ThreadMemento (navigation snapshot).
-            if let acceptedMemento {
-                mementoAcceptedCard(acceptedMemento)
-                    .padding(.horizontal, 10)
-                    .padding(.top, 8)
+    @ViewBuilder
+    private var ghostOverlay: some View {
+        if let ghost = latestGhostMessage, ghostOverlayMode == .full {
+            MuseOverlayHost(
+                canAscend: ghost.isAscendEligible && JournalDonationService.isJournalAvailable,
+                onDismiss: { dismissGhostOverlay(ghost) },
+                onAscend: { ghostHandleAscendTrigger = true }
+            ) {
+                MessageBubble(
+                    message: ghost,
+                    scrollViewportHeight: scrollViewportHeight,
+                    handleAscendTrigger: $ghostHandleAscendTrigger
+                )
             }
-
-            // Thread context or pending ThreadMemento draft from latest server response.
-            if let pending = pendingMementoCandidate {
-                Group {
-                    if pending.kind == .latest {
-                        mementoContextCard(pending)
-                    } else {
-                        mementoPendingCard(pending)
+            .transition(.opacity.combined(with: .scale(scale: 0.98)))
+            .animation(.easeIn(duration: 1.2), value: ghost.id)
+            .task(id: ghostSnoozeKey(for: ghost)) {
+                await MainActor.run {
+                    let typing = !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    let mode = preferredOverlayMode(for: ghost, isTyping: typing)
+                    ghostOverlayMode = mode
+                    if mode == .hidden, isGhostManualEntry(ghost), typing {
+                        presentRecoveryPill(for: ghost)
                     }
+                    scheduleGhostAutoSnooze(ghost)
                 }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var recoveryPillOverlay: some View {
+        if showRecoveryPill {
+            RecoveryPillView {
+                restoreGhostOverlay()
+            }
+            .padding(.leading, 12)
+            .padding(.bottom, composerHeight + outboxBannerHeight + 12)
+            .transition(.opacity)
+        }
+    }
+
+    @ViewBuilder
+    private var mainStack: some View {
+        VStack(spacing: 0) {
+
+        // Accepted ThreadMemento (navigation snapshot).
+        if let acceptedMemento {
+            mementoAcceptedCard(acceptedMemento)
                 .padding(.horizontal, 10)
                 .padding(.top, 8)
-            }
+        }
 
-            // Mini toast: short-lived feedback for memento actions.
-            if let toastMessage {
-                HStack(spacing: 10) {
-                    Image(systemName: "checkmark.circle")
-                    Text(toastMessage)
-                        .font(.footnote)
-                    Spacer()
-                }
-                .padding(10)
-                .background(.thinMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .padding(.horizontal, 10)
-                .padding(.top, 8)
-                .transition(.opacity)
-                .animation(.easeInOut(duration: 0.15), value: toastMessage)
-            }
-
-            ScrollViewReader { proxy in
-                VStack(spacing: 0) {
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 10) {
-                            ForEach(displayMessages) { msg in
-                                MessageBubble(message: msg, scrollViewportHeight: scrollViewportHeight)
-                                    .id(msg.id)
-                                    .background(GeometryReader { geo in
-                                        Color.clear.preference(
-                                            key: MessageFramePreferenceKey.self,
-                                            value: [msg.id: geo.frame(in: .named("threadScroll"))]
-                                        )
-                                    })
-                            }
-                        }
-                        .padding(.vertical, 12)
-                        .padding(.horizontal, 12)
-                    }
-                    .scrollDismissesKeyboard(.never)
-                    .contentShape(Rectangle())
-                    .simultaneousGesture(
-                        DragGesture(minimumDistance: 10)
-                            .onEnded { value in
-                                let dy = value.translation.height
-                                let dx = value.translation.width
-                                guard dy > Self.keyboardDismissThreshold, abs(dy) > abs(dx) else { return }
-                                KeyboardDismiss.dismiss()
-                            }
-                    )
-                    .coordinateSpace(name: "threadScroll")
-                    .background(
-                        GeometryReader { geo in
-                            Color.clear
-                                .onAppear { scrollViewportHeight = geo.size.height }
-                                .onChange(of: geo.size.height) { _, newValue in
-                                    scrollViewportHeight = newValue
-                                }
-                        }
-                    )
-                    .onPreferenceChange(MessageFramePreferenceKey.self) { frames in
-                        updateVisibleAnchor(frames: frames)
-                        updateAutoScroll(frames: frames)
-                    }
-                    .onAppear {
-                        applyInitialScroll(proxy: proxy)
-                    }
-                    .onChange(of: messages.count) { _, _ in
-                        applyInitialScroll(proxy: proxy)
-                        guard let last = displayMessages.last else { return }
-                        if autoScrollToLatest {
-                            proxy.scrollTo(last.id, anchor: .bottom)
-                        } else {
-                            showJumpToLatest = true
-                            refreshNewMessagesPill()
-                        }
-                    }
-
-                    if showNewMessagesPill, let targetId = newMessagesTargetId {
-                        Button(newMessagesLabel) {
-                            autoScrollToLatest = false
-                            showJumpToLatest = true
-                            proxy.scrollTo(targetId, anchor: .top)
-                        }
-                        .font(.footnote)
-                        .padding(.vertical, 6)
-                        .padding(.horizontal, 12)
-                        .background(.thinMaterial)
-                        .clipShape(Capsule())
-                        .padding(.bottom, 6)
-                    }
-
-                    if showJumpToLatest {
-                        Button("Jump to latest") {
-                            guard let last = displayMessages.last else { return }
-                            autoScrollToLatest = true
-                            showJumpToLatest = false
-                            showNewMessagesPill = false
-                            proxy.scrollTo(last.id, anchor: .bottom)
-                        }
-                        .font(.footnote)
-                        .padding(.vertical, 6)
-                        .padding(.horizontal, 12)
-                        .background(.thinMaterial)
-                        .clipShape(Capsule())
-                        .padding(.bottom, 6)
-                    }
+        // Thread context or pending ThreadMemento draft from latest server response.
+        if let pending = pendingMementoCandidate {
+            Group {
+                if pending.kind == .latest {
+                    mementoContextCard(pending)
+                } else {
+                    mementoPendingCard(pending)
                 }
             }
+            .padding(.horizontal, 10)
+            .padding(.top, 8)
+        }
 
-            Divider()
-
-            // Outbox banner reflects local Transmission state (queued/sending/failed).
-            if let banner = outboxBanner {
-                banner
-                    .padding(.horizontal, 10)
-                    .padding(.top, 8)
-                    .background(
-                        GeometryReader { geo in
-                            Color.clear
-                                .onAppear { outboxBannerHeight = geo.size.height }
-                                .onChange(of: geo.size.height) { _, newValue in
-                                    outboxBannerHeight = newValue
-                                }
-                        }
-                    )
-            }
-
-            ComposerView(
-                text: $composerText,
-                starlightState: starlightState,
-                isSendBlocked: budgetStore.isBlockedNow(),
-                blockedUntil: budgetStore.state.blockedUntil
-            ) { text in
-                send(text)
+        // Mini toast: short-lived feedback for memento actions.
+        if let toastMessage {
+            HStack(spacing: 10) {
+                Image(systemName: "checkmark.circle")
+                Text(toastMessage)
+                    .font(.footnote)
+                Spacer()
             }
             .padding(10)
-            .background(
-                GeometryReader { geo in
-                    Color.clear
-                        .onAppear { composerHeight = geo.size.height }
-                        .onChange(of: geo.size.height) { _, newValue in
-                            composerHeight = newValue
-                        }
-                }
-            )
-            }
+            .background(.thinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .padding(.horizontal, 10)
+            .padding(.top, 8)
+            .transition(.opacity)
+            .animation(.easeInOut(duration: 0.15), value: toastMessage)
+        }
 
-            // Ghost Cards should not "push" layout when they arrive. Render the newest ghost as an overlay
-            // pinned above the composer so it develops in place (Spirit Fade) without a layout pop.
-            if let ghost = latestGhostMessage, ghostOverlayMode == .full {
-                MuseOverlayHost(
-                    canAscend: ghost.isAscendEligible && JournalDonationService.isJournalAvailable,
-                    onDismiss: { dismissGhostOverlay(ghost) },
-                    onAscend: { ghostHandleAscendTrigger = true }
-                ) {
-                    MessageBubble(
-                        message: ghost,
-                        scrollViewportHeight: scrollViewportHeight,
-                        handleAscendTrigger: $ghostHandleAscendTrigger
-                    )
-                }
-                .transition(.opacity.combined(with: .scale(scale: 0.98)))
-                .animation(.easeIn(duration: 1.2), value: ghost.id)
-                .task(id: ghostSnoozeKey(for: ghost)) {
-                    await MainActor.run {
-                        let typing = !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        let mode = preferredOverlayMode(for: ghost, isTyping: typing)
-                        ghostOverlayMode = mode
-                        if mode == .hidden, isGhostManualEntry(ghost), typing {
-                            presentRecoveryPill(for: ghost)
+        ScrollViewReader { proxy in
+            VStack(spacing: 0) {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 10) {
+                        ForEach(displayMessages) { msg in
+                            MessageBubble(message: msg, scrollViewportHeight: scrollViewportHeight)
+                                .id(msg.id)
+                                .background(GeometryReader { geo in
+                                    Color.clear.preference(
+                                        key: MessageFramePreferenceKey.self,
+                                        value: [msg.id: geo.frame(in: .named("threadScroll"))]
+                                    )
+                                })
                         }
-                        scheduleGhostAutoSnooze(ghost)
+                    }
+                    .padding(.vertical, 12)
+                    .padding(.horizontal, 12)
+                }
+                .scrollDismissesKeyboard(.never)
+                .contentShape(Rectangle())
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 10)
+                        .onEnded { value in
+                            let dy = value.translation.height
+                            let dx = value.translation.width
+                            guard dy > Self.keyboardDismissThreshold, abs(dy) > abs(dx) else { return }
+                            KeyboardDismiss.dismiss()
+                        }
+                )
+                .coordinateSpace(name: "threadScroll")
+                .background(
+                    GeometryReader { geo in
+                        Color.clear
+                            .onAppear { scrollViewportHeight = geo.size.height }
+                            .onChange(of: geo.size.height) { _, newValue in
+                                scrollViewportHeight = newValue
+                            }
+                    }
+                )
+                .onPreferenceChange(MessageFramePreferenceKey.self) { frames in
+                    updateVisibleAnchor(frames: frames)
+                    updateAutoScroll(frames: frames)
+                }
+                .onAppear {
+                    applyInitialScroll(proxy: proxy)
+                }
+                .onChange(of: messages.count) { _, _ in
+                    applyInitialScroll(proxy: proxy)
+                    guard let last = displayMessages.last else { return }
+                    if autoScrollToLatest {
+                        proxy.scrollTo(last.id, anchor: .bottom)
+                    } else {
+                        showJumpToLatest = true
+                        refreshNewMessagesPill()
                     }
                 }
-            }
 
-            if showRecoveryPill {
-                RecoveryPillView {
-                    restoreGhostOverlay()
+                if showNewMessagesPill, let targetId = newMessagesTargetId {
+                    Button(newMessagesLabel) {
+                        autoScrollToLatest = false
+                        showJumpToLatest = true
+                        proxy.scrollTo(targetId, anchor: .top)
+                    }
+                    .font(.footnote)
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 12)
+                    .background(.thinMaterial)
+                    .clipShape(Capsule())
+                    .padding(.bottom, 6)
                 }
-                .padding(.leading, 12)
-                .padding(.bottom, composerHeight + outboxBannerHeight + 12)
-                .transition(.opacity)
+
+                if showJumpToLatest {
+                    Button("Jump to latest") {
+                        guard let last = displayMessages.last else { return }
+                        autoScrollToLatest = true
+                        showJumpToLatest = false
+                        showNewMessagesPill = false
+                        proxy.scrollTo(last.id, anchor: .bottom)
+                    }
+                    .font(.footnote)
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 12)
+                    .background(.thinMaterial)
+                    .clipShape(Capsule())
+                    .padding(.bottom, 6)
+                }
             }
+        }
+
+        Divider()
+
+        // Outbox banner reflects local Transmission state (queued/sending/failed).
+        if let banner = outboxBanner {
+            banner
+                .padding(.horizontal, 10)
+                .padding(.top, 8)
+                .background(
+                    GeometryReader { geo in
+                        Color.clear
+                            .onAppear { outboxBannerHeight = geo.size.height }
+                            .onChange(of: geo.size.height) { _, newValue in
+                                outboxBannerHeight = newValue
+                            }
+                    }
+                )
+        }
+
+        ComposerView(
+            text: $composerText,
+            starlightState: starlightState,
+            isSendBlocked: budgetStore.isBlockedNow(),
+            blockedUntil: budgetStore.state.blockedUntil
+        ) { text in
+            send(text)
+        }
+        .padding(10)
+        .background(
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear { composerHeight = geo.size.height }
+                    .onChange(of: geo.size.height) { _, newValue in
+                        composerHeight = newValue
+                    }
+            }
+        )
+        }
+
+    }
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            mainStack
+            ghostOverlay
+            recoveryPillOverlay
         }
         .onChange(of: outboxSummary.failed + outboxSummary.queued + outboxSummary.sending + outboxSummary.pending) { _, newValue in
             viewLog.debug("[outboxBanner] refresh total=\(newValue, privacy: .public)")
@@ -396,6 +409,15 @@ struct ThreadDetailView: View {
         .onChange(of: outboxStatusSignature) { _, _ in
             updateOutboxSummary()
             refreshStarlightPending()
+        }
+        .onChange(of: sseStatus.isWorking) { _, _ in
+            refreshStarlightFromSSE()
+        }
+        .onChange(of: sseStatus.workingTimedOut) { _, timedOut in
+            if timedOut {
+                starlightState = .idle
+                starlightPendingSince = nil
+            }
         }
         .onChange(of: latestAssistantMessageId) { _, newId in
             guard seededAssistantArrival else {
@@ -495,17 +517,38 @@ struct ThreadDetailView: View {
 
     private func send(_ text: String) {
         draftStore.forceSaveNow(threadId: thread.id, content: text)
+        guard let resolvedThread = resolveThreadForSend() else {
+            showToast("Thread not ready. Try again.")
+            viewLog.error("[send] thread_missing thread=\(thread.id.uuidString.prefix(8), privacy: .public)")
+            return
+        }
         pendingSendClear = true
         composerText = ""
 
-        let m = Message(thread: thread, creatorType: .user, text: text)
+        let m = Message(thread: resolvedThread, creatorType: .user, text: text)
+        guard DebugModelValidators.threadOrNil(m) != nil else {
+            showToast("Thread not ready. Try again.")
+            viewLog.error("[send] thread_nil_guard thread=\(resolvedThread.id.uuidString.prefix(8), privacy: .public) msg=\(m.id.uuidString.prefix(8), privacy: .public)")
+            return
+        }
         DebugModelValidators.assertMessageHasThread(m, context: "ThreadDetailView.send.beforeInsert")
-        thread.messages.append(m)
-        thread.lastActiveAt = Date()
+        resolvedThread.messages.append(m)
+        resolvedThread.lastActiveAt = Date()
         modelContext.insert(m)
 
         viewLog.info("[send] thread=\(thread.id.uuidString.prefix(8), privacy: .public) msg=\(m.id.uuidString.prefix(8), privacy: .public) len=\(text.count, privacy: .public)")
-        outboxService?.enqueueChat(thread: thread, userMessage: m)
+        outboxService?.enqueueChat(thread: resolvedThread, userMessage: m)
+    }
+
+    private func resolveThreadForSend() -> ConversationThread? {
+        let threadId = thread.id
+        let d = FetchDescriptor<ConversationThread>(
+            predicate: #Predicate<ConversationThread> { $0.id == threadId }
+        )
+        if let resolved = try? modelContext.fetch(d).first {
+            return resolved
+        }
+        return nil
     }
 
     private var draftStore: DraftStore {
@@ -588,8 +631,40 @@ struct ThreadDetailView: View {
         }
     }
 
+    private var latestSSEStage: SSEStatusStore.TransmissionStage? {
+        sseStatus.latestStage(forThreadId: thread.id.uuidString)
+    }
+
+    private var sseFailureDetail: SSEStatusStore.FailureDetail? {
+        sseStatus.failureDetail(forThreadId: thread.id.uuidString)
+    }
+
     private var outboxBanner: AnyView? {
         let s = outboxSummary
+
+        if let failure = sseFailureDetail,
+           latestSSEStage?.kind == .assistantFailed {
+            let detail = failure.detail ?? "Request failed."
+            let codeSuffix = failure.code.map { " (\($0))" } ?? ""
+            return AnyView(
+                HStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle")
+                    Text("\(detail)\(codeSuffix)")
+                        .font(.footnote)
+                    Spacer()
+                    if failure.retryable == true {
+                        Button("Retry") {
+                            viewLog.info("[retry] sse failure retry tapped")
+                            outboxService?.retryFailed()
+                        }
+                        .font(.footnote)
+                    }
+                }
+                    .padding(10)
+                    .background(.thinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            )
+        }
 
         if s.failed > 0 {
             return AnyView(
@@ -616,9 +691,29 @@ struct ThreadDetailView: View {
             )
         }
 
+        if sseStatus.syncPending {
+            return AnyView(
+                HStack(spacing: 10) {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                    Text("Sync pending — reconnecting…")
+                        .font(.footnote)
+                    Spacer()
+                }
+                    .padding(10)
+                    .background(.thinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            )
+        }
+
         if s.queued + s.sending + s.pending > 0 {
             let statusText: String
-            if hasLongPending {
+            if let stage = latestSSEStage, stage.kind == .runStarted {
+                statusText = "Thinking…"
+            } else if let stage = latestSSEStage, stage.kind == .txAccepted {
+                statusText = "Sent/Queued…"
+            } else if s.sending > 0 {
+                statusText = "Sending…"
+            } else if hasLongPending {
                 statusText = "Still processing… pending \(s.pending), queued \(s.queued), sending \(s.sending)"
             } else {
                 statusText = "Outbox: queued \(s.queued), pending \(s.pending), sending \(s.sending)"
@@ -835,7 +930,7 @@ struct ThreadDetailView: View {
 
         // Submit to SolServer (throws on transport issues). We still keep the optimistic UI.
         let transport = SolServerClient()
-        Task {
+        Task { @MainActor in
             let actions = TransmissionActions(modelContext: modelContext, transport: transport)
 
             do {
@@ -854,25 +949,23 @@ struct ThreadDetailView: View {
                         forKey: mementoDefaultsKeyCurrent
                     )
 
-                    await MainActor.run {
-                        acceptedMemento = patched
-                        showToast("Accepted")
-                    }
+                    acceptedMemento = patched
+                    showToast("Accepted")
 
                     viewLog.info("[memento] accept applied serverId=\(applied.id, privacy: .public)")
                 } else if result.reason == "already_accepted" {
-                    await MainActor.run { showToast("Already accepted") }
+                    showToast("Already accepted")
                     viewLog.info("[memento] accept already_accepted")
                 } else {
-                    await MainActor.run { showToast("Accept not applied") }
+                    showToast("Accept not applied")
                     viewLog.info("[memento] accept not_applied reason=\(result.reason ?? "-", privacy: .public)")
                 }
             } catch {
-                await MainActor.run { showToast("Accept failed") }
+                showToast("Accept failed")
                 viewLog.error("[memento] accept failed err=\(String(describing: error), privacy: .public)")
             }
 
-            await MainActor.run { mementoRefreshToken &+= 1 }
+            mementoRefreshToken &+= 1
         }
     }
 
@@ -886,22 +979,18 @@ struct ThreadDetailView: View {
 
         // Submit to SolServer and clear the local draft fields so the banner disappears immediately.
         let transport = SolServerClient()
-        Task {
+        Task { @MainActor in
             let actions = TransmissionActions(modelContext: modelContext, transport: transport)
             do {
                 let result = try await actions.decideThreadMemento(threadId: thread.id, mementoId: m.id, decision: .decline)
 
-                await MainActor.run {
-                    showToast(result.applied ? "Declined" : "Decline saved")
-                    // Force re-evaluation (UserDefaults is not observed).
-                    mementoRefreshToken &+= 1
-                }
+                showToast(result.applied ? "Declined" : "Decline saved")
+                // Force re-evaluation (UserDefaults is not observed).
+                mementoRefreshToken &+= 1
             } catch {
-                await MainActor.run {
-                    showToast("Decline failed")
-                    // Force re-evaluation (UserDefaults is not observed).
-                    mementoRefreshToken &+= 1
-                }
+                showToast("Decline failed")
+                // Force re-evaluation (UserDefaults is not observed).
+                mementoRefreshToken &+= 1
 
                 viewLog.error("[memento] decline failed err=\(String(describing: error), privacy: .public)")
             }
@@ -927,22 +1016,18 @@ struct ThreadDetailView: View {
 
             // Submit to SolServer and clear the local draft fields so the banner disappears immediately.
             let transport = SolServerClient()
-            Task {
+            Task { @MainActor in
                 let actions = TransmissionActions(modelContext: modelContext, transport: transport)
                 do {
                     let result = try await actions.decideThreadMemento(threadId: thread.id, mementoId: id, decision: .revoke)
 
-                    await MainActor.run {
-                        showToast(result.applied ? "Undone" : "Undo saved")
-                        // Force re-evaluation (UserDefaults is not observed).
-                        mementoRefreshToken &+= 1
-                    }
+                    showToast(result.applied ? "Undone" : "Undo saved")
+                    // Force re-evaluation (UserDefaults is not observed).
+                    mementoRefreshToken &+= 1
                 } catch {
-                    await MainActor.run {
-                        showToast("Undo failed")
-                        // Force re-evaluation (UserDefaults is not observed).
-                        mementoRefreshToken &+= 1
-                    }
+                    showToast("Undo failed")
+                    // Force re-evaluation (UserDefaults is not observed).
+                    mementoRefreshToken &+= 1
 
                     viewLog.error("[memento] revoke failed err=\(String(describing: error), privacy: .public)")
                 }
@@ -1034,6 +1119,23 @@ struct ThreadDetailView: View {
                 starlightPendingSince = pendingSince
             }
         } else if starlightState == .pending {
+            starlightState = .idle
+            starlightPendingSince = nil
+        }
+    }
+
+    private func refreshStarlightFromSSE() {
+        guard starlightState != .flash else { return }
+        if sseStatus.isWorking {
+            if starlightState == .idle {
+                starlightState = .pending
+            }
+            if starlightPendingSince == nil {
+                starlightPendingSince = Date()
+            }
+            return
+        }
+        if pendingChatSince() == nil && starlightState == .pending {
             starlightState = .idle
             starlightPendingSince = nil
         }
@@ -1431,7 +1533,7 @@ private struct MessageBubble: View {
             .onAppear {
                 logJournalOfferGateIfNeeded()
             }
-            .onChange(of: message.journalOfferJson) { _ in
+            .onChange(of: message.journalOfferJson) { _, _ in
                 logJournalOfferGateIfNeeded()
             }
         }

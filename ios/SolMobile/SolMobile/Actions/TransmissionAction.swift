@@ -81,7 +81,7 @@ nonisolated private enum ThreadMementoFormatter {
 
 // MARK: - Transport contracts
 
-struct PacketEnvelope: Sendable {
+nonisolated struct PacketEnvelope: Sendable {
     let packetId: UUID
     let packetType: String
     let threadId: UUID
@@ -92,13 +92,13 @@ struct PacketEnvelope: Sendable {
     let payloadJson: String?
 }
 
-struct DiagnosticsContext: Sendable {
+nonisolated struct DiagnosticsContext: Sendable {
     let attemptId: UUID
     let threadId: UUID?
     let localTransmissionId: UUID?
 }
 
-protocol ChatTransport {
+protocol ChatTransport: Sendable {
     func send(envelope: PacketEnvelope, diagnostics: DiagnosticsContext?) async throws -> ChatResponse
 }
 
@@ -124,18 +124,18 @@ enum ThreadMementoDecision: String, Codable, Sendable {
     case revoke
 }
 
-struct ThreadMementoDecisionResult: Sendable {
+nonisolated struct ThreadMementoDecisionResult: Sendable {
     let statusCode: Int
     let applied: Bool
     let reason: String?
     let memento: ThreadMementoDTO?
 }
 
-protocol ChatTransportMementoDecision {
+protocol ChatTransportMementoDecision: Sendable {
     func decideMemento(threadId: String, mementoId: String, decision: ThreadMementoDecision) async throws -> ThreadMementoDecisionResult
 }
 
-struct ChatPollResponse {
+nonisolated struct ChatPollResponse {
     let pending: Bool
     let assistant: String?
     let serverStatus: String?
@@ -164,7 +164,7 @@ struct ChatPollResponse {
         userMessageId: String? = nil,
         assistantMessageId: String? = nil,
         threadMemento: ThreadMementoDTO?,
-        journalOffer: JournalOffer?,
+        journalOffer: JournalOffer? = nil,
         evidenceSummary: EvidenceSummaryDTO?,
         evidence: EvidenceDTO?,
         evidenceWarnings: [EvidenceWarningDTO]?,
@@ -195,7 +195,7 @@ enum TransportError: Error {
     case unsupportedTransport(capability: String)
 }
 
-struct HTTPErrorInfo {
+nonisolated struct HTTPErrorInfo {
     let code: Int
     let body: String
     let headers: [String: String]
@@ -217,7 +217,7 @@ struct HTTPErrorInfo {
     }
 }
 
-struct ChatResponse {
+nonisolated struct ChatResponse {
     let text: String
     let statusCode: Int
     let transmissionId: String?
@@ -246,7 +246,7 @@ struct ChatResponse {
         userMessageId: String? = nil,
         assistantMessageId: String? = nil,
         threadMemento: ThreadMementoDTO?,
-        journalOffer: JournalOffer?,
+        journalOffer: JournalOffer? = nil,
         evidenceSummary: EvidenceSummaryDTO?,
         evidence: EvidenceDTO?,
         evidenceWarnings: [EvidenceWarningDTO]?,
@@ -272,7 +272,8 @@ struct ChatResponse {
 
 // MARK: - Outbox processor
 
-nonisolated final class TransmissionActions {
+@MainActor
+final class TransmissionActions {
 
     private let outboxLog = Logger(subsystem: "com.sollabshq.solmobile", category: "Outbox")
 
@@ -492,6 +493,19 @@ nonisolated final class TransmissionActions {
         await sendNextQueued(runId: runId)
         let trailingPollLimit = pollFirst ? 1 : pollLimit
         await pollPending(runId: runId, limit: trailingPollLimit)
+    }
+
+    func pollTransmission(serverTransmissionId: String, reason: String) async {
+        let runId = "sse-\(String(UUID().uuidString.prefix(8)))"
+        guard let tx = fetchTransmissionByServerId(serverTransmissionId) else {
+            outboxLog.debug("pollTransmission run=\(runId, privacy: .public) event=missing tx=\(shortOrDash(serverTransmissionId), privacy: .public) reason=\(reason, privacy: .public)")
+            return
+        }
+
+        let attempts = sortedAttempts(tx.deliveryAttempts)
+        let sel = PendingSelection(txId: tx.id, packetId: tx.packet.id, threadId: tx.packet.threadId)
+        _ = await pollOnce(runId: runId, sel: sel, attempts: attempts)
+        try? modelContext.save()
     }
 
     // Poll up to N pending transmissions (does not block sending).
@@ -792,11 +806,12 @@ nonisolated final class TransmissionActions {
     ) {
         guard let firstId = messageIds.first else { return }
         let resolvedServerMessageId = serverMessageId ?? fallbackServerMessageId
-        Task { @MainActor in
-            guard let message = try? fetchMessage(id: firstId) else { return }
-            applyServerMessageId(resolvedServerMessageId, to: message)
-            AppleIntelligenceObserver.shared.observeMessage(message)
+        let d = FetchDescriptor<Message>(predicate: #Predicate { $0.id == firstId })
+        guard let message = try? modelContext.fetch(d).first else { return }
+        if let resolvedServerMessageId, !resolvedServerMessageId.isEmpty {
+            message.serverMessageId = resolvedServerMessageId
         }
+        AppleIntelligenceObserver.shared.observeMessage(message)
     }
 
     @discardableResult
@@ -812,7 +827,16 @@ nonisolated final class TransmissionActions {
         txId: UUID,
         via: String
     ) -> Message? {
-        guard let thread = try? fetchThread(id: threadId) else { return nil }
+        guard let thread = resolveThread(
+            threadId: threadId,
+            runId: runId,
+            reason: "append_assistant"
+        ) else {
+            outboxLog.error(
+                "processQueue run=\(runId, privacy: .public) event=thread_missing_skip_message tx=\(short(txId), privacy: .public) thread=\(short(threadId), privacy: .public)"
+            )
+            return nil
+        }
         let previousMessage = thread.messages.last
 
         let text: String
@@ -832,6 +856,12 @@ nonisolated final class TransmissionActions {
             text: text,
             transmissionId: transmissionId
         )
+        guard DebugModelValidators.threadOrNil(assistantMessage) != nil else {
+            outboxLog.error(
+                "processQueue run=\(runId, privacy: .public) event=thread_nil_guard tx=\(short(txId), privacy: .public) thread=\(short(threadId), privacy: .public)"
+            )
+            return nil
+        }
         DebugModelValidators.assertMessageHasThread(
             assistantMessage,
             context: "TransmissionActions.appendAssistantMessageIfPossible.afterInit"
@@ -857,15 +887,13 @@ nonisolated final class TransmissionActions {
         let newMemoryId = assistantMessage.ghostMemoryId
         let factNull = assistantMessage.ghostFactNull
         let ghostKind = assistantMessage.ghostKind
-        Task { @MainActor in
-            GhostCardReceipt.fireCanonizationIfNeeded(
-                modelContext: modelContext,
-                previousMemoryId: previousMemoryId,
-                newMemoryId: newMemoryId,
-                factNull: factNull,
-                ghostKind: ghostKind
-            )
-        }
+        GhostCardReceipt.fireCanonizationIfNeeded(
+            modelContext: modelContext,
+            previousMemoryId: previousMemoryId,
+            newMemoryId: newMemoryId,
+            factNull: factNull,
+            ghostKind: ghostKind
+        )
 
         thread.messages.append(assistantMessage)
         thread.lastActiveAt = Date()
@@ -892,8 +920,8 @@ nonisolated final class TransmissionActions {
 
         if let previousMessage {
             let previousMessageId = previousMessage.id
-            Task { @MainActor in
-                guard let message = try? fetchMessage(id: previousMessageId) else { return }
+            let d = FetchDescriptor<Message>(predicate: #Predicate { $0.id == previousMessageId })
+            if let message = try? modelContext.fetch(d).first {
                 AppleIntelligenceObserver.shared.observeMessage(message)
             }
         }
@@ -927,6 +955,20 @@ nonisolated final class TransmissionActions {
 
         outboxLog.info("processQueue run=\(runId, privacy: .public) event=assistant_appended tx=\(short(txId), privacy: .public) via=\(via, privacy: .public)")
         return assistantMessage
+    }
+
+    private func resolveThread(
+        threadId: UUID,
+        runId: String,
+        reason: String
+    ) -> ConversationThread? {
+        if let existing = try? fetchThread(id: threadId) {
+            return existing
+        }
+        outboxLog.error(
+            "processQueue run=\(runId, privacy: .public) event=thread_missing_skip_message reason=\(reason, privacy: .public) thread=\(short(threadId), privacy: .public)"
+        )
+        return nil
     }
 
     private func upsertMemoryArtifact(from message: Message) {
@@ -1635,6 +1677,15 @@ nonisolated final class TransmissionActions {
     private func fetchTransmission(id: UUID) throws -> Transmission? {
         let d = FetchDescriptor<Transmission>(predicate: #Predicate { $0.id == id })
         return try modelContext.fetch(d).first
+    }
+
+    private func fetchTransmissionByServerId(_ transmissionId: String) -> Transmission? {
+        let d = FetchDescriptor<DeliveryAttempt>(
+            predicate: #Predicate { $0.transmissionId == transmissionId },
+            sortBy: [SortDescriptor(\DeliveryAttempt.createdAt, order: .reverse)]
+        )
+        guard let attempts = try? modelContext.fetch(d) else { return nil }
+        return attempts.first?.transmission
     }
 
     private func fetchMessage(id: UUID) throws -> Message? {

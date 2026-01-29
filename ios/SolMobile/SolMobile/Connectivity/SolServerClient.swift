@@ -219,24 +219,7 @@ private struct MementoDecisionResponse: Codable {
     let memento: ThreadMementoDTO?
 }
 
-private final class TaskIdBox {
-    var value: Int = 0
-}
-
-final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision {
-    private enum UserIdentity {
-        static let storageKey = "sol.dev.user_id"
-
-        static func resolvedId() -> String {
-            if let existing = UserDefaults.standard.string(forKey: storageKey),
-               !existing.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                return existing
-            }
-            let created = UUID().uuidString.lowercased()
-            UserDefaults.standard.set(created, forKey: storageKey)
-            return created
-        }
-    }
+final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision, @unchecked Sendable {
     private let baseURLProvider: () -> URL
     var baseURL: URL { baseURLProvider() }
     private let session: URLSession
@@ -351,20 +334,25 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
             throw error
         }
 
-        let hadAuthorization = authorizedReq.value(forHTTPHeaderField: "Authorization") != nil
+        let request = authorizedReq
+        let hadAuthorization = request.value(forHTTPHeaderField: "Authorization") != nil
         let started = Date()
+        let taskKey = UUID().uuidString
 
         return try await withCheckedThrowingContinuation { continuation in
-            let taskIdBox = TaskIdBox()
-            let task = session.dataTask(with: authorizedReq) { data, response, error in
+            let task = session.dataTask(with: request) { [weak self] data, response, error in
+                guard let self else {
+                    continuation.resume(throwing: URLError(.cancelled))
+                    return
+                }
                 let latencyMs = Int(Date().timeIntervalSince(started) * 1000)
-                let redirectChain = self.redirectTracker.consumeChain(taskId: taskIdBox.value)
+                let redirectChain = self.redirectTracker.consumeChain(taskKey: taskKey)
 
                 if let error {
                     let decision = RetryPolicy.classify(statusCode: nil, body: nil, headers: nil, error: error)
                     DiagnosticsStore.recordAsync(
-                        method: authorizedReq.httpMethod ?? "GET",
-                        url: authorizedReq.url,
+                        method: request.httpMethod ?? "GET",
+                        url: request.url,
                         responseURL: response?.url,
                         redirectChain: redirectChain,
                         status: nil,
@@ -380,8 +368,8 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
                         error: error,
                         responseData: nil,
                         responseHeaders: nil,
-                        requestHeaders: authorizedReq.allHTTPHeaderFields,
-                        requestBody: authorizedReq.httpBody,
+                        requestHeaders: request.allHTTPHeaderFields,
+                        requestBody: request.httpBody,
                         hadAuthorization: hadAuthorization
                     )
                     continuation.resume(throwing: error)
@@ -391,8 +379,8 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
                 guard let data, let http = response as? HTTPURLResponse else {
                     let error = URLError(.badServerResponse)
                     DiagnosticsStore.recordAsync(
-                        method: authorizedReq.httpMethod ?? "GET",
-                        url: authorizedReq.url,
+                        method: request.httpMethod ?? "GET",
+                        url: request.url,
                         responseURL: response?.url,
                         redirectChain: redirectChain,
                         status: nil,
@@ -408,15 +396,15 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
                         error: error,
                         responseData: nil,
                         responseHeaders: nil,
-                        requestHeaders: authorizedReq.allHTTPHeaderFields,
-                        requestBody: authorizedReq.httpBody,
+                        requestHeaders: request.allHTTPHeaderFields,
+                        requestBody: request.httpBody,
                         hadAuthorization: hadAuthorization
                     )
                     continuation.resume(throwing: error)
                     return
                 }
 
-                let headers = self.normalizedHeaders(http.allHeaderFields)
+                let headers = normalizedHeaders(http.allHeaderFields)
                 let responseInfo = ResponseInfo(
                     statusCode: http.statusCode,
                     headers: headers,
@@ -431,12 +419,12 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
                     headers: headers,
                     error: nil
                 )
-                let traceRunId = self.extractTraceRunId(headers: headers, body: bodyString)
-                let transmissionId = self.extractTransmissionId(headers: headers, body: bodyString)
+                let traceRunId = extractTraceRunId(headers: headers, body: bodyString)
+                let transmissionId = extractTransmissionId(headers: headers, body: bodyString)
 
                 DiagnosticsStore.recordAsync(
-                    method: authorizedReq.httpMethod ?? "GET",
-                    url: authorizedReq.url,
+                    method: request.httpMethod ?? "GET",
+                    url: request.url,
                     responseURL: responseInfo.finalURL,
                     redirectChain: redirectChain,
                     status: http.statusCode,
@@ -452,14 +440,14 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
                     error: nil,
                     responseData: data,
                     responseHeaders: http.allHeaderFields,
-                    requestHeaders: authorizedReq.allHTTPHeaderFields,
-                    requestBody: authorizedReq.httpBody,
+                    requestHeaders: request.allHTTPHeaderFields,
+                    requestBody: request.httpBody,
                     hadAuthorization: hadAuthorization
                 )
 
                 continuation.resume(returning: (data, http, responseInfo))
             }
-            taskIdBox.value = task.taskIdentifier
+            task.taskDescription = taskKey
             task.resume()
         }
     }
@@ -503,42 +491,6 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
                 )
             )
         }
-    }
-
-    private func normalizedHeaders(_ headers: [AnyHashable: Any]) -> [String: String] {
-        var normalized: [String: String] = [:]
-        for (key, value) in headers {
-            let keyString = String(describing: key).lowercased()
-            normalized[keyString] = String(describing: value)
-        }
-        return normalized
-    }
-
-    private func extractTraceRunId(headers: [String: String], body: String?) -> String? {
-        if let trace = headers["x-sol-trace-run-id"], !trace.isEmpty {
-            return trace
-        }
-        return RetryPolicy.parseErrorEnvelope(from: body)?.traceRunId
-    }
-
-    private func extractTransmissionId(headers: [String: String], body: String?) -> String? {
-        if let id = headers["x-sol-transmission-id"], !id.isEmpty {
-            return id
-        }
-        if let parsed = RetryPolicy.parseErrorEnvelope(from: body), let id = parsed.transmissionId {
-            return id
-        }
-        guard let body, let data = body.data(using: .utf8) else { return nil }
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return nil
-        }
-        if let id = json["transmissionId"] as? String, !id.isEmpty {
-            return id
-        }
-        if let id = json["transmission_id"] as? String, !id.isEmpty {
-            return id
-        }
-        return nil
     }
 
     // MARK: - Typed endpoints (useful for decoding tests / direct calls)
@@ -883,4 +835,40 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision 
             outputEnvelope: decoded.outputEnvelope
         )
     }
+}
+
+nonisolated func normalizedHeaders(_ headers: [AnyHashable: Any]) -> [String: String] {
+    var normalized: [String: String] = [:]
+    for (key, value) in headers {
+        let keyString = String(describing: key).lowercased()
+        normalized[keyString] = String(describing: value)
+    }
+    return normalized
+}
+
+nonisolated func extractTraceRunId(headers: [String: String], body: String?) -> String? {
+    if let trace = headers["x-sol-trace-run-id"], !trace.isEmpty {
+        return trace
+    }
+    return RetryPolicy.parseErrorEnvelope(from: body)?.traceRunId
+}
+
+nonisolated func extractTransmissionId(headers: [String: String], body: String?) -> String? {
+    if let id = headers["x-sol-transmission-id"], !id.isEmpty {
+        return id
+    }
+    if let parsed = RetryPolicy.parseErrorEnvelope(from: body), let id = parsed.transmissionId {
+        return id
+    }
+    guard let body, let data = body.data(using: .utf8) else { return nil }
+    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        return nil
+    }
+    if let id = json["transmissionId"] as? String, !id.isEmpty {
+        return id
+    }
+    if let id = json["transmission_id"] as? String, !id.isEmpty {
+        return id
+    }
+    return nil
 }

@@ -22,10 +22,17 @@ final class AppModel {
         if !useInMemory {
             var descriptor = FetchDescriptor<ConversationThread>()
             descriptor.fetchLimit = 1
-            _ = try? ModelContext(container).fetch(descriptor)
+            let context = ModelContext(container)
+            _ = try? context.fetch(descriptor)
+            #if DEBUG
+            DebugModelValidators.pruneOrphanMessages(modelContext: context, reason: "app_init")
+            #endif
         }
         outboxService = OutboxService(container: container)
         unreadTracker = UnreadTrackerActor(container: container)
+
+        SSEService.shared.bind(outboxService: outboxService)
+        SSEService.shared.start()
 
         outboxService.start()
         OutboxRefreshScheduler.shared.register { [weak outboxService] in

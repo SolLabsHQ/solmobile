@@ -5,7 +5,7 @@
 
 import Foundation
 
-enum GhostKind: String, Codable, CaseIterable {
+nonisolated enum GhostKind: String, Codable, CaseIterable {
     case memoryArtifact = "memory_artifact"
     case journalMoment = "journal_moment"
     case actionProposal = "action_proposal"
@@ -52,7 +52,7 @@ enum GhostKind: String, Codable, CaseIterable {
     }
 }
 
-enum GhostRigorLevel: String {
+nonisolated enum GhostRigorLevel: String {
     case normal
     case high
 }
@@ -63,7 +63,7 @@ struct GhostCTAState {
     let requiresConfirm: Bool
 }
 
-enum MoodAnchor: String {
+nonisolated enum MoodAnchor: String {
     case breakthrough
     case resolve
     case nostalgia
