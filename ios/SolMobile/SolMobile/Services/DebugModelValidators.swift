@@ -5,6 +5,7 @@
 
 import Foundation
 import os
+import SwiftData
 
 nonisolated enum DebugModelValidators {
     static let log = Logger(subsystem: "com.sollabshq.solmobile", category: "swiftdata-validate")
@@ -40,6 +41,28 @@ nonisolated enum DebugModelValidators {
     }
 
     #if DEBUG
+    static func threadOrNil(_ message: Message) -> ConversationThread? {
+        extractThread(from: message)
+    }
+
+    static func pruneOrphanMessages(
+        modelContext: ModelContext,
+        reason: String
+    ) {
+        let descriptor = FetchDescriptor<Message>()
+        guard let messages = try? modelContext.fetch(descriptor) else { return }
+        let orphans = messages.filter { extractThread(from: $0) == nil }
+        guard !orphans.isEmpty else { return }
+
+        orphans.forEach { modelContext.delete($0) }
+        do {
+            try modelContext.save()
+            log.error("pruned_orphan_messages count=\(orphans.count, privacy: .public) reason=\(reason, privacy: .public)")
+        } catch {
+            log.error("prune_orphan_messages_failed count=\(orphans.count, privacy: .public) reason=\(reason, privacy: .public) err=\(String(describing: error), privacy: .public)")
+        }
+    }
+
     private static func extractThread(from message: Message) -> ConversationThread? {
         let mirror = Mirror(reflecting: message)
         guard let child = mirror.children.first(where: { $0.label == "thread" }) else {
