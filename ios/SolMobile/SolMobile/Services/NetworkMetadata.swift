@@ -7,14 +7,14 @@
 
 import Foundation
 
-struct RedirectHop {
+nonisolated struct RedirectHop {
     let from: URL
     let to: URL
     let statusCode: Int
     let method: String?
 }
 
-struct ResponseInfo {
+nonisolated struct ResponseInfo {
     let statusCode: Int
     let headers: [String: String]
     let finalURL: URL?

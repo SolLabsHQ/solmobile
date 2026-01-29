@@ -9,7 +9,9 @@ import Foundation
 import XCTest
 @testable import SolMobile
 
+@MainActor
 final class RedirectTrackerTests: XCTestCase {
+    @MainActor
     func test_redirectTracker_recordsAndCapsChain() {
         let tracker = RedirectTracker()
         let taskId = 42
@@ -25,8 +27,10 @@ final class RedirectTrackerTests: XCTestCase {
         tracker.recordRedirect(taskId: taskId, from: url4, to: url1, statusCode: 308, method: "GET")
 
         let chain = tracker.consumeChain(taskId: taskId)
+        let firstFrom = chain[0].from
+        let lastTo = chain[2].to
         XCTAssertEqual(chain.count, 3)
-        XCTAssertEqual(chain[0].from, url1)
-        XCTAssertEqual(chain[2].to, url4)
+        XCTAssertEqual(firstFrom, url1)
+        XCTAssertEqual(lastTo, url4)
     }
 }

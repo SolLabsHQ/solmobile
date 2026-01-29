@@ -9,6 +9,7 @@ import XCTest
 import SwiftData
 @testable import SolMobile
 
+@MainActor
 final class TransmissionActionsPollingTests: SwiftDataTestBase {
 
     // Transport that returns 202 first, then completes via poll.

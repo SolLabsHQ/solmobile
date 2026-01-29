@@ -6,6 +6,7 @@
 import XCTest
 @testable import SolMobile
 
+@MainActor
 final class JournalPresentationStateTests: XCTestCase {
     func test_alertDismissTransitionsToShareSheetWhenFlagged() {
         let state = JournalPresentationState.alert(message: "Test", showShareSheet: true)

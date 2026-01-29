@@ -6,6 +6,7 @@
 import XCTest
 @testable import SolMobile
 
+@MainActor
 final class JournalDonationServiceTests: XCTestCase {
     func test_donateMoment_returnsUnavailableWhenDirectDonationUnsupported() async {
         let result = await JournalDonationService.shared.donateMoment(

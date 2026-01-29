@@ -7,6 +7,7 @@ import XCTest
 import SwiftData
 @testable import SolMobile
 
+@MainActor
 final class OutputEnvelopeStorageTests: XCTestCase {
 
     @MainActor

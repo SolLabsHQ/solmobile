@@ -81,7 +81,7 @@ nonisolated private enum ThreadMementoFormatter {
 
 // MARK: - Transport contracts
 
-struct PacketEnvelope: Sendable {
+nonisolated struct PacketEnvelope: Sendable {
     let packetId: UUID
     let packetType: String
     let threadId: UUID
@@ -92,7 +92,7 @@ struct PacketEnvelope: Sendable {
     let payloadJson: String?
 }
 
-struct DiagnosticsContext: Sendable {
+nonisolated struct DiagnosticsContext: Sendable {
     let attemptId: UUID
     let threadId: UUID?
     let localTransmissionId: UUID?
@@ -124,7 +124,7 @@ enum ThreadMementoDecision: String, Codable, Sendable {
     case revoke
 }
 
-struct ThreadMementoDecisionResult: Sendable {
+nonisolated struct ThreadMementoDecisionResult: Sendable {
     let statusCode: Int
     let applied: Bool
     let reason: String?
@@ -135,7 +135,7 @@ protocol ChatTransportMementoDecision: Sendable {
     func decideMemento(threadId: String, mementoId: String, decision: ThreadMementoDecision) async throws -> ThreadMementoDecisionResult
 }
 
-struct ChatPollResponse {
+nonisolated struct ChatPollResponse {
     let pending: Bool
     let assistant: String?
     let serverStatus: String?
@@ -164,7 +164,7 @@ struct ChatPollResponse {
         userMessageId: String? = nil,
         assistantMessageId: String? = nil,
         threadMemento: ThreadMementoDTO?,
-        journalOffer: JournalOffer?,
+        journalOffer: JournalOffer? = nil,
         evidenceSummary: EvidenceSummaryDTO?,
         evidence: EvidenceDTO?,
         evidenceWarnings: [EvidenceWarningDTO]?,
@@ -195,7 +195,7 @@ enum TransportError: Error {
     case unsupportedTransport(capability: String)
 }
 
-struct HTTPErrorInfo {
+nonisolated struct HTTPErrorInfo {
     let code: Int
     let body: String
     let headers: [String: String]
@@ -217,7 +217,7 @@ struct HTTPErrorInfo {
     }
 }
 
-struct ChatResponse {
+nonisolated struct ChatResponse {
     let text: String
     let statusCode: Int
     let transmissionId: String?
@@ -246,7 +246,7 @@ struct ChatResponse {
         userMessageId: String? = nil,
         assistantMessageId: String? = nil,
         threadMemento: ThreadMementoDTO?,
-        journalOffer: JournalOffer?,
+        journalOffer: JournalOffer? = nil,
         evidenceSummary: EvidenceSummaryDTO?,
         evidence: EvidenceDTO?,
         evidenceWarnings: [EvidenceWarningDTO]?,

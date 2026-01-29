@@ -8,6 +8,7 @@
 import XCTest
 @testable import SolMobile
 
+@MainActor
 final class SolServerClientRequestTests: XCTestCase {
 
     private func makeConfig() -> URLSessionConfiguration {

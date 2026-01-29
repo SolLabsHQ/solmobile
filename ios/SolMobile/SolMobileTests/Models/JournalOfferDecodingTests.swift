@@ -6,6 +6,7 @@
 import XCTest
 @testable import SolMobile
 
+@MainActor
 final class JournalOfferDecodingTests: XCTestCase {
     func test_outputEnvelope_decodesJournalOfferCamelCase() throws {
         let json = """

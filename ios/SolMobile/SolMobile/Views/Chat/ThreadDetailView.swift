@@ -185,211 +185,223 @@ struct ThreadDetailView: View {
         }
     }
 
-    var body: some View {
-        ZStack(alignment: .bottom) {
-            VStack(spacing: 0) {
-
-            // Accepted ThreadMemento (navigation snapshot).
-            if let acceptedMemento {
-                mementoAcceptedCard(acceptedMemento)
-                    .padding(.horizontal, 10)
-                    .padding(.top, 8)
+    @ViewBuilder
+    private var ghostOverlay: some View {
+        if let ghost = latestGhostMessage, ghostOverlayMode == .full {
+            MuseOverlayHost(
+                canAscend: ghost.isAscendEligible && JournalDonationService.isJournalAvailable,
+                onDismiss: { dismissGhostOverlay(ghost) },
+                onAscend: { ghostHandleAscendTrigger = true }
+            ) {
+                MessageBubble(
+                    message: ghost,
+                    scrollViewportHeight: scrollViewportHeight,
+                    handleAscendTrigger: $ghostHandleAscendTrigger
+                )
             }
-
-            // Thread context or pending ThreadMemento draft from latest server response.
-            if let pending = pendingMementoCandidate {
-                Group {
-                    if pending.kind == .latest {
-                        mementoContextCard(pending)
-                    } else {
-                        mementoPendingCard(pending)
+            .transition(.opacity.combined(with: .scale(scale: 0.98)))
+            .animation(.easeIn(duration: 1.2), value: ghost.id)
+            .task(id: ghostSnoozeKey(for: ghost)) {
+                await MainActor.run {
+                    let typing = !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    let mode = preferredOverlayMode(for: ghost, isTyping: typing)
+                    ghostOverlayMode = mode
+                    if mode == .hidden, isGhostManualEntry(ghost), typing {
+                        presentRecoveryPill(for: ghost)
                     }
+                    scheduleGhostAutoSnooze(ghost)
                 }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var recoveryPillOverlay: some View {
+        if showRecoveryPill {
+            RecoveryPillView {
+                restoreGhostOverlay()
+            }
+            .padding(.leading, 12)
+            .padding(.bottom, composerHeight + outboxBannerHeight + 12)
+            .transition(.opacity)
+        }
+    }
+
+    @ViewBuilder
+    private var mainStack: some View {
+        VStack(spacing: 0) {
+
+        // Accepted ThreadMemento (navigation snapshot).
+        if let acceptedMemento {
+            mementoAcceptedCard(acceptedMemento)
                 .padding(.horizontal, 10)
                 .padding(.top, 8)
-            }
+        }
 
-            // Mini toast: short-lived feedback for memento actions.
-            if let toastMessage {
-                HStack(spacing: 10) {
-                    Image(systemName: "checkmark.circle")
-                    Text(toastMessage)
-                        .font(.footnote)
-                    Spacer()
-                }
-                .padding(10)
-                .background(.thinMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .padding(.horizontal, 10)
-                .padding(.top, 8)
-                .transition(.opacity)
-                .animation(.easeInOut(duration: 0.15), value: toastMessage)
-            }
-
-            ScrollViewReader { proxy in
-                VStack(spacing: 0) {
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 10) {
-                            ForEach(displayMessages) { msg in
-                                MessageBubble(message: msg, scrollViewportHeight: scrollViewportHeight)
-                                    .id(msg.id)
-                                    .background(GeometryReader { geo in
-                                        Color.clear.preference(
-                                            key: MessageFramePreferenceKey.self,
-                                            value: [msg.id: geo.frame(in: .named("threadScroll"))]
-                                        )
-                                    })
-                            }
-                        }
-                        .padding(.vertical, 12)
-                        .padding(.horizontal, 12)
-                    }
-                    .scrollDismissesKeyboard(.never)
-                    .contentShape(Rectangle())
-                    .simultaneousGesture(
-                        DragGesture(minimumDistance: 10)
-                            .onEnded { value in
-                                let dy = value.translation.height
-                                let dx = value.translation.width
-                                guard dy > Self.keyboardDismissThreshold, abs(dy) > abs(dx) else { return }
-                                KeyboardDismiss.dismiss()
-                            }
-                    )
-                    .coordinateSpace(name: "threadScroll")
-                    .background(
-                        GeometryReader { geo in
-                            Color.clear
-                                .onAppear { scrollViewportHeight = geo.size.height }
-                                .onChange(of: geo.size.height) { _, newValue in
-                                    scrollViewportHeight = newValue
-                                }
-                        }
-                    )
-                    .onPreferenceChange(MessageFramePreferenceKey.self) { frames in
-                        updateVisibleAnchor(frames: frames)
-                        updateAutoScroll(frames: frames)
-                    }
-                    .onAppear {
-                        applyInitialScroll(proxy: proxy)
-                    }
-                    .onChange(of: messages.count) { _, _ in
-                        applyInitialScroll(proxy: proxy)
-                        guard let last = displayMessages.last else { return }
-                        if autoScrollToLatest {
-                            proxy.scrollTo(last.id, anchor: .bottom)
-                        } else {
-                            showJumpToLatest = true
-                            refreshNewMessagesPill()
-                        }
-                    }
-
-                    if showNewMessagesPill, let targetId = newMessagesTargetId {
-                        Button(newMessagesLabel) {
-                            autoScrollToLatest = false
-                            showJumpToLatest = true
-                            proxy.scrollTo(targetId, anchor: .top)
-                        }
-                        .font(.footnote)
-                        .padding(.vertical, 6)
-                        .padding(.horizontal, 12)
-                        .background(.thinMaterial)
-                        .clipShape(Capsule())
-                        .padding(.bottom, 6)
-                    }
-
-                    if showJumpToLatest {
-                        Button("Jump to latest") {
-                            guard let last = displayMessages.last else { return }
-                            autoScrollToLatest = true
-                            showJumpToLatest = false
-                            showNewMessagesPill = false
-                            proxy.scrollTo(last.id, anchor: .bottom)
-                        }
-                        .font(.footnote)
-                        .padding(.vertical, 6)
-                        .padding(.horizontal, 12)
-                        .background(.thinMaterial)
-                        .clipShape(Capsule())
-                        .padding(.bottom, 6)
-                    }
+        // Thread context or pending ThreadMemento draft from latest server response.
+        if let pending = pendingMementoCandidate {
+            Group {
+                if pending.kind == .latest {
+                    mementoContextCard(pending)
+                } else {
+                    mementoPendingCard(pending)
                 }
             }
+            .padding(.horizontal, 10)
+            .padding(.top, 8)
+        }
 
-            Divider()
-
-            // Outbox banner reflects local Transmission state (queued/sending/failed).
-            if let banner = outboxBanner {
-                banner
-                    .padding(.horizontal, 10)
-                    .padding(.top, 8)
-                    .background(
-                        GeometryReader { geo in
-                            Color.clear
-                                .onAppear { outboxBannerHeight = geo.size.height }
-                                .onChange(of: geo.size.height) { _, newValue in
-                                    outboxBannerHeight = newValue
-                                }
-                        }
-                    )
-            }
-
-            ComposerView(
-                text: $composerText,
-                starlightState: starlightState,
-                isSendBlocked: budgetStore.isBlockedNow(),
-                blockedUntil: budgetStore.state.blockedUntil
-            ) { text in
-                send(text)
+        // Mini toast: short-lived feedback for memento actions.
+        if let toastMessage {
+            HStack(spacing: 10) {
+                Image(systemName: "checkmark.circle")
+                Text(toastMessage)
+                    .font(.footnote)
+                Spacer()
             }
             .padding(10)
-            .background(
-                GeometryReader { geo in
-                    Color.clear
-                        .onAppear { composerHeight = geo.size.height }
-                        .onChange(of: geo.size.height) { _, newValue in
-                            composerHeight = newValue
-                        }
-                }
-            )
-            }
+            .background(.thinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .padding(.horizontal, 10)
+            .padding(.top, 8)
+            .transition(.opacity)
+            .animation(.easeInOut(duration: 0.15), value: toastMessage)
+        }
 
-            // Ghost Cards should not "push" layout when they arrive. Render the newest ghost as an overlay
-            // pinned above the composer so it develops in place (Spirit Fade) without a layout pop.
-            if let ghost = latestGhostMessage, ghostOverlayMode == .full {
-                MuseOverlayHost(
-                    canAscend: ghost.isAscendEligible && JournalDonationService.isJournalAvailable,
-                    onDismiss: { dismissGhostOverlay(ghost) },
-                    onAscend: { ghostHandleAscendTrigger = true }
-                ) {
-                    MessageBubble(
-                        message: ghost,
-                        scrollViewportHeight: scrollViewportHeight,
-                        handleAscendTrigger: $ghostHandleAscendTrigger
-                    )
-                }
-                .transition(.opacity.combined(with: .scale(scale: 0.98)))
-                .animation(.easeIn(duration: 1.2), value: ghost.id)
-                .task(id: ghostSnoozeKey(for: ghost)) {
-                    await MainActor.run {
-                        let typing = !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        let mode = preferredOverlayMode(for: ghost, isTyping: typing)
-                        ghostOverlayMode = mode
-                        if mode == .hidden, isGhostManualEntry(ghost), typing {
-                            presentRecoveryPill(for: ghost)
+        ScrollViewReader { proxy in
+            VStack(spacing: 0) {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 10) {
+                        ForEach(displayMessages) { msg in
+                            MessageBubble(message: msg, scrollViewportHeight: scrollViewportHeight)
+                                .id(msg.id)
+                                .background(GeometryReader { geo in
+                                    Color.clear.preference(
+                                        key: MessageFramePreferenceKey.self,
+                                        value: [msg.id: geo.frame(in: .named("threadScroll"))]
+                                    )
+                                })
                         }
-                        scheduleGhostAutoSnooze(ghost)
+                    }
+                    .padding(.vertical, 12)
+                    .padding(.horizontal, 12)
+                }
+                .scrollDismissesKeyboard(.never)
+                .contentShape(Rectangle())
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 10)
+                        .onEnded { value in
+                            let dy = value.translation.height
+                            let dx = value.translation.width
+                            guard dy > Self.keyboardDismissThreshold, abs(dy) > abs(dx) else { return }
+                            KeyboardDismiss.dismiss()
+                        }
+                )
+                .coordinateSpace(name: "threadScroll")
+                .background(
+                    GeometryReader { geo in
+                        Color.clear
+                            .onAppear { scrollViewportHeight = geo.size.height }
+                            .onChange(of: geo.size.height) { _, newValue in
+                                scrollViewportHeight = newValue
+                            }
+                    }
+                )
+                .onPreferenceChange(MessageFramePreferenceKey.self) { frames in
+                    updateVisibleAnchor(frames: frames)
+                    updateAutoScroll(frames: frames)
+                }
+                .onAppear {
+                    applyInitialScroll(proxy: proxy)
+                }
+                .onChange(of: messages.count) { _, _ in
+                    applyInitialScroll(proxy: proxy)
+                    guard let last = displayMessages.last else { return }
+                    if autoScrollToLatest {
+                        proxy.scrollTo(last.id, anchor: .bottom)
+                    } else {
+                        showJumpToLatest = true
+                        refreshNewMessagesPill()
                     }
                 }
-            }
 
-            if showRecoveryPill {
-                RecoveryPillView {
-                    restoreGhostOverlay()
+                if showNewMessagesPill, let targetId = newMessagesTargetId {
+                    Button(newMessagesLabel) {
+                        autoScrollToLatest = false
+                        showJumpToLatest = true
+                        proxy.scrollTo(targetId, anchor: .top)
+                    }
+                    .font(.footnote)
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 12)
+                    .background(.thinMaterial)
+                    .clipShape(Capsule())
+                    .padding(.bottom, 6)
                 }
-                .padding(.leading, 12)
-                .padding(.bottom, composerHeight + outboxBannerHeight + 12)
-                .transition(.opacity)
+
+                if showJumpToLatest {
+                    Button("Jump to latest") {
+                        guard let last = displayMessages.last else { return }
+                        autoScrollToLatest = true
+                        showJumpToLatest = false
+                        showNewMessagesPill = false
+                        proxy.scrollTo(last.id, anchor: .bottom)
+                    }
+                    .font(.footnote)
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 12)
+                    .background(.thinMaterial)
+                    .clipShape(Capsule())
+                    .padding(.bottom, 6)
+                }
             }
+        }
+
+        Divider()
+
+        // Outbox banner reflects local Transmission state (queued/sending/failed).
+        if let banner = outboxBanner {
+            banner
+                .padding(.horizontal, 10)
+                .padding(.top, 8)
+                .background(
+                    GeometryReader { geo in
+                        Color.clear
+                            .onAppear { outboxBannerHeight = geo.size.height }
+                            .onChange(of: geo.size.height) { _, newValue in
+                                outboxBannerHeight = newValue
+                            }
+                    }
+                )
+        }
+
+        ComposerView(
+            text: $composerText,
+            starlightState: starlightState,
+            isSendBlocked: budgetStore.isBlockedNow(),
+            blockedUntil: budgetStore.state.blockedUntil
+        ) { text in
+            send(text)
+        }
+        .padding(10)
+        .background(
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear { composerHeight = geo.size.height }
+                    .onChange(of: geo.size.height) { _, newValue in
+                        composerHeight = newValue
+                    }
+            }
+        )
+        }
+
+    }
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            mainStack
+            ghostOverlay
+            recoveryPillOverlay
         }
         .onChange(of: outboxSummary.failed + outboxSummary.queued + outboxSummary.sending + outboxSummary.pending) { _, newValue in
             viewLog.debug("[outboxBanner] refresh total=\(newValue, privacy: .public)")

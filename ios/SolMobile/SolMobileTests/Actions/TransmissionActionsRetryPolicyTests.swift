@@ -54,11 +54,12 @@ final class TransmissionActionsRetryPolicyTests: XCTestCase {
 
     // MARK: - Local transport helpers
 
+    @MainActor
     private final class CountingTransport: ChatTransport {
         private(set) var sendCallCount: Int = 0
-        private let handler: (PacketEnvelope) async throws -> ChatResponse
+        private let handler: @Sendable (PacketEnvelope) async throws -> ChatResponse
 
-        init(handler: @escaping (PacketEnvelope) async throws -> ChatResponse) {
+        init(handler: @escaping @Sendable (PacketEnvelope) async throws -> ChatResponse) {
             self.handler = handler
         }
 
@@ -68,6 +69,7 @@ final class TransmissionActionsRetryPolicyTests: XCTestCase {
         }
     }
 
+    @MainActor
     private final class RecordingTransport: ChatTransport {
         private(set) var requestIds: [String] = []
         private var callIndex: Int = 0

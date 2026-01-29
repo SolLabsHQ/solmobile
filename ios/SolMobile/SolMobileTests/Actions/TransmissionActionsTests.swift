@@ -12,10 +12,22 @@ import SwiftData
 
 @MainActor
 final class TransmissionActionsTests: SwiftDataTestBase {
-    private final class TestTransport: ChatTransport {
-        private let handler: (PacketEnvelope) async throws -> ChatResponse
+    private actor SendFlag {
+        private var value = false
 
-        init(_ handler: @escaping (PacketEnvelope) async throws -> ChatResponse) {
+        func set() {
+            value = true
+        }
+
+        func get() -> Bool {
+            value
+        }
+    }
+    @MainActor
+    private final class TestTransport: ChatTransport {
+        private let handler: @Sendable (PacketEnvelope) async throws -> ChatResponse
+
+        init(_ handler: @escaping @Sendable (PacketEnvelope) async throws -> ChatResponse) {
             self.handler = handler
         }
 
@@ -226,9 +238,9 @@ final class TransmissionActionsTests: SwiftDataTestBase {
     }
 
     func test_staleSending_requeues_and_sends() async throws {
-        var didSend = false
+        let didSend = SendFlag()
         let transport = TestTransport { _ in
-            didSend = true
+            await didSend.set()
             return ChatResponse(
                 text: "ok",
                 statusCode: 200,
@@ -262,7 +274,8 @@ final class TransmissionActionsTests: SwiftDataTestBase {
         let actions = TransmissionActions(modelContext: context, transport: transport)
         await actions.processQueue()
 
-        XCTAssertTrue(didSend)
+        let didSendValue = await didSend.get()
+        XCTAssertTrue(didSendValue)
 
         let fresh = try context.fetch(FetchDescriptor<Transmission>()).first
         XCTAssertEqual(fresh?.status, .succeeded)
@@ -368,9 +381,9 @@ final class TransmissionActionsTests: SwiftDataTestBase {
     func test_blockedState_preventsSend() async throws {
         // Arrange
         BudgetStore.shared.applyBudgetExceeded(blockedUntil: nil)
-        var didSend = false
+        let didSend = SendFlag()
         let transport = TestTransport { _ in
-            didSend = true
+            await didSend.set()
             return ChatResponse(
                 text: "should not send",
                 statusCode: 200,
@@ -399,7 +412,8 @@ final class TransmissionActionsTests: SwiftDataTestBase {
         await actions.processQueue()
 
         // Assert
-        XCTAssertFalse(didSend)
+        let didSendValue = await didSend.get()
+        XCTAssertFalse(didSendValue)
         let allTx = try context.fetch(FetchDescriptor<Transmission>())
         XCTAssertEqual(allTx.count, 1)
         XCTAssertEqual(allTx[0].status, .failed)

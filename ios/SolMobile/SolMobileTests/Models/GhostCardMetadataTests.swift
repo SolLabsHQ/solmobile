@@ -6,6 +6,7 @@
 import XCTest
 @testable import SolMobile
 
+@MainActor
 final class GhostCardMetadataTests: XCTestCase {
     func test_isAscendEligible_requiresGhostKindRaw() {
         let thread = ConversationThread()

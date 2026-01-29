@@ -9,6 +9,7 @@ import Foundation
 import XCTest
 @testable import SolMobile
 
+@MainActor
 final class SolServerClientHTTPSGuardTests: XCTestCase {
     func test_insecureBaseURL_isBlockedInStaging() async {
         AppEnvironment.override = .staging
