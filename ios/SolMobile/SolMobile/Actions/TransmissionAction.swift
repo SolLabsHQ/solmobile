@@ -827,7 +827,16 @@ final class TransmissionActions {
         txId: UUID,
         via: String
     ) -> Message? {
-        guard let thread = try? fetchThread(id: threadId) else { return nil }
+        guard let thread = findOrCreateThread(
+            threadId: threadId,
+            runId: runId,
+            reason: "append_assistant"
+        ) else {
+            outboxLog.error(
+                "processQueue run=\(runId, privacy: .public) event=thread_missing_skip_message tx=\(short(txId), privacy: .public) thread=\(short(threadId), privacy: .public)"
+            )
+            return nil
+        }
         let previousMessage = thread.messages.last
 
         let text: String
@@ -940,6 +949,23 @@ final class TransmissionActions {
 
         outboxLog.info("processQueue run=\(runId, privacy: .public) event=assistant_appended tx=\(short(txId), privacy: .public) via=\(via, privacy: .public)")
         return assistantMessage
+    }
+
+    private func findOrCreateThread(
+        threadId: UUID,
+        runId: String,
+        reason: String
+    ) -> ConversationThread? {
+        if let existing = try? fetchThread(id: threadId) {
+            return existing
+        }
+
+        let recovered = ConversationThread(id: threadId, title: "Recovered Thread")
+        modelContext.insert(recovered)
+        outboxLog.error(
+            "processQueue run=\(runId, privacy: .public) event=thread_missing_created reason=\(reason, privacy: .public) thread=\(short(threadId), privacy: .public)"
+        )
+        return recovered
     }
 
     private func upsertMemoryArtifact(from message: Message) {

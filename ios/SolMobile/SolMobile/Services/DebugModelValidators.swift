@@ -14,12 +14,13 @@ nonisolated enum DebugModelValidators {
         _ message: Message,
         context: String,
         file: StaticString = #fileID,
+        function: StaticString = #function,
         line: UInt = #line
     ) {
         #if DEBUG
         guard extractThread(from: message) != nil else {
             log.error(
-                "BUG: Message.thread is nil at save time. context=\(context, privacy: .public) messageId=\(message.id.uuidString, privacy: .public) serverMessageId=\(String(describing: message.serverMessageId), privacy: .public) transmissionId=\(String(describing: message.transmissionId), privacy: .public) creator=\(message.creatorTypeRaw, privacy: .public)"
+                "BUG: Message.thread is nil at save time. context=\(context, privacy: .public) messageId=\(message.id.uuidString, privacy: .public) serverMessageId=\(String(describing: message.serverMessageId), privacy: .public) transmissionId=\(String(describing: message.transmissionId), privacy: .public) creator=\(message.creatorTypeRaw, privacy: .public) file=\(String(describing: file), privacy: .public) func=\(String(describing: function), privacy: .public) line=\(line, privacy: .public)"
             )
             assertionFailure("BUG: Message.thread is nil at save time. context=\(context)", file: file, line: line)
             fatalError("BUG: Message.thread is nil at save time. context=\(context)")
@@ -31,11 +32,12 @@ nonisolated enum DebugModelValidators {
         _ messages: [Message],
         context: String,
         file: StaticString = #fileID,
+        function: StaticString = #function,
         line: UInt = #line
     ) {
         #if DEBUG
         for message in messages {
-            assertMessageHasThread(message, context: context, file: file, line: line)
+            assertMessageHasThread(message, context: context, file: file, function: function, line: line)
         }
         #endif
     }
