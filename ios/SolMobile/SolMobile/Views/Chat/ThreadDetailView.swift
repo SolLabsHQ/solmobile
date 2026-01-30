@@ -1123,7 +1123,7 @@ struct ThreadDetailView: View {
             HStack {
                 Text("Memory saved")
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(BrandColors.statusText)
 
                 Spacer()
 
@@ -1175,7 +1175,7 @@ struct ThreadDetailView: View {
             await fetchMemoryDetailIfNeeded(memoryId: memoryId)
             await MainActor.run {
                 presentMemoryReceipt(memoryId: memoryId)
-                showToast("Accepted")
+                showToast("Saved")
             }
         }
     }
@@ -1217,7 +1217,6 @@ struct ThreadDetailView: View {
             memoryReceipt = nil
         }
     }
-
     private func markMemoryAccepted(memoryId: String) {
         let descriptor = FetchDescriptor<MemoryArtifact>(predicate: #Predicate { $0.memoryId == memoryId })
         if let artifact = try? modelContext.fetch(descriptor).first {
@@ -1342,11 +1341,11 @@ struct ThreadDetailView: View {
                     )
 
                     acceptedMemento = patched
-                    showToast("Accepted")
+                    showToast("Applied")
 
                     viewLog.info("[memento] accept applied serverId=\(applied.id, privacy: .public)")
                 } else if result.reason == "already_accepted" {
-                    showToast("Already accepted")
+                    showToast("Already applied")
                     viewLog.info("[memento] accept already_accepted")
                 } else {
                     showToast("Accept not applied")
