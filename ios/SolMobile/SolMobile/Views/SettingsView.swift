@@ -462,6 +462,9 @@ struct SettingsView: View {
                     lastHealthCheck = nil
                     lastHealthCheckError = nil
                     lastHealthCheckAt = nil
+
+                    // Ensure SSE reconnects to the updated base URL.
+                    SSEService.shared.refreshConnection()
                 }
 
                 Section("Journaling") {

@@ -1483,6 +1483,9 @@ struct ThreadDetailView: View {
     }
 
     private func pendingSince(_ tx: Transmission) -> Date? {
+        if tx.status == .queued || tx.status == .sending {
+            return tx.createdAt
+        }
         let attempts = tx.deliveryAttempts.sorted { $0.createdAt < $1.createdAt }
         guard let last = attempts.last, last.outcome == .pending else { return nil }
 
@@ -1499,7 +1502,7 @@ struct ThreadDetailView: View {
 
     private func pendingChatSince() -> Date? {
         transmissions
-            .filter { $0.status == .pending && $0.packet.packetType == "chat" }
+            .filter { ($0.status == .pending || $0.status == .queued || $0.status == .sending) && $0.packet.packetType == "chat" }
             .compactMap(pendingSince)
             .min()
     }
