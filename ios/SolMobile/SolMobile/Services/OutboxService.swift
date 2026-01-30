@@ -11,6 +11,11 @@ import os
 import SwiftData
 import UIKit
 
+enum OutboxRetryKind {
+    case chatSend
+    case memorySave
+}
+
 @MainActor
 final class OutboxService {
     private let outboxLog = Logger(subsystem: "com.sollabshq.solmobile", category: "OutboxService")
@@ -120,10 +125,10 @@ final class OutboxService {
             }
         }
     }
-    func retryFailed() {
+    func retryFailed(kind: OutboxRetryKind? = nil) {
         Task { [weak self] in
             guard let self else { return }
-            await self.worker.retryFailed()
+            await self.worker.retryFailed(kind: kind)
             await MainActor.run {
                 self.kick(reason: .retry, useBackgroundTask: true)
             }

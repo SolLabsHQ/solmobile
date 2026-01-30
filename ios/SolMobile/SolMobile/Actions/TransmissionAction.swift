@@ -1715,7 +1715,7 @@ final class TransmissionActions {
         }
     }
 
-    func retryFailed() {
+    func retryFailed(kind: OutboxRetryKind? = nil) {
         outboxLog.info("retryFailed event=start")
 
         let failedRaw = TransmissionStatus.failed.rawValue
@@ -1728,6 +1728,18 @@ final class TransmissionActions {
         outboxLog.info("retryFailed event=failed_count count=\(failed.count, privacy: .public)")
 
         for tx in failed {
+            let isMemory = tx.packet.packetType == "memory_distill"
+            let matchesKind: Bool
+            switch kind {
+            case .chatSend:
+                matchesKind = !isMemory
+            case .memorySave:
+                matchesKind = isMemory
+            case .none:
+                matchesKind = true
+            }
+            if !matchesKind { continue }
+
             outboxLog.info("retryFailed event=tx tx=\(short(tx.id), privacy: .public) packetType=\(tx.packet.packetType, privacy: .public)")
 
             // DEBUG: one-shot fail test, only fail the first attempt.

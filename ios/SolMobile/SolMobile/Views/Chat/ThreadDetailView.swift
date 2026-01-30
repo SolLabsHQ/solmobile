@@ -11,6 +11,7 @@ struct ThreadDetailView: View {
     private static let perfLog = OSLog(subsystem: "com.sollabshq.solmobile", category: "ThreadDetailPerf")
     private static let pendingSlowThresholdSeconds: TimeInterval = 20
     private static let keyboardDismissThreshold: CGFloat = 32
+    private static let memoryReceiptAutoDismissSeconds: TimeInterval = 4
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
@@ -23,7 +24,7 @@ struct ThreadDetailView: View {
     @Bindable var thread: ConversationThread
     @Query private var messages: [Message]
     @Query private var transmissions: [Transmission]
-    @State private var cachedOutboxSummary = OutboxSummary(queued: 0, sending: 0, pending: 0, failed: 0)
+    @State private var cachedOutboxSummary = OutboxSummary()
     @State private var keyboardSignpostId = OSSignpostID(log: ThreadDetailView.perfLog)
     @State private var keyboardSignpostActive = false
     @State private var autoScrollToLatest: Bool = true
@@ -66,6 +67,7 @@ struct ThreadDetailView: View {
     // Memory accept receipt (View + Undo).
     @State private var memoryReceipt: MemoryReceipt? = nil
     @State private var activeMemoryDetail: MemoryDetailRoute? = nil
+    @State private var memoryReceiptDismissTask: Task<Void, Never>? = nil
 
     // Composer draft persistence (ADR-021).
     @State private var composerText: String = ""
@@ -422,7 +424,7 @@ struct ThreadDetailView: View {
             ghostOverlay
             recoveryPillOverlay
         }
-        .onChange(of: outboxSummary.failed + outboxSummary.queued + outboxSummary.sending + outboxSummary.pending) { _, newValue in
+        .onChange(of: outboxSummary.totalFailed + outboxSummary.totalQueued + outboxSummary.totalSending + outboxSummary.totalPending) { _, newValue in
             viewLog.debug("[outboxBanner] refresh total=\(newValue, privacy: .public)")
         }
         .onChange(of: outboxStatusSignature) { _, _ in
@@ -661,6 +663,8 @@ struct ThreadDetailView: View {
 
     private var outboxBanner: AnyView? {
         let s = outboxSummary
+        let failedChat = s.chat.failed
+        let failedMemory = s.memory.failed
 
         if let failure = sseFailureDetail,
            latestSSEStage?.kind == .assistantFailed {
@@ -675,7 +679,7 @@ struct ThreadDetailView: View {
                     if failure.retryable == true {
                         Button("Retry") {
                             viewLog.info("[retry] sse failure retry tapped")
-                            outboxService?.retryFailed()
+                            outboxService?.retryFailed(kind: .chatSend)
                         }
                         .font(.footnote)
                     }
@@ -686,28 +690,22 @@ struct ThreadDetailView: View {
             )
         }
 
-        if s.failed > 0 {
+        if failedChat > 0 || failedMemory > 0 {
             return AnyView(
-                HStack(spacing: 10) {
-                    Image(systemName: "exclamationmark.triangle")
-                    Text("Failed to send \(s.failed) item\(s.failed == 1 ? "" : "s").")
-                        .font(.footnote)
-                    Spacer()
-                    Button("Retry") {
-                        viewLog.info("[retry] tapped")
-
-                        let before = outboxSummary
-                        viewLog.info("[retry] before failed=\(before.failed, privacy: .public) queued=\(before.queued, privacy: .public) sending=\(before.sending, privacy: .public)")
-                        outboxService?.retryFailed()
-
-                        let after = outboxSummary
-                        viewLog.info("[retry] after failed=\(after.failed, privacy: .public) queued=\(after.queued, privacy: .public) sending=\(after.sending, privacy: .public)")
+                VStack(spacing: 8) {
+                    if failedChat > 0 {
+                        outboxFailureBanner(
+                            text: "Message failed to send.",
+                            kind: .chatSend
+                        )
                     }
-                    .font(.footnote)
+                    if failedMemory > 0 {
+                        outboxFailureBanner(
+                            text: "Memory save failed.",
+                            kind: .memorySave
+                        )
+                    }
                 }
-                    .padding(10)
-                    .background(.thinMaterial)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
             )
         }
 
@@ -725,18 +723,29 @@ struct ThreadDetailView: View {
             )
         }
 
-        if s.queued + s.sending + s.pending > 0 {
+        if s.totalQueued + s.totalSending + s.totalPending > 0 {
             let statusText: String
-            if let stage = latestSSEStage, stage.kind == .runStarted {
+            let chatActive = s.chat.queued + s.chat.sending + s.chat.pending
+            let memoryActive = s.memory.queued + s.memory.sending + s.memory.pending
+
+            if chatActive == 0, memoryActive > 0 {
+                statusText = "Saving memory…"
+            } else if let stage = latestSSEStage, stage.kind == .runStarted {
                 statusText = "Thinking…"
             } else if let stage = latestSSEStage, stage.kind == .txAccepted {
                 statusText = "Sent/Queued…"
-            } else if s.sending > 0 {
+            } else if s.totalSending > 0 {
                 statusText = "Sending…"
             } else if hasLongPending {
-                statusText = "Still processing… pending \(s.pending), queued \(s.queued), sending \(s.sending)"
+                statusText = "Still processing… pending \(s.totalPending), queued \(s.totalQueued), sending \(s.totalSending)"
             } else {
-                statusText = "Outbox: queued \(s.queued), pending \(s.pending), sending \(s.sending)"
+                if chatActive > 0 && memoryActive > 0 {
+                    statusText = "Outbox: chat \(chatActive), memory \(memoryActive)"
+                } else if memoryActive > 0 {
+                    statusText = "Outbox: memory \(memoryActive)"
+                } else {
+                    statusText = "Outbox: queued \(s.totalQueued), pending \(s.totalPending), sending \(s.totalSending)"
+                }
             }
             return AnyView(
                 HStack(spacing: 10) {
@@ -754,11 +763,38 @@ struct ThreadDetailView: View {
         return nil
     }
 
+    private func outboxFailureBanner(text: String, kind: OutboxRetryKind) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle")
+            Text(text)
+                .font(.footnote)
+            Spacer()
+            Button("Retry") {
+                viewLog.info("[retry] tapped kind=\(String(describing: kind), privacy: .public)")
+                outboxService?.retryFailed(kind: kind)
+            }
+            .font(.footnote)
+        }
+        .padding(10)
+        .background(.thinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private struct OutboxCounts {
+        var queued: Int = 0
+        var sending: Int = 0
+        var pending: Int = 0
+        var failed: Int = 0
+    }
+
     private struct OutboxSummary {
-        var queued: Int
-        var sending: Int
-        var pending: Int
-        var failed: Int
+        var chat: OutboxCounts = OutboxCounts()
+        var memory: OutboxCounts = OutboxCounts()
+
+        var totalQueued: Int { chat.queued + memory.queued }
+        var totalSending: Int { chat.sending + memory.sending }
+        var totalPending: Int { chat.pending + memory.pending }
+        var totalFailed: Int { chat.failed + memory.failed }
     }
 
     // MARK: - ThreadMemento UI + state
@@ -1092,13 +1128,23 @@ struct ThreadDetailView: View {
                 Spacer()
 
                 Button("Undo") {
+                    cancelMemoryReceiptAutoDismiss()
                     undoMemoryAccept(memoryId: receipt.memoryId)
                 }
                 .font(.footnote)
+
+                Button {
+                    dismissMemoryReceipt()
+                } label: {
+                    Image(systemName: "xmark")
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Dismiss")
             }
 
             HStack(spacing: 12) {
                 Button("View") {
+                    cancelMemoryReceiptAutoDismiss()
                     activeMemoryDetail = MemoryDetailRoute(id: receipt.memoryId)
                 }
                 .buttonStyle(.bordered)
@@ -1109,11 +1155,19 @@ struct ThreadDetailView: View {
         .padding(10)
         .background(.thinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 12))
+        .gesture(
+            DragGesture()
+                .onEnded { value in
+                    guard value.translation.height < -40 || value.translation.width > 60 else { return }
+                    dismissMemoryReceipt()
+                }
+        )
     }
 
     private func presentMemoryReceipt(memoryId: String) {
         markMemoryAccepted(memoryId: memoryId)
         memoryReceipt = MemoryReceipt(memoryId: memoryId)
+        scheduleMemoryReceiptAutoDismiss()
     }
 
     private func acceptMemoryOffer(memoryId: String) {
@@ -1133,12 +1187,34 @@ struct ThreadDetailView: View {
                 try await client.deleteMemory(memoryId: memoryId, confirm: true)
                 await MainActor.run {
                     deleteMemoryArtifact(memoryId: memoryId)
-                    memoryReceipt = nil
+                    dismissMemoryReceipt()
                     showToast("Undone")
                 }
             } catch {
                 showToast("Undo failed")
             }
+        }
+    }
+
+    private func scheduleMemoryReceiptAutoDismiss() {
+        memoryReceiptDismissTask?.cancel()
+        let delay = ThreadDetailView.memoryReceiptAutoDismissSeconds
+        memoryReceiptDismissTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            dismissMemoryReceipt()
+        }
+    }
+
+    private func cancelMemoryReceiptAutoDismiss() {
+        memoryReceiptDismissTask?.cancel()
+        memoryReceiptDismissTask = nil
+    }
+
+    private func dismissMemoryReceipt() {
+        cancelMemoryReceiptAutoDismiss()
+        withAnimation(.easeInOut(duration: 0.2)) {
+            memoryReceipt = nil
         }
     }
 
@@ -1405,7 +1481,7 @@ struct ThreadDetailView: View {
     private var outboxSummary: OutboxSummary { cachedOutboxSummary }
 
     private var outboxStatusSignature: String {
-        transmissions.map { $0.statusRaw }.joined(separator: "|")
+        transmissions.map { "\($0.statusRaw)|\($0.packet.packetType)" }.joined(separator: "|")
     }
 
     private var newMessagesLabel: String {
@@ -1415,12 +1491,24 @@ struct ThreadDetailView: View {
 
     private func updateOutboxSummary() {
         // Derived state from SwiftData query; cache to avoid repeated filters during renders.
-        let queued = transmissions.filter { $0.status == .queued }.count
-        let sending = transmissions.filter { $0.status == .sending }.count
-        let pending = transmissions.filter { $0.status == .pending }.count
-        let failed = transmissions.filter { $0.status == .failed }.count
-        cachedOutboxSummary = OutboxSummary(queued: queued, sending: sending, pending: pending, failed: failed)
-        if (failed == 0) && (queued + sending + pending == 0) {
+        var summary = OutboxSummary()
+        for tx in transmissions {
+            let isMemory = tx.packet.packetType == "memory_distill"
+            switch tx.status {
+            case .queued:
+                if isMemory { summary.memory.queued += 1 } else { summary.chat.queued += 1 }
+            case .sending:
+                if isMemory { summary.memory.sending += 1 } else { summary.chat.sending += 1 }
+            case .pending:
+                if isMemory { summary.memory.pending += 1 } else { summary.chat.pending += 1 }
+            case .failed:
+                if isMemory { summary.memory.failed += 1 } else { summary.chat.failed += 1 }
+            case .succeeded:
+                break
+            }
+        }
+        cachedOutboxSummary = summary
+        if summary.totalFailed == 0 && (summary.totalQueued + summary.totalSending + summary.totalPending == 0) {
             outboxBannerHeight = 0
         }
     }
@@ -1508,7 +1596,7 @@ struct ThreadDetailView: View {
     }
 
     private var hasLongPending: Bool {
-        guard outboxSummary.pending > 0 else { return false }
+        guard outboxSummary.totalPending > 0 else { return false }
         let now = Date()
         return transmissions.contains { tx in
             guard tx.status == .pending,

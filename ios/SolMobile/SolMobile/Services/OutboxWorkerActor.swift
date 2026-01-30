@@ -55,7 +55,7 @@ actor OutboxWorkerActor {
         }
         await engine.enqueueMemoryDistill(threadId: threadId, messageIds: messageIds, payload: payload)
     }
-    func retryFailed() async {
+    func retryFailed(kind: OutboxRetryKind?) async {
         let engine = await MainActor.run {
             TransmissionActions(
                 modelContext: ModelContext(container),
@@ -63,7 +63,7 @@ actor OutboxWorkerActor {
                 statusWatcher: statusWatcher
             )
         }
-        await engine.retryFailed()
+        await engine.retryFailed(kind: kind)
     }
 
     func pollTransmission(serverTransmissionId: String, reason: String) async {
