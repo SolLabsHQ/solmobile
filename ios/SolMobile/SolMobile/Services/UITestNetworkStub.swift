@@ -60,6 +60,17 @@ nonisolated final class UITestURLProtocol: URLProtocol {
             return
         }
 
+        if method == "GET" && path.hasPrefix("/v1/memories/") {
+            let memoryId = path.components(separatedBy: "/").last ?? Self.defaultMemoryId
+            respondMemoryDetail(id: memoryId)
+            return
+        }
+
+        if method == "DELETE" && path.hasPrefix("/v1/memories/") {
+            respondMemoryDelete()
+            return
+        }
+
         finishWithError(code: 404, body: "{\"error\":\"not_found\"}")
     }
 
@@ -85,6 +96,18 @@ nonisolated final class UITestURLProtocol: URLProtocol {
                 "supports": 0,
                 "claims": 0,
                 "warnings": 0
+            ],
+            "outputEnvelope": [
+                "assistant_text": "Noted.",
+                "notification_policy": "muted",
+                "meta": [
+                    "display_hint": "ghost_card",
+                    "ghost_kind": "memory_artifact",
+                    "memory_id": Self.defaultMemoryId,
+                    "rigor_level": "normal",
+                    "snippet": Self.defaultSnippet,
+                    "fact_null": false
+                ]
             ]
         ]
 
@@ -131,6 +154,30 @@ nonisolated final class UITestURLProtocol: URLProtocol {
             ]
         ]
 
+        respondJSON(statusCode: 200, json: response, headers: [:])
+    }
+
+    private func respondMemoryDetail(id: String) {
+        let response: [String: Any] = [
+            "request_id": "stub-memory-detail",
+            "memory": [
+                "memory_id": id,
+                "type": "memory",
+                "snippet": Self.defaultSnippet,
+                "summary": Self.defaultSnippet,
+                "lifecycle_state": "pinned",
+                "memory_kind": "preference",
+                "created_at": "2026-01-01T00:00:00.000Z",
+                "updated_at": "2026-01-01T00:00:00.000Z"
+            ]
+        ]
+        respondJSON(statusCode: 200, json: response, headers: [:])
+    }
+
+    private func respondMemoryDelete() {
+        let response: [String: Any] = [
+            "request_id": "stub-memory-delete"
+        ]
         respondJSON(statusCode: 200, json: response, headers: [:])
     }
 

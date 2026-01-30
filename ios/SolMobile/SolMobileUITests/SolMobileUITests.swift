@@ -32,7 +32,7 @@ final class SolMobileUITests: XCTestCase {
     }
 
     @MainActor
-    func testSaveToMemoryShowsGhostOverlay() throws {
+    func testGhostCardAcceptShowsReceipt() throws {
         let app = XCUIApplication()
         app.launchArguments = ["-ui_test_stub_network", "1"]
         app.launch()
@@ -59,12 +59,112 @@ final class SolMobileUITests: XCTestCase {
         let sentMessage = app.staticTexts["Remember that my dog is named Max."]
         XCTAssertTrue(sentMessage.waitForExistence(timeout: 3))
 
-        let saveButton = app.buttons["save_to_memory_button"]
-        XCTAssertTrue(saveButton.waitForExistence(timeout: 3))
-        saveButton.tap()
-
         let ghostOverlay = app.descendants(matching: .any).matching(identifier: "ghost_overlay").firstMatch
         XCTAssertTrue(ghostOverlay.waitForExistence(timeout: 10))
+
+        let acceptButton = app.buttons["Accept"]
+        XCTAssertTrue(acceptButton.waitForExistence(timeout: 5))
+        acceptButton.tap()
+
+        let receiptTitle = app.staticTexts["Memory saved"]
+        XCTAssertTrue(receiptTitle.waitForExistence(timeout: 5))
+
+        let viewButton = app.buttons["View"]
+        XCTAssertTrue(viewButton.waitForExistence(timeout: 5))
+        viewButton.tap()
+
+        let detailSnippet = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Remembered for later.")).firstMatch
+        XCTAssertTrue(detailSnippet.waitForExistence(timeout: 5))
+        app.swipeDown()
+
+        let undoButton = app.buttons["Undo"]
+        XCTAssertTrue(undoButton.waitForExistence(timeout: 5))
+        undoButton.tap()
+        XCTAssertFalse(receiptTitle.waitForExistence(timeout: 2))
+    }
+
+    @MainActor
+    func testMemoryVaultAndCitationsLocal() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        let chatTab = app.tabBars.buttons["Chat"]
+        if chatTab.exists {
+            chatTab.tap()
+        }
+
+        let newThreadButton = app.buttons["new_thread_button"]
+        XCTAssertTrue(newThreadButton.waitForExistence(timeout: 5))
+        newThreadButton.tap()
+
+        let threadCell = app.cells.element(boundBy: 0)
+        XCTAssertTrue(threadCell.waitForExistence(timeout: 5))
+        threadCell.tap()
+
+        let messageField = app.textFields["Message…"]
+        XCTAssertTrue(messageField.waitForExistence(timeout: 5))
+        let messageSeed = "Local memory test \(Int(Date().timeIntervalSince1970))"
+        messageField.tap()
+        messageField.typeText(messageSeed)
+        app.buttons["Send"].tap()
+
+        let sentMessage = app.staticTexts[messageSeed]
+        XCTAssertTrue(sentMessage.waitForExistence(timeout: 10))
+
+        let assistantMessage = app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'Stub response'")).firstMatch
+        XCTAssertTrue(assistantMessage.waitForExistence(timeout: 20))
+
+        let saveButton = app.buttons["save_to_memory_button"]
+        XCTAssertTrue(saveButton.waitForExistence(timeout: 5))
+        saveButton.tap()
+
+        let receiptTitle = app.staticTexts["Memory saved"]
+        XCTAssertTrue(receiptTitle.waitForExistence(timeout: 10))
+
+        let settingsTab = app.tabBars.buttons["Settings"]
+        XCTAssertTrue(settingsTab.waitForExistence(timeout: 5))
+        settingsTab.tap()
+
+        let autoAcceptLabel = app.staticTexts["Auto-accept"]
+        XCTAssertTrue(autoAcceptLabel.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Safe only"].exists)
+
+        let memoryVaultLink = app.staticTexts["Memory Vault"]
+        if !memoryVaultLink.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(memoryVaultLink.waitForExistence(timeout: 5))
+        memoryVaultLink.tap()
+
+        let snippetMatch = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", messageSeed)).firstMatch
+        XCTAssertTrue(snippetMatch.waitForExistence(timeout: 10))
+        snippetMatch.tap()
+
+        let detailSnippet = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", messageSeed)).firstMatch
+        XCTAssertTrue(detailSnippet.waitForExistence(timeout: 5))
+
+        let backButton = app.navigationBars.buttons.element(boundBy: 0)
+        if backButton.exists {
+            backButton.tap()
+        }
+
+        chatTab.tap()
+        let recallField = app.textFields["Message…"]
+        XCTAssertTrue(recallField.waitForExistence(timeout: 5))
+        recallField.tap()
+        recallField.typeText("Please recall: \(messageSeed)")
+        app.buttons["Send"].tap()
+
+        let memoriesButton = app.buttons.containing(NSPredicate(format: "label CONTAINS 'Memories'")).firstMatch
+        XCTAssertTrue(memoriesButton.waitForExistence(timeout: 20))
+        memoriesButton.tap()
+
+        let citation = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", messageSeed)).firstMatch
+        XCTAssertTrue(citation.waitForExistence(timeout: 10))
+        citation.tap()
+
+        let citationDetail = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", messageSeed)).firstMatch
+        XCTAssertTrue(citationDetail.waitForExistence(timeout: 5))
     }
 
     @MainActor
