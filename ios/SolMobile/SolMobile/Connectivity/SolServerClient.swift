@@ -569,9 +569,33 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision,
         return try JSONDecoder().decode(MemoryDistillResponse.self, from: data)
     }
 
-    func listMemories(cursor: String? = nil, limit: Int? = nil, domain: String? = nil, tagsAny: [String]? = nil) async throws -> MemoryListResponse {
+    func saveMemorySpan(request: MemorySpanSaveRequest) async throws -> MemoryCreateResponse {
+        var req = URLRequest(url: baseURL.appendingPathComponent("/v1/memories"))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONEncoder().encode(request)
+
+        let (data, http, responseInfo) = try await requestJSON(req)
+        try require2xx(http, data: data, responseInfo: responseInfo)
+        return try JSONDecoder().decode(MemoryCreateResponse.self, from: data)
+    }
+
+    func listMemories(
+        scope: String? = nil,
+        threadId: String? = nil,
+        lifecycleState: String? = nil,
+        memoryKind: String? = nil,
+        cursor: String? = nil,
+        limit: Int? = nil,
+        domain: String? = nil,
+        tagsAny: [String]? = nil
+    ) async throws -> MemoryListResponse {
         var components = URLComponents(url: baseURL.appendingPathComponent("/v1/memories"), resolvingAgainstBaseURL: false)
         var query: [URLQueryItem] = []
+        if let scope { query.append(.init(name: "scope", value: scope)) }
+        if let threadId { query.append(.init(name: "thread_id", value: threadId)) }
+        if let lifecycleState { query.append(.init(name: "lifecycle_state", value: lifecycleState)) }
+        if let memoryKind { query.append(.init(name: "memory_kind", value: memoryKind)) }
         if let cursor { query.append(.init(name: "cursor", value: cursor)) }
         if let limit { query.append(.init(name: "limit", value: String(limit))) }
         if let domain { query.append(.init(name: "domain", value: domain)) }
@@ -636,6 +660,16 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision,
         let (data, http, responseInfo) = try await requestJSON(req)
         try require2xx(http, data: data, responseInfo: responseInfo)
         _ = data
+    }
+
+    func getMemory(memoryId: String) async throws -> MemoryDetailResponse {
+        let url = baseURL.appendingPathComponent("/v1/memories").appendingPathComponent(memoryId)
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+
+        let (data, http, responseInfo) = try await requestJSON(req)
+        try require2xx(http, data: data, responseInfo: responseInfo)
+        return try JSONDecoder().decode(MemoryDetailResponse.self, from: data)
     }
 
     func batchDeleteMemories(request: MemoryBatchDeleteRequest) async throws -> MemoryBatchDeleteResponse {

@@ -55,6 +55,10 @@ final class Message {
     var journalOfferJson: Data?
     var journalOfferShownAt: Date?
 
+    // Lattice meta (PR-40) for retrieval citations.
+    var latticeStatusRaw: String?
+    var latticeMemoryIdsCsv: String?
+
     var thread: ConversationThread
     
     // Evidence ownership (cascade delete)
@@ -84,6 +88,8 @@ final class Message {
         claimsTruncated: Bool = false,
         journalOfferJson: Data? = nil,
         journalOfferShownAt: Date? = nil,
+        latticeStatusRaw: String? = nil,
+        latticeMemoryIdsCsv: String? = nil,
         captureSuggestionJson: Data? = nil,
         captureSuggestionId: String? = nil,
         captureSuggestionTypeRaw: String? = nil,
@@ -118,6 +124,8 @@ final class Message {
         self.claimsTruncated = claimsTruncated
         self.journalOfferJson = journalOfferJson
         self.journalOfferShownAt = journalOfferShownAt
+        self.latticeStatusRaw = latticeStatusRaw
+        self.latticeMemoryIdsCsv = latticeMemoryIdsCsv
         self.captureSuggestionJson = captureSuggestionJson
         self.captureSuggestionId = captureSuggestionId
         self.captureSuggestionTypeRaw = captureSuggestionTypeRaw
@@ -156,6 +164,14 @@ extension Message {
     var resolvedServerMessageId: String? {
         guard let id = serverMessageId, !id.isEmpty else { return nil }
         return id
+    }
+
+    var latticeMemoryIds: [String] {
+        guard let latticeMemoryIdsCsv, !latticeMemoryIdsCsv.isEmpty else { return [] }
+        return latticeMemoryIdsCsv
+            .split(separator: ",")
+            .map { String($0) }
+            .filter { !$0.isEmpty }
     }
 
     /// Validate evidence relationships at encode-time

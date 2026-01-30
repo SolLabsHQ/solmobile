@@ -17,6 +17,10 @@ struct MemoryVaultView: View {
     @State private var showClearAll = false
     @State private var errorMessage: String?
     @State private var showErrorAlert = false
+    
+    private var pinnedMemories: [MemoryArtifact] {
+        memories.filter { ($0.lifecycleStateRaw ?? "pinned") != "archived" }
+    }
 
     var body: some View {
         List {
@@ -25,11 +29,11 @@ struct MemoryVaultView: View {
             }
 
             Section("Memories") {
-                if memories.isEmpty {
+                if pinnedMemories.isEmpty {
                     Text("No memories yet.")
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(memories) { memory in
+                    ForEach(pinnedMemories) { memory in
                         NavigationLink {
                             MemoryDetailView(memory: memory)
                         } label: {
@@ -101,7 +105,10 @@ struct MemoryVaultView: View {
                 if response.nextCursor == nil {
                     let serverIds = Set(response.memories.map { $0.id })
                     for memory in memories where !serverIds.contains(memory.memoryId) {
-                        modelContext.delete(memory)
+                        if (memory.lifecycleStateRaw ?? "pinned") != "archived" {
+                            memory.lifecycleStateRaw = "archived"
+                            memory.updatedAt = Date()
+                        }
                     }
                     try? modelContext.save()
                 }
@@ -147,9 +154,15 @@ struct MemoryVaultView: View {
             existing.triggerMessageId = dto.triggerMessageId
             existing.typeRaw = dto.type ?? existing.typeRaw
             existing.snippet = dto.snippet ?? existing.snippet
+            existing.summary = dto.summary ?? existing.summary
             existing.moodAnchor = dto.moodAnchor ?? existing.moodAnchor
             existing.rigorLevelRaw = dto.rigorLevel ?? existing.rigorLevelRaw
+            existing.lifecycleStateRaw = dto.lifecycleState ?? existing.lifecycleStateRaw
+            existing.memoryKindRaw = dto.memoryKind ?? existing.memoryKindRaw
             existing.tagsCsv = dto.tags?.joined(separator: ",") ?? existing.tagsCsv
+            if let evidenceIds = dto.evidenceMessageIds {
+                existing.evidenceMessageIdsCsv = evidenceIds.joined(separator: ",")
+            }
             existing.fidelityRaw = dto.fidelity ?? existing.fidelityRaw
             existing.transitionToHazyAt = dto.transitionToHazyAt.flatMap { ISO8601DateFormatter().date(from: $0) }
             existing.updatedAt = updatedAt ?? Date()
@@ -163,9 +176,13 @@ struct MemoryVaultView: View {
             triggerMessageId: dto.triggerMessageId,
             typeRaw: dto.type ?? "memory",
             snippet: dto.snippet,
+            summary: dto.summary,
             moodAnchor: dto.moodAnchor,
             rigorLevelRaw: dto.rigorLevel,
+            lifecycleStateRaw: dto.lifecycleState,
+            memoryKindRaw: dto.memoryKind,
             tagsCsv: dto.tags?.joined(separator: ","),
+            evidenceMessageIdsCsv: dto.evidenceMessageIds?.joined(separator: ","),
             fidelityRaw: dto.fidelity,
             transitionToHazyAt: dto.transitionToHazyAt.flatMap { ISO8601DateFormatter().date(from: $0) },
             createdAt: createdAt,
@@ -206,104 +223,5 @@ private struct ClearAllMemoriesSheet: View {
                 }
             }
         }
-    }
-}
-
-private struct MemoryDetailView: View {
-    @Environment(\.modelContext) private var modelContext
-    @State private var editorMode: MemoryEditorMode?
-    @State private var showDeleteConfirm = false
-    @State private var showErrorAlert = false
-    @State private var errorMessage: String = ""
-
-    @Bindable var memory: MemoryArtifact
-
-    var body: some View {
-        List {
-            Section("Snippet") {
-                Text(memory.snippet ?? "(no snippet)")
-            }
-
-            Section("Origin") {
-                if let threadId = memory.threadId {
-                    Text("Thread: \(threadId)")
-                }
-            }
-
-            Section("Metadata") {
-                if let rigor = memory.rigorLevelRaw {
-                    Text("Rigor: \(rigor)")
-                }
-                if let mood = memory.moodAnchor {
-                    Text("Mood: \(mood)")
-                }
-                if let fidelity = memory.fidelityRaw {
-                    Text("Fidelity: \(fidelity)")
-                }
-                if let hazy = memory.transitionToHazyAt {
-                    Text("Hazy At: \(hazy.formatted())")
-                }
-            }
-
-            Section {
-                Button("Edit") {
-                    editorMode = .edit(memoryId: memory.memoryId, initialText: memory.snippet ?? "")
-                }
-
-                Button(role: .destructive) {
-                    if memory.rigorLevelRaw == "high" {
-                        showDeleteConfirm = true
-                    } else {
-                        Task { await deleteMemory(confirm: false) }
-                    }
-                } label: {
-                    Text("Forget")
-                }
-            }
-        }
-        .navigationTitle("Memory")
-        .sheet(item: $editorMode) { mode in
-            MemoryEditorSheet(mode: mode) { updated in
-                if let updated {
-                    applyUpdate(updated)
-                }
-            }
-        }
-        .alert("Confirm Delete", isPresented: $showDeleteConfirm) {
-            Button("Delete", role: .destructive) {
-                Task { await deleteMemory(confirm: true) }
-            }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("This memory affects safety boundaries. Confirm to delete it.")
-        }
-        .alert("Request Failed", isPresented: $showErrorAlert) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text(errorMessage)
-        }
-    }
-
-    private func deleteMemory(confirm: Bool) async {
-        do {
-            let client = SolServerClient()
-            try await client.deleteMemory(memoryId: memory.memoryId, confirm: confirm ? true : nil)
-            await MainActor.run {
-                modelContext.delete(memory)
-                try? modelContext.save()
-            }
-        } catch {
-            errorMessage = "Unable to delete memory."
-            showErrorAlert = true
-        }
-    }
-
-    private func applyUpdate(_ dto: MemoryItemDTO) {
-        memory.snippet = dto.snippet ?? memory.snippet
-        memory.moodAnchor = dto.moodAnchor ?? memory.moodAnchor
-        memory.rigorLevelRaw = dto.rigorLevel ?? memory.rigorLevelRaw
-        memory.tagsCsv = dto.tags?.joined(separator: ",") ?? memory.tagsCsv
-        memory.updatedAt = dto.updatedAt.flatMap { ISO8601DateFormatter().date(from: $0) } ?? Date()
-        try? modelContext.save()
     }
 }

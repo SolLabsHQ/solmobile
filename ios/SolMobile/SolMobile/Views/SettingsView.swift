@@ -20,6 +20,7 @@ struct SettingsView: View {
     @AppStorage(AppleIntelligenceSettings.enabledKey) private var appleIntelligenceEnabled: Bool = false
     @AppStorage(ThreadContextSettings.modeKey) private var threadContextMode: String = ThreadContextSettings.Mode.auto.rawValue
     @AppStorage(ThreadContextSettings.showKey) private var showThreadContext: Bool = false
+    @AppStorage(MemoryOfferSettings.autoAcceptKey) private var autoAcceptMemoryOffers: String = MemoryOfferSettings.AutoAcceptMode.safeOnly.rawValue
 
     // Light tracing for debugging (non-sensitive)
     private let log = Logger(subsystem: "com.sollabshq.solmobile", category: "Settings")
@@ -461,6 +462,9 @@ struct SettingsView: View {
                     lastHealthCheck = nil
                     lastHealthCheckError = nil
                     lastHealthCheckAt = nil
+
+                    // Ensure SSE reconnects to the updated base URL.
+                    SSEService.shared.refreshConnection()
                 }
 
                 Section("Journaling") {
@@ -488,6 +492,17 @@ struct SettingsView: View {
                     TextField("Journal style CPB ID (optional)", text: $journalCpbId)
 
                     Text("Cooldown applies to new offers. Tone notes are used for assist drafts.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Memory offers") {
+                    Picker("Auto-accept", selection: $autoAcceptMemoryOffers) {
+                        Text("Off").tag(MemoryOfferSettings.AutoAcceptMode.off.rawValue)
+                        Text("Safe only").tag(MemoryOfferSettings.AutoAcceptMode.safeOnly.rawValue)
+                        Text("Always").tag(MemoryOfferSettings.AutoAcceptMode.always.rawValue)
+                    }
+                    Text("Safe only auto-accepts preference, workflow, and project memories. Constraints always require explicit accept.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

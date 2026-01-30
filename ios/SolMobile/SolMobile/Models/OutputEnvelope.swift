@@ -75,6 +75,7 @@ struct OutputEnvelopeMetaDTO: Codable {
     let factNull: Bool?
     let moodAnchor: String?
     let journalOffer: JournalOffer?
+    let lattice: LatticeMetaDTO?
 
     enum CodingKeys: String, CodingKey {
         case metaVersion
@@ -92,6 +93,7 @@ struct OutputEnvelopeMetaDTO: Codable {
         case factNull
         case moodAnchor
         case journalOffer
+        case lattice
     }
 
     enum LegacyCodingKeys: String, CodingKey {
@@ -110,6 +112,7 @@ struct OutputEnvelopeMetaDTO: Codable {
         case factNull = "fact_null"
         case moodAnchor = "mood_anchor"
         case journalOffer = "journal_offer"
+        case lattice
     }
 
     init(from decoder: Decoder) throws {
@@ -136,6 +139,7 @@ struct OutputEnvelopeMetaDTO: Codable {
         factNull = decodeIfPresent(Bool.self, key: .factNull, legacyKey: .factNull)
         moodAnchor = decodeIfPresent(String.self, key: .moodAnchor, legacyKey: .moodAnchor)
         journalOffer = decodeIfPresent(JournalOffer.self, key: .journalOffer, legacyKey: .journalOffer)
+        lattice = decodeIfPresent(LatticeMetaDTO.self, key: .lattice, legacyKey: .lattice)
     }
 
     init(
@@ -153,7 +157,8 @@ struct OutputEnvelopeMetaDTO: Codable {
         snippet: String? = nil,
         factNull: Bool? = nil,
         moodAnchor: String? = nil,
-        journalOffer: JournalOffer? = nil
+        journalOffer: JournalOffer? = nil,
+        lattice: LatticeMetaDTO? = nil
     ) {
         self.metaVersion = metaVersion
         self.claims = claims
@@ -170,6 +175,7 @@ struct OutputEnvelopeMetaDTO: Codable {
         self.factNull = factNull
         self.moodAnchor = moodAnchor
         self.journalOffer = journalOffer
+        self.lattice = lattice
     }
 
     func encode(to encoder: Encoder) throws {
@@ -189,6 +195,64 @@ struct OutputEnvelopeMetaDTO: Codable {
         try container.encodeIfPresent(factNull, forKey: .factNull)
         try container.encodeIfPresent(moodAnchor, forKey: .moodAnchor)
         try container.encodeIfPresent(journalOffer, forKey: .journalOffer)
+        try container.encodeIfPresent(lattice, forKey: .lattice)
+    }
+}
+
+struct LatticeMetaDTO: Codable {
+    let status: String?
+    let retrievalTrace: LatticeRetrievalTraceDTO?
+    let scores: [String: LatticeScoreDTO]?
+    let counts: LatticeCountsDTO?
+    let bytesTotal: Int?
+    let timingsMs: LatticeTimingsDTO?
+    let warnings: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case status
+        case retrievalTrace = "retrieval_trace"
+        case scores
+        case counts
+        case bytesTotal = "bytes_total"
+        case timingsMs = "timings_ms"
+        case warnings
+    }
+}
+
+struct LatticeScoreDTO: Codable {
+    let method: String?
+    let value: Double?
+}
+
+struct LatticeRetrievalTraceDTO: Codable {
+    let memoryIds: [String]?
+    let mementoIds: [String]?
+    let policyCapsuleIds: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case memoryIds = "memory_ids"
+        case mementoIds = "memento_ids"
+        case policyCapsuleIds = "policy_capsule_ids"
+    }
+}
+
+struct LatticeCountsDTO: Codable {
+    let memories: Int?
+    let mementos: Int?
+    let policyCapsules: Int?
+}
+
+struct LatticeTimingsDTO: Codable {
+    let latticeTotal: Int?
+    let latticeDb: Int?
+    let modelTotal: Int?
+    let requestTotal: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case latticeTotal = "lattice_total"
+        case latticeDb = "lattice_db"
+        case modelTotal = "model_total"
+        case requestTotal = "request_total"
     }
 }
 
@@ -421,6 +485,8 @@ extension Message {
         ghostMoodAnchor = nil
         journalOfferJson = nil
         journalOfferShownAt = nil
+        latticeStatusRaw = nil
+        latticeMemoryIdsCsv = nil
 
         guard let meta = envelope?.meta else { return }
 
@@ -438,6 +504,13 @@ extension Message {
 
         if let offer = meta.journalOffer {
             journalOfferJson = try? JSONEncoder().encode(offer)
+        }
+
+        if let lattice = meta.lattice {
+            latticeStatusRaw = lattice.status
+            if let memoryIds = lattice.retrievalTrace?.memoryIds, !memoryIds.isEmpty {
+                latticeMemoryIdsCsv = memoryIds.joined(separator: ",")
+            }
         }
 
         if let suggestion = meta.captureSuggestion {

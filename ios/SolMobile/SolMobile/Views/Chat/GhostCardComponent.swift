@@ -4,11 +4,13 @@
 //
 
 import CoreLocation
+import Foundation
 import SwiftUI
 import UIKit
 import SwiftData
 
 struct GhostCardActions {
+    var onAccept: (() -> Void)?
     var onEdit: (() -> Void)?
     var onForget: (() -> Void)?
     var onAscend: (() async -> Bool)?
@@ -17,6 +19,7 @@ struct GhostCardActions {
     var onGoToThread: (() -> Void)?
 
     init(
+        onAccept: (() -> Void)? = nil,
         onEdit: (() -> Void)? = nil,
         onForget: (() -> Void)? = nil,
         onAscend: (() async -> Bool)? = nil,
@@ -24,6 +27,7 @@ struct GhostCardActions {
         onAddToReminder: (() -> Void)? = nil,
         onGoToThread: (() -> Void)? = nil
     ) {
+        self.onAccept = onAccept
         self.onEdit = onEdit
         self.onForget = onForget
         self.onAscend = onAscend
@@ -104,6 +108,7 @@ struct GhostCardComponent: View {
     @State private var showReceiptGlow = false
     @State private var glowPulseOn = false
     @State private var receiptGlowTask: Task<Void, Never>? = nil
+    @State private var didAutoAccept = false
 
     init(card: GhostCardModel, externalAscendTrigger: Binding<Bool> = .constant(false)) {
         self.card = card
@@ -150,6 +155,9 @@ struct GhostCardComponent: View {
                 guard !isVisible else { return }
                 isVisible = true
                 fireHeartbeatIfNeeded()
+            }
+            .task(id: card.memoryId ?? card.id.uuidString) {
+                await autoAcceptIfNeeded()
             }
             .onChange(of: card.memoryId) { oldValue, newValue in
                 triggerReceiptGlowIfNeeded(previous: oldValue, current: newValue)
@@ -262,6 +270,15 @@ struct GhostCardComponent: View {
         switch card.kind {
         case .memoryArtifact:
             HStack(spacing: 12) {
+                if let onAccept = card.actions.onAccept, card.memoryId != nil, !card.factNull {
+                    Button {
+                        onAccept()
+                    } label: {
+                        Label("Accept", systemImage: "hand.thumbsup")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .frame(minHeight: 44)
+                }
                 if let onEdit = card.actions.onEdit {
                     Button("Edit", action: onEdit)
                         .frame(minHeight: 44)
@@ -307,6 +324,97 @@ struct GhostCardComponent: View {
                     .frame(minHeight: 44)
             }
         }
+    }
+
+    private func autoAcceptIfNeeded() async {
+        guard card.kind == .memoryArtifact,
+              let memoryId = card.memoryId,
+              !memoryId.isEmpty,
+              !card.factNull,
+              !didAutoAccept else { return }
+
+        let mode = MemoryOfferSettings.autoAcceptMode
+        guard mode != .off else { return }
+
+        let descriptor = FetchDescriptor<MemoryArtifact>(predicate: #Predicate { $0.memoryId == memoryId })
+        guard let artifact = try? modelContext.fetch(descriptor).first else { return }
+        guard artifact.acceptedAt == nil else { return }
+
+        if artifact.memoryKindRaw == nil {
+            do {
+                let response = try await SolServerClient().getMemory(memoryId: memoryId)
+                if let dto = response.memory {
+                    await MainActor.run {
+                        upsertMemoryArtifact(from: dto)
+                    }
+                }
+            } catch {
+                return
+            }
+        }
+
+        guard let refreshed = try? modelContext.fetch(descriptor).first else { return }
+        guard refreshed.acceptedAt == nil else { return }
+        guard refreshed.memoryKindRaw != "constraint" else { return }
+
+        let shouldAccept = mode == .always || (mode == .safeOnly && refreshed.isSafeForAutoAccept)
+        guard shouldAccept else { return }
+
+        didAutoAccept = true
+        await MainActor.run {
+            card.actions.onAccept?()
+        }
+    }
+
+    private func upsertMemoryArtifact(from dto: MemoryItemDTO) {
+        let memoryId = dto.id
+        let descriptor = FetchDescriptor<MemoryArtifact>(predicate: #Predicate { $0.memoryId == memoryId })
+        let existing = (try? modelContext.fetch(descriptor))?.first
+
+        let createdAt = dto.createdAt.flatMap { ISO8601DateFormatter().date(from: $0) }
+        let updatedAt = dto.updatedAt.flatMap { ISO8601DateFormatter().date(from: $0) }
+
+        if let existing {
+            existing.threadId = dto.threadId
+            existing.triggerMessageId = dto.triggerMessageId
+            existing.typeRaw = dto.type ?? existing.typeRaw
+            existing.snippet = dto.snippet ?? existing.snippet
+            existing.summary = dto.summary ?? existing.summary
+            existing.moodAnchor = dto.moodAnchor ?? existing.moodAnchor
+            existing.rigorLevelRaw = dto.rigorLevel ?? existing.rigorLevelRaw
+            existing.lifecycleStateRaw = dto.lifecycleState ?? existing.lifecycleStateRaw
+            existing.memoryKindRaw = dto.memoryKind ?? existing.memoryKindRaw
+            existing.tagsCsv = dto.tags?.joined(separator: ",") ?? existing.tagsCsv
+            if let evidenceIds = dto.evidenceMessageIds {
+                existing.evidenceMessageIdsCsv = evidenceIds.joined(separator: ",")
+            }
+            existing.fidelityRaw = dto.fidelity ?? existing.fidelityRaw
+            existing.transitionToHazyAt = dto.transitionToHazyAt.flatMap { ISO8601DateFormatter().date(from: $0) }
+            existing.updatedAt = updatedAt ?? Date()
+            try? modelContext.save()
+            return
+        }
+
+        let artifact = MemoryArtifact(
+            memoryId: dto.id,
+            threadId: dto.threadId,
+            triggerMessageId: dto.triggerMessageId,
+            typeRaw: dto.type ?? "memory",
+            snippet: dto.snippet,
+            summary: dto.summary,
+            moodAnchor: dto.moodAnchor,
+            rigorLevelRaw: dto.rigorLevel,
+            lifecycleStateRaw: dto.lifecycleState,
+            memoryKindRaw: dto.memoryKind,
+            tagsCsv: dto.tags?.joined(separator: ","),
+            evidenceMessageIdsCsv: dto.evidenceMessageIds?.joined(separator: ","),
+            fidelityRaw: dto.fidelity,
+            transitionToHazyAt: dto.transitionToHazyAt.flatMap { ISO8601DateFormatter().date(from: $0) },
+            createdAt: createdAt,
+            updatedAt: updatedAt
+        )
+        modelContext.insert(artifact)
+        try? modelContext.save()
     }
 
     private func performForget(_ action: @escaping () -> Void) {

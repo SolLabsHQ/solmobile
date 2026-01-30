@@ -17,6 +17,7 @@ enum GhostCardRegistry {
         rigorLevel: GhostRigorLevel?,
         moodAnchor: MoodAnchor?,
         factNull: Bool,
+        onAccept: (() -> Void)? = nil,
         onEdit: @escaping () -> Void,
         onForget: @escaping () -> Void
     ) -> GhostCardModel {
@@ -31,6 +32,7 @@ enum GhostCardRegistry {
             factNull: factNull,
             hapticKey: memoryId,
             actions: GhostCardActions(
+                onAccept: onAccept,
                 onEdit: onEdit,
                 onForget: onForget
             )
