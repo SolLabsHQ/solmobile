@@ -132,7 +132,8 @@ struct MemoryEditorSheet: View {
                     patch: MemoryPatchPayload(
                         snippet: trimmedText,
                         tags: nil,
-                        moodAnchor: nil
+                        moodAnchor: nil,
+                        memoryKind: nil
                     ),
                     consent: MemoryConsent(explicitUserConsent: true)
                 )

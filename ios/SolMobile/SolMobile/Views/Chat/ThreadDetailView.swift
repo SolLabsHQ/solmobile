@@ -63,6 +63,10 @@ struct ThreadDetailView: View {
     @State private var toastToken: Int = 0
     @State private var threadContextDismissed: Bool = false
 
+    // Memory accept receipt (View + Undo).
+    @State private var memoryReceipt: MemoryReceipt? = nil
+    @State private var activeMemoryDetail: MemoryDetailRoute? = nil
+
     // Composer draft persistence (ADR-021).
     @State private var composerText: String = ""
     @State private var draftSaveTask: Task<Void, Never>? = nil
@@ -196,7 +200,10 @@ struct ThreadDetailView: View {
                 MessageBubble(
                     message: ghost,
                     scrollViewportHeight: scrollViewportHeight,
-                    handleAscendTrigger: $ghostHandleAscendTrigger
+                    handleAscendTrigger: $ghostHandleAscendTrigger,
+                    onMemoryOfferAccept: { memoryId in
+                        acceptMemoryOffer(memoryId: memoryId)
+                    }
                 )
             }
             .transition(.opacity.combined(with: .scale(scale: 0.98)))
@@ -238,6 +245,12 @@ struct ThreadDetailView: View {
                 .padding(.top, 8)
         }
 
+        if let receipt = memoryReceipt {
+            memoryReceiptCard(receipt)
+                .padding(.horizontal, 10)
+                .padding(.top, 8)
+        }
+
         // Thread context or pending ThreadMemento draft from latest server response.
         if let pending = pendingMementoCandidate {
             Group {
@@ -273,7 +286,13 @@ struct ThreadDetailView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 10) {
                         ForEach(displayMessages) { msg in
-                            MessageBubble(message: msg, scrollViewportHeight: scrollViewportHeight)
+                            MessageBubble(
+                                message: msg,
+                                scrollViewportHeight: scrollViewportHeight,
+                                onMemoryOfferAccept: { memoryId in
+                                    acceptMemoryOffer(memoryId: memoryId)
+                                }
+                            )
                                 .id(msg.id)
                                 .background(GeometryReader { geo in
                                     Color.clear.preference(
@@ -513,6 +532,9 @@ struct ThreadDetailView: View {
         .onChange(of: thread.id) { _, _ in
             threadContextDismissed = false
         }
+        .sheet(item: $activeMemoryDetail) { route in
+            MemoryCitationDetailSheet(memoryId: route.id)
+        }
     }
 
     private func send(_ text: String) {
@@ -556,44 +578,42 @@ struct ThreadDetailView: View {
     }
 
     private func triggerMemoryDistill() {
-        guard let outboxService else { return }
-        let context = buildMemoryContext()
-        guard let triggerMessageId = context.last?.messageId else { return }
+        guard let anchorMessageId = resolveMemoryAnchorMessageId() else {
+            showToast("Message not synced yet.")
+            return
+        }
 
-        let requestId = "mem:thread:\(thread.id.uuidString):\(triggerMessageId)"
-        let payload = MemoryDistillRequest(
-            threadId: thread.id.uuidString,
-            triggerMessageId: triggerMessageId,
-            contextWindow: context,
+        let requestId = "mem:thread:\(thread.id.uuidString):\(anchorMessageId)"
+        let payload = MemorySpanSaveRequest(
             requestId: requestId,
-            reaffirmCount: 0,
+            threadId: thread.id.uuidString,
+            anchorMessageId: anchorMessageId,
+            window: nil,
+            memoryKind: nil,
+            tags: nil,
             consent: MemoryConsent(explicitUserConsent: true)
         )
 
-        outboxService.enqueueMemoryDistill(
-            threadId: thread.id,
-            messageIds: context.compactMap { UUID(uuidString: $0.messageId) },
-            payload: payload
-        )
+        Task {
+            do {
+                let response = try await SolServerClient().saveMemorySpan(request: payload)
+                if let memory = response.memory {
+                    await MainActor.run {
+                        upsertMemoryArtifact(from: memory, memoryId: memory.id)
+                        presentMemoryReceipt(memoryId: memory.id)
+                    }
+                } else {
+                    showToast("Memory saved")
+                }
+            } catch {
+                showToast("Unable to save memory.")
+            }
+        }
     }
 
-    private func buildMemoryContext() -> [MemoryContextItem] {
-        let eligible = messages.filter { message in
-            !message.isGhostCard
-        }
-
-        let window = eligible.suffix(15)
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-
-        return window.map { message in
-            MemoryContextItem(
-                messageId: message.id.uuidString,
-                role: message.creatorType.rawValue,
-                content: message.text,
-                createdAt: formatter.string(from: message.createdAt)
-            )
-        }
+    private func resolveMemoryAnchorMessageId() -> String? {
+        let eligible = messages.filter { !$0.isGhostCard }
+        return eligible.last { $0.resolvedServerMessageId != nil }?.resolvedServerMessageId
     }
 
     private func restoreDraftIfNeeded() {
@@ -757,6 +777,161 @@ struct ThreadDetailView: View {
         let kind: MementoKind
     }
 
+    private struct MemoryReceipt: Identifiable, Equatable {
+        let id = UUID()
+        let memoryId: String
+    }
+
+    private struct MemoryDetailRoute: Identifiable, Equatable {
+        let id: String
+    }
+
+    fileprivate struct MemoryCitationDetailSheet: View {
+        @Environment(\.modelContext) private var modelContext
+        let memoryId: String
+        @State private var memory: MemoryArtifact?
+
+        var body: some View {
+            NavigationStack {
+                if let memory {
+                    MemoryDetailView(memory: memory)
+                } else {
+                    VStack(spacing: 12) {
+                        Text("Memory not found")
+                            .font(.headline)
+                        Text(memoryId)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                    .padding()
+                }
+            }
+            .task(id: memoryId) {
+                await fetchMemoryIfNeeded()
+            }
+        }
+
+        private func fetchMemoryIfNeeded() async {
+            let descriptor = FetchDescriptor<MemoryArtifact>(
+                predicate: #Predicate { $0.memoryId == memoryId }
+            )
+            if let cached = (try? modelContext.fetch(descriptor))?.first {
+                memory = cached
+                return
+            }
+
+            do {
+                let response = try await SolServerClient().getMemory(memoryId: memoryId)
+                if let dto = response.memory {
+                    await MainActor.run {
+                        upsertMemoryArtifact(from: dto)
+                        memory = (try? modelContext.fetch(descriptor))?.first
+                    }
+                }
+            } catch {
+                // keep placeholder if fetch fails
+            }
+        }
+
+        private func upsertMemoryArtifact(from dto: MemoryItemDTO) {
+            let memoryId = dto.id
+            let descriptor = FetchDescriptor<MemoryArtifact>(predicate: #Predicate { $0.memoryId == memoryId })
+            let existing = (try? modelContext.fetch(descriptor))?.first
+
+            let createdAt = dto.createdAt.flatMap { ISO8601DateFormatter().date(from: $0) }
+            let updatedAt = dto.updatedAt.flatMap { ISO8601DateFormatter().date(from: $0) }
+
+            if let existing {
+                existing.threadId = dto.threadId
+                existing.triggerMessageId = dto.triggerMessageId
+                existing.typeRaw = dto.type ?? existing.typeRaw
+                existing.snippet = dto.snippet ?? existing.snippet
+                existing.summary = dto.summary ?? existing.summary
+                existing.moodAnchor = dto.moodAnchor ?? existing.moodAnchor
+                existing.rigorLevelRaw = dto.rigorLevel ?? existing.rigorLevelRaw
+                existing.lifecycleStateRaw = dto.lifecycleState ?? existing.lifecycleStateRaw
+                existing.memoryKindRaw = dto.memoryKind ?? existing.memoryKindRaw
+                existing.tagsCsv = dto.tags?.joined(separator: ",") ?? existing.tagsCsv
+                if let evidenceIds = dto.evidenceMessageIds {
+                    existing.evidenceMessageIdsCsv = evidenceIds.joined(separator: ",")
+                }
+                existing.fidelityRaw = dto.fidelity ?? existing.fidelityRaw
+                existing.transitionToHazyAt = dto.transitionToHazyAt.flatMap { ISO8601DateFormatter().date(from: $0) }
+                existing.updatedAt = updatedAt ?? Date()
+                try? modelContext.save()
+                return
+            }
+
+            let artifact = MemoryArtifact(
+                memoryId: dto.id,
+                threadId: dto.threadId,
+                triggerMessageId: dto.triggerMessageId,
+                typeRaw: dto.type ?? "memory",
+                snippet: dto.snippet,
+                summary: dto.summary,
+                moodAnchor: dto.moodAnchor,
+                rigorLevelRaw: dto.rigorLevel,
+                lifecycleStateRaw: dto.lifecycleState,
+                memoryKindRaw: dto.memoryKind,
+                tagsCsv: dto.tags?.joined(separator: ","),
+                evidenceMessageIdsCsv: dto.evidenceMessageIds?.joined(separator: ","),
+                fidelityRaw: dto.fidelity,
+                transitionToHazyAt: dto.transitionToHazyAt.flatMap { ISO8601DateFormatter().date(from: $0) },
+                createdAt: createdAt,
+                updatedAt: updatedAt
+            )
+            modelContext.insert(artifact)
+            try? modelContext.save()
+        }
+    }
+
+    fileprivate struct MemoryCitationsSheet: View {
+        @Environment(\.modelContext) private var modelContext
+        let memoryIds: [String]
+
+        var body: some View {
+            NavigationStack {
+                List {
+                    ForEach(memoryIds, id: \.self) { memoryId in
+                        NavigationLink {
+                            MemoryCitationDetailSheet(memoryId: memoryId)
+                        } label: {
+                            if let memory = resolveMemory(memoryId) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(memory.snippet ?? "(no snippet)")
+                                        .font(.subheadline)
+                                        .lineLimit(2)
+                                    Text(memoryId)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            } else {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(memoryId)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .textSelection(.enabled)
+                                    Text("Tap to fetch")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+                .navigationTitle("Memory References")
+            }
+        }
+
+        private func resolveMemory(_ memoryId: String) -> MemoryArtifact? {
+            let descriptor = FetchDescriptor<MemoryArtifact>(
+                predicate: #Predicate { $0.memoryId == memoryId }
+            )
+            return (try? modelContext.fetch(descriptor))?.first
+        }
+    }
+
     private var resolvedThreadContextMode: ThreadContextSettings.Mode {
         ThreadContextSettings.normalized(threadContextMode)
     }
@@ -905,6 +1080,147 @@ struct ThreadDetailView: View {
             guard self.toastToken == token else { return }
             self.toastMessage = nil
         }
+    }
+
+    private func memoryReceiptCard(_ receipt: MemoryReceipt) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Memory saved")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                Button("Undo") {
+                    undoMemoryAccept(memoryId: receipt.memoryId)
+                }
+                .font(.footnote)
+            }
+
+            HStack(spacing: 12) {
+                Button("View") {
+                    activeMemoryDetail = MemoryDetailRoute(id: receipt.memoryId)
+                }
+                .buttonStyle(.bordered)
+
+                Spacer()
+            }
+        }
+        .padding(10)
+        .background(.thinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func presentMemoryReceipt(memoryId: String) {
+        markMemoryAccepted(memoryId: memoryId)
+        memoryReceipt = MemoryReceipt(memoryId: memoryId)
+    }
+
+    private func acceptMemoryOffer(memoryId: String) {
+        Task {
+            await fetchMemoryDetailIfNeeded(memoryId: memoryId)
+            await MainActor.run {
+                presentMemoryReceipt(memoryId: memoryId)
+                showToast("Accepted")
+            }
+        }
+    }
+
+    private func undoMemoryAccept(memoryId: String) {
+        Task {
+            do {
+                let client = SolServerClient()
+                try await client.deleteMemory(memoryId: memoryId, confirm: true)
+                await MainActor.run {
+                    deleteMemoryArtifact(memoryId: memoryId)
+                    memoryReceipt = nil
+                    showToast("Undone")
+                }
+            } catch {
+                showToast("Undo failed")
+            }
+        }
+    }
+
+    private func markMemoryAccepted(memoryId: String) {
+        let descriptor = FetchDescriptor<MemoryArtifact>(predicate: #Predicate { $0.memoryId == memoryId })
+        if let artifact = try? modelContext.fetch(descriptor).first {
+            artifact.acceptedAt = Date()
+            try? modelContext.save()
+        }
+    }
+
+    private func fetchMemoryDetailIfNeeded(memoryId: String) async {
+        let descriptor = FetchDescriptor<MemoryArtifact>(predicate: #Predicate { $0.memoryId == memoryId })
+        if (try? modelContext.fetch(descriptor).first) != nil {
+            return
+        }
+        do {
+            let response = try await SolServerClient().getMemory(memoryId: memoryId)
+            if let memory = response.memory {
+                await MainActor.run {
+                    upsertMemoryArtifact(from: memory, memoryId: memory.id)
+                }
+            }
+        } catch {
+            showToast("Unable to load memory.")
+        }
+    }
+
+    private func deleteMemoryArtifact(memoryId: String) {
+        let descriptor = FetchDescriptor<MemoryArtifact>(predicate: #Predicate { $0.memoryId == memoryId })
+        if let artifact = try? modelContext.fetch(descriptor).first {
+            modelContext.delete(artifact)
+            try? modelContext.save()
+        }
+    }
+
+    private func upsertMemoryArtifact(from dto: MemoryItemDTO, memoryId: String) {
+        let descriptor = FetchDescriptor<MemoryArtifact>(predicate: #Predicate { $0.memoryId == memoryId })
+        let existing = (try? modelContext.fetch(descriptor))?.first
+
+        if let existing {
+            existing.threadId = dto.threadId
+            existing.triggerMessageId = dto.triggerMessageId
+            existing.typeRaw = dto.type ?? existing.typeRaw
+            existing.snippet = dto.snippet ?? existing.snippet
+            existing.summary = dto.summary ?? existing.summary
+            existing.moodAnchor = dto.moodAnchor ?? existing.moodAnchor
+            existing.rigorLevelRaw = dto.rigorLevel ?? existing.rigorLevelRaw
+            existing.lifecycleStateRaw = dto.lifecycleState ?? existing.lifecycleStateRaw
+            existing.memoryKindRaw = dto.memoryKind ?? existing.memoryKindRaw
+            existing.tagsCsv = dto.tags?.joined(separator: ",") ?? existing.tagsCsv
+            if let evidenceIds = dto.evidenceMessageIds {
+                existing.evidenceMessageIdsCsv = evidenceIds.joined(separator: ",")
+            }
+            existing.fidelityRaw = dto.fidelity ?? existing.fidelityRaw
+            existing.transitionToHazyAt = dto.transitionToHazyAt.flatMap { ISO8601DateFormatter().date(from: $0) }
+            existing.updatedAt = dto.updatedAt.flatMap { ISO8601DateFormatter().date(from: $0) } ?? Date()
+            try? modelContext.save()
+            return
+        }
+
+        let createdAt = dto.createdAt.flatMap { ISO8601DateFormatter().date(from: $0) }
+        let artifact = MemoryArtifact(
+            memoryId: memoryId,
+            threadId: dto.threadId,
+            triggerMessageId: dto.triggerMessageId,
+            typeRaw: dto.type ?? "memory",
+            snippet: dto.snippet,
+            summary: dto.summary,
+            moodAnchor: dto.moodAnchor,
+            rigorLevelRaw: dto.rigorLevel,
+            lifecycleStateRaw: dto.lifecycleState,
+            memoryKindRaw: dto.memoryKind,
+            tagsCsv: dto.tags?.joined(separator: ","),
+            evidenceMessageIdsCsv: dto.evidenceMessageIds?.joined(separator: ","),
+            fidelityRaw: dto.fidelity,
+            transitionToHazyAt: dto.transitionToHazyAt.flatMap { ISO8601DateFormatter().date(from: $0) },
+            createdAt: createdAt,
+            updatedAt: createdAt
+        )
+        modelContext.insert(artifact)
+        try? modelContext.save()
     }
 
     private func acceptMemento(_ m: MementoViewModel) {
@@ -1341,12 +1657,14 @@ private struct MessageBubble: View {
     let message: Message
     let scrollViewportHeight: CGFloat
     @Binding var handleAscendTrigger: Bool
+    let onMemoryOfferAccept: ((String) -> Void)?
     @Environment(\.modelContext) private var modelContext
     @State private var showingClaims = false
     @State private var editorMode: MemoryEditorMode?
     @State private var showDeleteConfirm = false
     @State private var showErrorAlert = false
     @State private var errorMessage: String = ""
+    @State private var showMemoryCitations = false
     @State private var activeExportSheet: ExportSheet?
     @State private var activeDraft: JournalDraftEditorPayload?
     @State private var activeDraftOffer: JournalOffer?
@@ -1361,10 +1679,16 @@ private struct MessageBubble: View {
     private let eventStore = EKEventStore()
     private let log = Logger(subsystem: "com.sollabshq.solmobile", category: "MessageBubble")
 
-    init(message: Message, scrollViewportHeight: CGFloat, handleAscendTrigger: Binding<Bool> = .constant(false)) {
+    init(
+        message: Message,
+        scrollViewportHeight: CGFloat,
+        handleAscendTrigger: Binding<Bool> = .constant(false),
+        onMemoryOfferAccept: ((String) -> Void)? = nil
+    ) {
         self.message = message
         self.scrollViewportHeight = scrollViewportHeight
         self._handleAscendTrigger = handleAscendTrigger
+        self.onMemoryOfferAccept = onMemoryOfferAccept
     }
 
     var body: some View {
@@ -1436,6 +1760,18 @@ private struct MessageBubble: View {
                         .padding(10)
                         .background(message.creatorType == .user ? Color.gray.opacity(0.2) : Color.blue.opacity(0.15))
                         .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                    if shouldShowLatticeOfflineBadge {
+                        Text("LATTICE_OFFLINE")
+                            .font(.caption2)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Color.red.opacity(0.15))
+                            .foregroundStyle(.red)
+                            .clipShape(Capsule())
+                            .padding(.top, 6)
+                            .padding(.horizontal, 10)
+                    }
 
                     if message.creatorType == .assistant && hasClaimsBadge {
                         Button {
@@ -1514,6 +1850,16 @@ private struct MessageBubble: View {
                         )
                         .padding(.horizontal, 10)
                     }
+
+                    if message.creatorType == .assistant && !message.latticeMemoryIds.isEmpty {
+                        Button {
+                            showMemoryCitations = true
+                        } label: {
+                            Label("Memories (\(message.latticeMemoryIds.count))", systemImage: "brain")
+                                .font(.caption)
+                        }
+                        .padding(.horizontal, 10)
+                    }
                 }
 
                 if message.creatorType != .user { Spacer(minLength: 40) }
@@ -1530,6 +1876,9 @@ private struct MessageBubble: View {
                     }
                 )
             }
+            .sheet(isPresented: $showMemoryCitations) {
+                ThreadDetailView.MemoryCitationsSheet(memoryIds: message.latticeMemoryIds)
+            }
             .onAppear {
                 logJournalOfferGateIfNeeded()
             }
@@ -1541,6 +1890,27 @@ private struct MessageBubble: View {
     
     private var hasEvidence: Bool {
         message.hasEvidence
+    }
+
+    private var shouldShowLatticeOfflineBadge: Bool {
+        guard message.creatorType == .assistant else { return false }
+        guard message.latticeStatusRaw == "fail" else { return false }
+        guard AppEnvironment.current != .prod else { return false }
+        return isDevBadgeEnabled
+    }
+
+    private var isDevBadgeEnabled: Bool {
+        if let raw = Bundle.main.infoDictionary?["LATTICE_DEV_BADGE"] as? String {
+            return raw == "1" || raw.lowercased() == "true"
+        }
+        if let raw = Bundle.main.infoDictionary?["LATTICE_DEV_BADGE"] as? Bool {
+            return raw
+        }
+        #if DEBUG
+        return true
+        #else
+        return false
+        #endif
     }
 
     private var hasClaimsBadge: Bool {
@@ -1955,6 +2325,15 @@ private struct MessageBubble: View {
             onEdit = nil
         }
 
+        let onAccept: (() -> Void)?
+        if kind == .memoryArtifact, let memoryId = message.ghostMemoryId, !message.ghostFactNull {
+            onAccept = {
+                onMemoryOfferAccept?(memoryId)
+            }
+        } else {
+            onAccept = nil
+        }
+
         let onForget: (() -> Void)?
         if cta.canForget {
             onForget = {
@@ -1988,6 +2367,7 @@ private struct MessageBubble: View {
             captureSuggestion: message.captureSuggestion,
             hapticKey: message.ghostMemoryId ?? message.id.uuidString,
             actions: GhostCardActions(
+                onAccept: onAccept,
                 onEdit: onEdit,
                 onForget: onForget,
                 onAscend: onAscend,
@@ -2062,9 +2442,15 @@ private struct MessageBubble: View {
             existing.triggerMessageId = dto.triggerMessageId
             existing.typeRaw = dto.type ?? existing.typeRaw
             existing.snippet = dto.snippet ?? existing.snippet
+            existing.summary = dto.summary ?? existing.summary
             existing.moodAnchor = dto.moodAnchor ?? existing.moodAnchor
             existing.rigorLevelRaw = dto.rigorLevel ?? existing.rigorLevelRaw
+            existing.lifecycleStateRaw = dto.lifecycleState ?? existing.lifecycleStateRaw
+            existing.memoryKindRaw = dto.memoryKind ?? existing.memoryKindRaw
             existing.tagsCsv = dto.tags?.joined(separator: ",") ?? existing.tagsCsv
+            if let evidenceIds = dto.evidenceMessageIds {
+                existing.evidenceMessageIdsCsv = evidenceIds.joined(separator: ",")
+            }
             existing.fidelityRaw = dto.fidelity ?? existing.fidelityRaw
             existing.transitionToHazyAt = dto.transitionToHazyAt.flatMap { ISO8601DateFormatter().date(from: $0) }
             existing.updatedAt = dto.updatedAt.flatMap { ISO8601DateFormatter().date(from: $0) } ?? Date()
@@ -2079,9 +2465,13 @@ private struct MessageBubble: View {
             triggerMessageId: dto.triggerMessageId,
             typeRaw: dto.type ?? "memory",
             snippet: dto.snippet,
+            summary: dto.summary,
             moodAnchor: dto.moodAnchor,
             rigorLevelRaw: dto.rigorLevel,
+            lifecycleStateRaw: dto.lifecycleState,
+            memoryKindRaw: dto.memoryKind,
             tagsCsv: dto.tags?.joined(separator: ","),
+            evidenceMessageIdsCsv: dto.evidenceMessageIds?.joined(separator: ","),
             fidelityRaw: dto.fidelity,
             transitionToHazyAt: dto.transitionToHazyAt.flatMap { ISO8601DateFormatter().date(from: $0) },
             createdAt: createdAt,

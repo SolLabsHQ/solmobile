@@ -887,6 +887,7 @@ final class TransmissionActions {
         let newMemoryId = assistantMessage.ghostMemoryId
         let factNull = assistantMessage.ghostFactNull
         let ghostKind = assistantMessage.ghostKind
+        prefetchLatticeMemoriesIfNeeded(for: assistantMessage)
         GhostCardReceipt.fireCanonizationIfNeeded(
             modelContext: modelContext,
             previousMemoryId: previousMemoryId,
@@ -994,6 +995,7 @@ final class TransmissionActions {
             existing.triggerMessageId = message.ghostTriggerMessageId ?? existing.triggerMessageId
             existing.typeRaw = typeRaw
             existing.snippet = message.ghostSnippet ?? existing.snippet
+            existing.summary = message.ghostSnippet ?? existing.summary
             existing.moodAnchor = message.ghostMoodAnchor ?? existing.moodAnchor
             existing.rigorLevelRaw = message.ghostRigorLevelRaw ?? existing.rigorLevelRaw
             existing.updatedAt = Date()
@@ -1006,12 +1008,98 @@ final class TransmissionActions {
             triggerMessageId: message.ghostTriggerMessageId,
             typeRaw: typeRaw,
             snippet: message.ghostSnippet,
+            summary: message.ghostSnippet,
             moodAnchor: message.ghostMoodAnchor,
             rigorLevelRaw: message.ghostRigorLevelRaw,
             createdAt: message.createdAt,
             updatedAt: message.createdAt
         )
 
+        modelContext.insert(artifact)
+    }
+
+    private func prefetchLatticeMemoriesIfNeeded(for message: Message) {
+        let memoryIds = message.latticeMemoryIds
+        guard !memoryIds.isEmpty else { return }
+
+        var missing: [String] = []
+        for memoryId in memoryIds {
+            let descriptor = FetchDescriptor<MemoryArtifact>(
+                predicate: #Predicate { $0.memoryId == memoryId }
+            )
+            if (try? modelContext.fetch(descriptor).first) == nil {
+                missing.append(memoryId)
+            }
+        }
+
+        guard !missing.isEmpty else { return }
+
+        let logger = outboxLog
+
+        Task { [weak self, missing] in
+            guard let self else { return }
+            let client = SolServerClient()
+            for memoryId in missing {
+                do {
+                    let response = try await client.getMemory(memoryId: memoryId)
+                    if let dto = response.memory {
+                        await MainActor.run {
+                            self.upsertMemoryArtifact(from: dto)
+                        }
+                    }
+                } catch {
+                    logger.error("prefetch_lattice_memory_failed id=\(memoryId, privacy: .public)")
+                }
+            }
+        }
+    }
+
+    private func upsertMemoryArtifact(from dto: MemoryItemDTO) {
+        let memoryId = dto.id
+        let descriptor = FetchDescriptor<MemoryArtifact>(predicate: #Predicate { $0.memoryId == memoryId })
+        let existing = (try? modelContext.fetch(descriptor))?.first
+
+        let createdAt = dto.createdAt.flatMap { ISO8601DateFormatter().date(from: $0) }
+        let updatedAt = dto.updatedAt.flatMap { ISO8601DateFormatter().date(from: $0) }
+
+        if let existing {
+            existing.threadId = dto.threadId
+            existing.triggerMessageId = dto.triggerMessageId
+            existing.typeRaw = dto.type ?? existing.typeRaw
+            existing.snippet = dto.snippet ?? existing.snippet
+            existing.summary = dto.summary ?? existing.summary
+            existing.moodAnchor = dto.moodAnchor ?? existing.moodAnchor
+            existing.rigorLevelRaw = dto.rigorLevel ?? existing.rigorLevelRaw
+            existing.lifecycleStateRaw = dto.lifecycleState ?? existing.lifecycleStateRaw
+            existing.memoryKindRaw = dto.memoryKind ?? existing.memoryKindRaw
+            existing.tagsCsv = dto.tags?.joined(separator: ",") ?? existing.tagsCsv
+            if let evidenceIds = dto.evidenceMessageIds {
+                existing.evidenceMessageIdsCsv = evidenceIds.joined(separator: ",")
+            }
+            existing.fidelityRaw = dto.fidelity ?? existing.fidelityRaw
+            existing.transitionToHazyAt = dto.transitionToHazyAt.flatMap { ISO8601DateFormatter().date(from: $0) }
+            existing.updatedAt = updatedAt ?? Date()
+            return
+        }
+
+        let artifact = MemoryArtifact(
+            memoryId: dto.id,
+            threadId: dto.threadId,
+            triggerMessageId: dto.triggerMessageId,
+            typeRaw: dto.type ?? "memory",
+            snippet: dto.snippet,
+            summary: dto.summary,
+            moodAnchor: dto.moodAnchor,
+            rigorLevelRaw: dto.rigorLevel,
+            lifecycleStateRaw: dto.lifecycleState,
+            memoryKindRaw: dto.memoryKind,
+            tagsCsv: dto.tags?.joined(separator: ","),
+            evidenceMessageIdsCsv: dto.evidenceMessageIds?.joined(separator: ","),
+            fidelityRaw: dto.fidelity,
+            transitionToHazyAt: dto.transitionToHazyAt.flatMap { ISO8601DateFormatter().date(from: $0) },
+            createdAt: createdAt,
+            updatedAt: updatedAt
+        )
         modelContext.insert(artifact)
     }
 

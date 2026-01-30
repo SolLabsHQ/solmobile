@@ -42,6 +42,8 @@
 	<string>https://api.sollabshq.com</string>
 	<key>SOLSERVER_BASE_URL_STAGING</key>
 	<string>https://solserver-staging.sollabshq.com</string>
+	<key>LATTICE_DEV_BADGE</key>
+	<string>1</string>
 	<key>SOL_ENV</key>
 	<string>dev</string>
 </dict>

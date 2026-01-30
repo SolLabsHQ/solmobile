@@ -37,6 +37,31 @@ nonisolated struct MemoryDistillRequest: Codable {
     }
 }
 
+struct MemorySpanWindow: Codable {
+    let before: Int?
+    let after: Int?
+}
+
+struct MemorySpanSaveRequest: Codable {
+    let requestId: String
+    let threadId: String
+    let anchorMessageId: String
+    let window: MemorySpanWindow?
+    let memoryKind: String?
+    let tags: [String]?
+    let consent: MemoryConsent
+
+    enum CodingKeys: String, CodingKey {
+        case requestId = "request_id"
+        case threadId = "thread_id"
+        case anchorMessageId = "anchor_message_id"
+        case window
+        case memoryKind = "memory_kind"
+        case tags
+        case consent
+    }
+}
+
 nonisolated struct MemoryDistillResponse: Codable {
     let requestId: String?
     let transmissionId: String?
@@ -79,9 +104,14 @@ struct MemoryItemDTO: Decodable {
     let triggerMessageId: String?
     let type: String?
     let snippet: String?
+    let summary: String?
     let moodAnchor: String?
     let rigorLevel: String?
+    let lifecycleState: String?
+    let memoryKind: String?
+    let isSafeForAutoAccept: Bool?
     let tags: [String]?
+    let evidenceMessageIds: [String]?
     let fidelity: String?
     let transitionToHazyAt: String?
     let createdAt: String?
@@ -94,9 +124,14 @@ struct MemoryItemDTO: Decodable {
         case triggerMessageId = "trigger_message_id"
         case type
         case snippet
+        case summary
         case moodAnchor = "mood_anchor"
         case rigorLevel = "rigor_level"
+        case lifecycleState = "lifecycle_state"
+        case memoryKind = "memory_kind"
+        case isSafeForAutoAccept = "is_safe_for_auto_accept"
         case tags
+        case evidenceMessageIds = "evidence_message_ids"
         case fidelity
         case transitionToHazyAt = "transition_to_hazy_at"
         case createdAt = "created_at"
@@ -122,9 +157,14 @@ struct MemoryItemDTO: Decodable {
         triggerMessageId = try container.decodeIfPresent(String.self, forKey: .triggerMessageId)
         type = try container.decodeIfPresent(String.self, forKey: .type)
         snippet = try container.decodeIfPresent(String.self, forKey: .snippet)
+        summary = try container.decodeIfPresent(String.self, forKey: .summary)
         moodAnchor = try container.decodeIfPresent(String.self, forKey: .moodAnchor)
         rigorLevel = try container.decodeIfPresent(String.self, forKey: .rigorLevel)
+        lifecycleState = try container.decodeIfPresent(String.self, forKey: .lifecycleState)
+        memoryKind = try container.decodeIfPresent(String.self, forKey: .memoryKind)
+        isSafeForAutoAccept = try container.decodeIfPresent(Bool.self, forKey: .isSafeForAutoAccept)
         tags = try container.decodeIfPresent([String].self, forKey: .tags)
+        evidenceMessageIds = try container.decodeIfPresent([String].self, forKey: .evidenceMessageIds)
         fidelity = try container.decodeIfPresent(String.self, forKey: .fidelity)
         transitionToHazyAt = try container.decodeIfPresent(String.self, forKey: .transitionToHazyAt)
         createdAt = try container.decodeIfPresent(String.self, forKey: .createdAt)
@@ -136,11 +176,13 @@ struct MemoryPatchPayload: Codable {
     let snippet: String?
     let tags: [String]?
     let moodAnchor: String?
+    let memoryKind: String?
 
     enum CodingKeys: String, CodingKey {
         case snippet
         case tags
         case moodAnchor = "mood_anchor"
+        case memoryKind = "memory_kind"
     }
 }
 
@@ -183,6 +225,16 @@ struct MemoryCreatePayload: Codable {
         case content
         case moodAnchor = "mood_anchor"
         case rigorLevel = "rigor_level"
+    }
+}
+
+struct MemoryDetailResponse: Decodable {
+    let requestId: String?
+    let memory: MemoryItemDTO?
+
+    enum CodingKeys: String, CodingKey {
+        case requestId = "request_id"
+        case memory
     }
 }
 
