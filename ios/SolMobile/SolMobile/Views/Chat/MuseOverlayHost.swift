@@ -24,23 +24,20 @@ struct MuseOverlayHost<Content: View>: View {
     }
 
     var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .topLeading) {
-                content
-                    .padding(.top, 10)
-                    .padding(.leading, 10)
+        ZStack(alignment: .topLeading) {
+            content
+                .padding(.top, 10)
+                .padding(.leading, 10)
 
-                MuseHandleView(
-                    canAscend: canAscend,
-                    onDismiss: onDismiss,
-                    onAscend: onAscend
-                )
-                .offset(x: -6, y: -6)
-            }
-            .padding(.top, geo.safeAreaInsets.top + 12)
-            .padding(.leading, 12)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            MuseHandleView(
+                canAscend: canAscend,
+                onDismiss: onDismiss,
+                onAscend: onAscend
+            )
+            .offset(x: -6, y: -6)
         }
+        .safeAreaPadding(.top, 12)
+        .padding(.leading, 12)
     }
 }
 
@@ -59,7 +56,7 @@ struct MuseHandleView: View {
     var body: some View {
         ZStack {
             Circle()
-                .stroke(brandGold.opacity(0.6), lineWidth: 1)
+                .stroke(BrandColors.gold.opacity(0.6), lineWidth: 1)
                 .scaleEffect(echoScale)
                 .opacity(echoOpacity)
                 .allowsHitTesting(false)
@@ -67,11 +64,11 @@ struct MuseHandleView: View {
             Text("👻")
                 .font(.system(size: 24))
                 .opacity(0.6)
-                .shadow(color: brandGold.opacity(0.4), radius: 4, x: 0, y: 1)
+                .shadow(color: BrandColors.gold.opacity(0.4), radius: 4, x: 0, y: 1)
         }
         .frame(width: handleSize, height: handleSize)
         .background(.ultraThinMaterial, in: Circle())
-        .shadow(color: brandGold.opacity(0.35), radius: 6, x: 0, y: 2)
+        .shadow(color: BrandColors.gold.opacity(0.35), radius: 6, x: 0, y: 2)
         .scaleEffect(bounceScale)
         .contentShape(Circle())
         .onAppear {
@@ -89,10 +86,6 @@ struct MuseHandleView: View {
                     }
                 }
         )
-    }
-
-    private var brandGold: Color {
-        Color(red: 0.95, green: 0.82, blue: 0.32)
     }
 
     private func runEcho() {

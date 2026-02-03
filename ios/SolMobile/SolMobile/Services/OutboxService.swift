@@ -88,23 +88,12 @@ final class OutboxService {
         kick(reason: .start, useBackgroundTask: false)
     }
 
-    func enqueueChat(thread: ConversationThread, userMessage: Message) {
-        let shouldFail = userMessage.text
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-            .hasPrefix("/fail")
-
-        let threadId = thread.id
-        let messageId = userMessage.id
-        let messageText = userMessage.text
-
+    func enqueueChat(threadId: UUID, userMessageId: UUID) {
         Task { [weak self] in
             guard let self else { return }
             await self.worker.enqueueChat(
                 threadId: threadId,
-                messageId: messageId,
-                messageText: messageText,
-                shouldFail: shouldFail
+                messageId: userMessageId
             )
             await MainActor.run {
                 self.kick(reason: .enqueue, useBackgroundTask: true)

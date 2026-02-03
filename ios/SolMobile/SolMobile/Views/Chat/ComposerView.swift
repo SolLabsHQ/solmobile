@@ -9,7 +9,6 @@ import SwiftUI
 
 struct ComposerView: View {
     @Binding var text: String
-    var starlightState: StarlightState = .idle
     var isSendBlocked: Bool = false
     var blockedUntil: Date? = nil
     var onSend: (String) -> Void
@@ -17,14 +16,13 @@ struct ComposerView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 10) {
-                StarlightPulseView(state: starlightState)
-                    .frame(width: 12, height: 12)
                 TextField("Message…", text: $text, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
 
                 Button("Send") {
                     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !trimmed.isEmpty else { return }
+                    HapticRouter.shared.tapLight()
                     onSend(trimmed)
                 }
                 .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSendBlocked)
@@ -33,7 +31,7 @@ struct ComposerView: View {
             if isSendBlocked {
                 Text(blockedMessage)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(BrandColors.statusText)
             }
         }
     }

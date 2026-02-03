@@ -14,7 +14,7 @@ struct RecoveryPillView: View {
                 Text("👻")
                     .font(.system(size: 14))
                     .opacity(0.6)
-                    .shadow(color: brandGold.opacity(0.5), radius: 4, x: 0, y: 1)
+                    .shadow(color: BrandColors.gold.opacity(0.5), radius: 4, x: 0, y: 1)
 
                 Text("Restore")
                     .font(.footnote)
@@ -26,9 +26,4 @@ struct RecoveryPillView: View {
         }
         .buttonStyle(.plain)
     }
-
-    private var brandGold: Color {
-        Color(red: 0.95, green: 0.82, blue: 0.32)
-    }
 }
-

@@ -34,7 +34,7 @@ actor OutboxWorkerActor {
         await engine.processQueue(pollLimit: pollLimit, pollFirst: pollFirst)
     }
 
-    func enqueueChat(threadId: UUID, messageId: UUID, messageText: String?, shouldFail: Bool) async {
+    func enqueueChat(threadId: UUID, messageId: UUID) async {
         let engine = await MainActor.run {
             TransmissionActions(
                 modelContext: ModelContext(container),
@@ -42,7 +42,7 @@ actor OutboxWorkerActor {
                 statusWatcher: statusWatcher
             )
         }
-        await engine.enqueueChat(threadId: threadId, messageId: messageId, messageText: messageText, shouldFail: shouldFail)
+        await engine.enqueueChat(threadId: threadId, messageId: messageId)
     }
 
     func enqueueMemoryDistill(threadId: UUID, messageIds: [UUID], payload: MemoryDistillRequest) async {

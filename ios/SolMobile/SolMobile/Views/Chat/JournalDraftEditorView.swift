@@ -60,14 +60,14 @@ struct JournalDraftEditorView: View {
                     .frame(minHeight: 220)
                     .overlay(
                         RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+                            .stroke(BrandColors.glassStroke, lineWidth: 1)
                     )
 
                 if !payload.tagsSuggested.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Tags suggested")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(BrandColors.timeLaneText)
                         WrapTagsView(tags: payload.tagsSuggested)
                     }
                 }
@@ -177,7 +177,8 @@ private struct WrapTagsView: View {
                 .font(.caption)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
-                .background(Color.secondary.opacity(0.15))
+                .background(BrandColors.badgeFill)
+                .foregroundStyle(BrandColors.badgeText)
                 .clipShape(Capsule())
         }
     }

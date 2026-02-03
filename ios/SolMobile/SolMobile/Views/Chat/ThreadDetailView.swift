@@ -31,10 +31,13 @@ struct ThreadDetailView: View {
     @State private var initialScrollDone: Bool = false
     @State private var showJumpToLatest: Bool = false
     @State private var showNewMessagesPill: Bool = false
-    @State private var newMessagesTargetId: UUID? = nil
+    @State private var newMessagesTargetId: PersistentIdentifier? = nil
     @State private var newMessagesCount: Int? = nil
     @State private var scrollViewportHeight: CGFloat = 0
-    @State private var lastVisibleAnchorId: UUID? = nil
+    @State private var scrollViewportWidth: CGFloat = 0
+    @State private var lastVisibleAnchorId: PersistentIdentifier? = nil
+    @State private var pendingFrameUpdate: [PersistentIdentifier: CGRect] = [:]
+    @State private var frameUpdateScheduled: Bool = false
     @State private var composerHeight: CGFloat = 0
     @State private var outboxBannerHeight: CGFloat = 0
     @State private var starlightState: StarlightState = .idle
@@ -73,6 +76,9 @@ struct ThreadDetailView: View {
     @State private var composerText: String = ""
     @State private var draftSaveTask: Task<Void, Never>? = nil
     @State private var pendingSendClear: Bool = false
+    @State private var pendingScrollTargetId: PersistentIdentifier? = nil
+    @State private var draftSnapshot: DraftSnapshot? = nil
+    @State private var draftSnapshotMessageId: UUID? = nil
 
     // Trace UI-level outbox lifecycle (retry taps, coalesced reruns, etc.)
     private let viewLog = Logger(subsystem: "com.sollabshq.solmobile", category: "ThreadDetailView")
@@ -101,6 +107,11 @@ struct ThreadDetailView: View {
         messages.filter { !$0.isGhostCard }
     }
 
+    private func rowKey(for messageId: UUID?) -> PersistentIdentifier? {
+        guard let messageId else { return nil }
+        return displayMessages.first(where: { $0.id == messageId })?.persistentModelID
+    }
+
     // Most recent ghost message for overlay.
     private var latestGhostMessage: Message? {
         // Show the most recent ghost card as an overlay (does not participate in List/VStack layout).
@@ -109,6 +120,20 @@ struct ThreadDetailView: View {
 
     private var latestAssistantMessageId: UUID? {
         messages.last(where: { $0.creatorType == .assistant && !$0.isGhostCard })?.id
+    }
+
+    private var transmissionByMessageId: [UUID: Transmission] {
+        var map: [UUID: Transmission] = [:]
+        for tx in transmissions {
+            for id in tx.packet.messageIds {
+                map[id] = tx
+            }
+        }
+        return map
+    }
+
+    private var latestOutgoingUserMessageId: UUID? {
+        messages.last(where: { $0.creatorType == .user && transmissionByMessageId[$0.id] != nil })?.id
     }
 
     private func isGhostSaved(_ ghost: Message) -> Bool {
@@ -194,19 +219,25 @@ struct ThreadDetailView: View {
     @ViewBuilder
     private var ghostOverlay: some View {
         if let ghost = latestGhostMessage, ghostOverlayMode == .full {
-            MuseOverlayHost(
-                canAscend: ghost.isAscendEligible && JournalDonationService.isJournalAvailable,
-                onDismiss: { dismissGhostOverlay(ghost) },
-                onAscend: { ghostHandleAscendTrigger = true }
-            ) {
-                MessageBubble(
-                    message: ghost,
-                    scrollViewportHeight: scrollViewportHeight,
-                    handleAscendTrigger: $ghostHandleAscendTrigger,
-                    onMemoryOfferAccept: { memoryId in
-                        acceptMemoryOffer(memoryId: memoryId)
-                    }
-                )
+            ZStack {
+                Color.clear.allowsHitTesting(false)
+                MuseOverlayHost(
+                    canAscend: ghost.isAscendEligible && JournalDonationService.isJournalAvailable,
+                    onDismiss: { dismissGhostOverlay(ghost) },
+                    onAscend: { ghostHandleAscendTrigger = true }
+                ) {
+                    MessageBubble(
+                        message: ghost,
+                        scrollViewportHeight: scrollViewportHeight,
+                        scrollViewportWidth: scrollViewportWidth,
+                        statusContext: nil,
+                        handleAscendTrigger: $ghostHandleAscendTrigger,
+                        onMemoryOfferAccept: { memoryId in
+                            acceptMemoryOffer(memoryId: memoryId)
+                        }
+                    )
+                }
+                .allowsHitTesting(true)
             }
             .transition(.opacity.combined(with: .scale(scale: 0.98)))
             .animation(.easeIn(duration: 1.2), value: ghost.id)
@@ -227,8 +258,12 @@ struct ThreadDetailView: View {
     @ViewBuilder
     private var recoveryPillOverlay: some View {
         if showRecoveryPill {
-            RecoveryPillView {
-                restoreGhostOverlay()
+            ZStack {
+                Color.clear.allowsHitTesting(false)
+                RecoveryPillView {
+                    restoreGhostOverlay()
+                }
+                .allowsHitTesting(true)
             }
             .padding(.leading, 12)
             .padding(.bottom, composerHeight + outboxBannerHeight + 12)
@@ -239,73 +274,75 @@ struct ThreadDetailView: View {
     @ViewBuilder
     private var mainStack: some View {
         VStack(spacing: 0) {
-
-        // Accepted ThreadMemento (navigation snapshot).
-        if let acceptedMemento {
-            mementoAcceptedCard(acceptedMemento)
-                .padding(.horizontal, 10)
-                .padding(.top, 8)
-        }
-
-        if let receipt = memoryReceipt {
-            memoryReceiptCard(receipt)
-                .padding(.horizontal, 10)
-                .padding(.top, 8)
-        }
-
-        // Thread context or pending ThreadMemento draft from latest server response.
-        if let pending = pendingMementoCandidate {
-            Group {
-                if pending.kind == .latest {
-                    mementoContextCard(pending)
-                } else {
-                    mementoPendingCard(pending)
-                }
-            }
-            .padding(.horizontal, 10)
-            .padding(.top, 8)
-        }
-
-        // Mini toast: short-lived feedback for memento actions.
-        if let toastMessage {
-            HStack(spacing: 10) {
-                Image(systemName: "checkmark.circle")
-                Text(toastMessage)
-                    .font(.footnote)
-                Spacer()
-            }
-            .padding(10)
-            .background(.thinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .padding(.horizontal, 10)
-            .padding(.top, 8)
-            .transition(.opacity)
-            .animation(.easeInOut(duration: 0.15), value: toastMessage)
-        }
-
         ScrollViewReader { proxy in
             VStack(spacing: 0) {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 10) {
-                        ForEach(displayMessages) { msg in
-                            MessageBubble(
-                                message: msg,
-                                scrollViewportHeight: scrollViewportHeight,
-                                onMemoryOfferAccept: { memoryId in
-                                    acceptMemoryOffer(memoryId: memoryId)
+                        // Accepted ThreadMemento (navigation snapshot).
+                        if let acceptedMemento {
+                            mementoAcceptedCard(acceptedMemento)
+                                .padding(.top, 8)
+                        }
+
+                        if let receipt = memoryReceipt {
+                            memoryReceiptCard(receipt)
+                                .padding(.top, 8)
+                        }
+
+                        // Thread context or pending ThreadMemento draft from latest server response.
+                        if let pending = pendingMementoCandidate {
+                            Group {
+                                if pending.kind == .latest {
+                                    mementoContextCard(pending)
+                                } else {
+                                    mementoPendingCard(pending)
                                 }
-                            )
-                                .id(msg.id)
-                                .background(GeometryReader { geo in
-                                    Color.clear.preference(
-                                        key: MessageFramePreferenceKey.self,
-                                        value: [msg.id: geo.frame(in: .named("threadScroll"))]
-                                    )
-                                })
+                            }
+                            .padding(.top, 8)
+                        }
+
+                        // Mini toast: short-lived feedback for memento actions.
+                        if let toastMessage {
+                            HStack(spacing: 10) {
+                                Image(systemName: "checkmark.circle")
+                                Text(toastMessage)
+                                    .font(.footnote)
+                                Spacer()
+                            }
+                            .padding(10)
+                            .background(.thinMaterial)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .padding(.top, 8)
+                            .transition(.opacity)
+                            .animation(.easeInOut(duration: 0.15), value: toastMessage)
+                        }
+
+                        ForEach(displayMessages, id: \.persistentModelID) { msg in
+                            HStack(spacing: 0) {
+                                if msg.creatorType == .user { Spacer(minLength: 40) }
+                                MessageBubble(
+                                    message: msg,
+                                    scrollViewportHeight: scrollViewportHeight,
+                                    scrollViewportWidth: scrollViewportWidth,
+                                    statusContext: statusContext(for: msg),
+                                    onMemoryOfferAccept: { memoryId in
+                                        acceptMemoryOffer(memoryId: memoryId)
+                                    }
+                                )
+                                if msg.creatorType != .user { Spacer(minLength: 40) }
+                            }
+                            .frame(maxWidth: .infinity, alignment: msg.creatorType == .user ? .trailing : .leading)
+                            .background(GeometryReader { geo in
+                                Color.clear.preference(
+                                    key: MessageFramePreferenceKey.self,
+                                    value: [msg.persistentModelID: geo.frame(in: .named("threadScroll"))]
+                                )
+                            })
                         }
                     }
                     .padding(.vertical, 12)
                     .padding(.horizontal, 12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .scrollDismissesKeyboard(.never)
                 .contentShape(Rectangle())
@@ -322,15 +359,29 @@ struct ThreadDetailView: View {
                 .background(
                     GeometryReader { geo in
                         Color.clear
-                            .onAppear { scrollViewportHeight = geo.size.height }
+                            .onAppear {
+                                scrollViewportHeight = geo.size.height
+                                scrollViewportWidth = geo.size.width
+                            }
                             .onChange(of: geo.size.height) { _, newValue in
                                 scrollViewportHeight = newValue
+                            }
+                            .onChange(of: geo.size.width) { _, newValue in
+                                scrollViewportWidth = newValue
                             }
                     }
                 )
                 .onPreferenceChange(MessageFramePreferenceKey.self) { frames in
-                    updateVisibleAnchor(frames: frames)
-                    updateAutoScroll(frames: frames)
+                    pendingFrameUpdate = frames
+                    guard !frameUpdateScheduled else { return }
+                    frameUpdateScheduled = true
+                    DispatchQueue.main.async {
+                        let latest = pendingFrameUpdate
+                        pendingFrameUpdate = [:]
+                        updateVisibleAnchor(frames: latest)
+                        updateAutoScroll(frames: latest)
+                        frameUpdateScheduled = false
+                    }
                 }
                 .onAppear {
                     applyInitialScroll(proxy: proxy)
@@ -339,10 +390,21 @@ struct ThreadDetailView: View {
                     applyInitialScroll(proxy: proxy)
                     guard let last = displayMessages.last else { return }
                     if autoScrollToLatest {
-                        proxy.scrollTo(last.id, anchor: .bottom)
+                        showNewMessagesPill = false
+                        newMessagesTargetId = nil
+                        newMessagesCount = nil
+                        proxy.scrollTo(last.persistentModelID, anchor: .bottom)
                     } else {
                         showJumpToLatest = true
                         refreshNewMessagesPill()
+                    }
+                }
+                .onChange(of: pendingScrollTargetId) { _, newValue in
+                    guard let targetId = newValue else { return }
+                    Task { @MainActor in
+                        await Task.yield()
+                        proxy.scrollTo(targetId, anchor: .bottom)
+                        pendingScrollTargetId = nil
                     }
                 }
 
@@ -366,7 +428,7 @@ struct ThreadDetailView: View {
                         autoScrollToLatest = true
                         showJumpToLatest = false
                         showNewMessagesPill = false
-                        proxy.scrollTo(last.id, anchor: .bottom)
+                        proxy.scrollTo(last.persistentModelID, anchor: .bottom)
                     }
                     .font(.footnote)
                     .padding(.vertical, 6)
@@ -398,7 +460,6 @@ struct ThreadDetailView: View {
 
         ComposerView(
             text: $composerText,
-            starlightState: starlightState,
             isSendBlocked: budgetStore.isBlockedNow(),
             blockedUntil: budgetStore.state.blockedUntil
         ) { text in
@@ -419,128 +480,151 @@ struct ThreadDetailView: View {
     }
 
     var body: some View {
+        applySheets(
+            applyNavigation(
+                applyLifecycle(
+                    rootZStack
+                )
+            )
+        )
+    }
+
+    private var rootZStack: some View {
         ZStack(alignment: .bottom) {
+            BrandGradients.deepSpace.ignoresSafeArea()
             mainStack
             ghostOverlay
             recoveryPillOverlay
         }
-        .onChange(of: outboxSummary.totalFailed + outboxSummary.totalQueued + outboxSummary.totalSending + outboxSummary.totalPending) { _, newValue in
-            viewLog.debug("[outboxBanner] refresh total=\(newValue, privacy: .public)")
-        }
-        .onChange(of: outboxStatusSignature) { _, _ in
-            updateOutboxSummary()
-            refreshStarlightPending()
-        }
-        .onChange(of: sseStatus.isWorking) { _, _ in
-            refreshStarlightFromSSE()
-        }
-        .onChange(of: sseStatus.workingTimedOut) { _, timedOut in
-            if timedOut {
-                starlightState = .idle
-                starlightPendingSince = nil
+    }
+
+    private func applyLifecycle<V: View>(_ view: V) -> some View {
+        view
+            .onChange(of: outboxSummary.totalFailed + outboxSummary.totalQueued + outboxSummary.totalSending + outboxSummary.totalPending) { _, newValue in
+                viewLog.debug("[outboxBanner] refresh total=\(newValue, privacy: .public)")
             }
-        }
-        .onChange(of: latestAssistantMessageId) { _, newId in
-            guard seededAssistantArrival else {
-                seededAssistantArrival = true
-                lastAssistantMessageId = newId
-                return
+            .onChange(of: outboxStatusSignature) { _, _ in
+                updateOutboxSummary()
+                refreshStarlightPending()
+                refreshDraftSnapshotState()
             }
-            if let newId, newId != lastAssistantMessageId {
-                handleAssistantArrival()
+            .onChange(of: sseStatus.isWorking) { _, _ in
+                refreshStarlightFromSSE()
             }
-            lastAssistantMessageId = newId
-        }
-        .onChange(of: latestGhostMessage?.id) { _, newId in
-            ghostSnoozeTask?.cancel()
-            ghostHandleAscendTrigger = false
-            recoveryPillTask?.cancel()
-            showRecoveryPill = false
-            guard let ghost = latestGhostMessage, newId != nil else {
-                ghostOverlayMode = .full
-                return
-            }
-            let typing = !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            let mode = preferredOverlayMode(for: ghost, isTyping: typing)
-            ghostOverlayMode = mode
-            if mode == .hidden, isGhostManualEntry(ghost), typing {
-                presentRecoveryPill(for: ghost)
-            }
-            scheduleGhostAutoSnooze(ghost)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
-            let id = OSSignpostID(log: Self.perfLog)
-            keyboardSignpostId = id
-            keyboardSignpostActive = true
-            os_signpost(.begin, log: Self.perfLog, name: "KeyboardShow", signpostID: id)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
-            guard keyboardSignpostActive else { return }
-            os_signpost(.end, log: Self.perfLog, name: "KeyboardShow", signpostID: keyboardSignpostId)
-            keyboardSignpostActive = false
-        }
-        .onChange(of: composerText) { _, newValue in
-            // If the user starts typing, snooze the overlay so it doesn't feel like it blocks the flow.
-            let typing = !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            if typing, let ghost = latestGhostMessage, ghostOverlayMode == .full {
-                if isGhostManualEntry(ghost) {
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        ghostOverlayMode = .hidden
-                    }
-                    presentRecoveryPill(for: ghost)
+            .onChange(of: sseStatus.workingTimedOut) { _, timedOut in
+                if timedOut {
+                    starlightState = .idle
+                    starlightPendingSince = nil
                 }
             }
-            handleComposerTextChange(newValue)
-        }
-        .onChange(of: scenePhase) { _, newValue in
-            if newValue == .background {
-                draftStore.forceSaveNow(threadId: thread.id, content: composerText)
+            .onChange(of: latestAssistantMessageId) { _, newId in
+                guard seededAssistantArrival else {
+                    seededAssistantArrival = true
+                    lastAssistantMessageId = newId
+                    return
+                }
+                if let newId, newId != lastAssistantMessageId {
+                    handleAssistantArrival()
+                }
+                lastAssistantMessageId = newId
+            }
+            .onChange(of: latestGhostMessage?.id) { _, newId in
+                ghostSnoozeTask?.cancel()
+                ghostHandleAscendTrigger = false
+                recoveryPillTask?.cancel()
+                showRecoveryPill = false
+
+                guard let ghost = latestGhostMessage, newId != nil else {
+                    ghostOverlayMode = .full
+                    return
+                }
+
+                let typing = !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                let mode = preferredOverlayMode(for: ghost, isTyping: typing)
+                ghostOverlayMode = mode
+                if mode == .hidden, isGhostManualEntry(ghost), typing {
+                    presentRecoveryPill(for: ghost)
+                }
+                scheduleGhostAutoSnooze(ghost)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+                let id = OSSignpostID(log: Self.perfLog)
+                keyboardSignpostId = id
+                keyboardSignpostActive = true
+                os_signpost(.begin, log: Self.perfLog, name: "KeyboardShow", signpostID: id)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
+                guard keyboardSignpostActive else { return }
+                os_signpost(.end, log: Self.perfLog, name: "KeyboardShow", signpostID: keyboardSignpostId)
+                keyboardSignpostActive = false
+            }
+            .onChange(of: composerText) { _, newValue in
+                let typing = !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                if typing, let ghost = latestGhostMessage, ghostOverlayMode == .full, isGhostManualEntry(ghost) {
+                    withAnimation(.easeInOut(duration: 0.15)) { ghostOverlayMode = .hidden }
+                    presentRecoveryPill(for: ghost)
+                }
+                handleComposerTextChange(newValue)
+            }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .background {
+                    draftStore.forceSaveNow(threadId: thread.id, content: composerText)
+                    if let unreadTracker {
+                        Task { await unreadTracker.flush(threadId: thread.id) }
+                    }
+                }
+            }
+            .onAppear {
+                loadAcceptedMementoFromDefaults()
+                updateOutboxSummary()
+                refreshStarlightPending()
+                lastAssistantMessageId = latestAssistantMessageId
+                seededAssistantArrival = true
+                restoreDraftIfNeeded()
+                budgetStore.refreshIfExpired()
+            }
+            .onDisappear {
+                ghostSnoozeTask?.cancel()
+                recoveryPillTask?.cancel()
                 if let unreadTracker {
                     Task { await unreadTracker.flush(threadId: thread.id) }
                 }
             }
-        }
-        .onAppear {
-            loadAcceptedMementoFromDefaults()
-            updateOutboxSummary()
-            refreshStarlightPending()
-            lastAssistantMessageId = latestAssistantMessageId
-            seededAssistantArrival = true
-            restoreDraftIfNeeded()
-            budgetStore.refreshIfExpired()
-        }
-        .onDisappear {
-            ghostSnoozeTask?.cancel()
-            recoveryPillTask?.cancel()
-            if let unreadTracker {
-                Task { await unreadTracker.flush(threadId: thread.id) }
-            }
-        }
-        .navigationTitle(thread.title)
-        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func applyNavigation<V: View>(_ view: V) -> some View {
+        view
+            .navigationTitle(thread.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Save to Memory") {
-                    triggerMemoryDistill()
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Save to Memory") { triggerMemoryDistill() }
+                        .accessibilityIdentifier("save_to_memory_button")
                 }
-                .accessibilityIdentifier("save_to_memory_button")
             }
-        }
-        .onChange(of: showThreadContext) { _, newValue in
-            if newValue {
+            .onChange(of: showThreadContext) { _, newValue in
+                if newValue { threadContextDismissed = false }
+            }
+            .onChange(of: thread.id) { _, _ in
                 threadContextDismissed = false
             }
-        }
-        .onChange(of: thread.id) { _, _ in
-            threadContextDismissed = false
-        }
-        .sheet(item: $activeMemoryDetail) { route in
-            MemoryCitationDetailSheet(memoryId: route.id)
-        }
+    }
+
+    private func applySheets<V: View>(_ view: V) -> some View {
+        view
+            .sheet(item: $activeMemoryDetail) { route in
+                MemoryCitationDetailSheet(memoryId: route.id)
+            }
     }
 
     private func send(_ text: String) {
-        draftStore.forceSaveNow(threadId: thread.id, content: text)
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            draftSnapshot = DraftSnapshot(content: trimmed, updatedAt: Date())
+        }
+        draftStore.deleteDraft(threadId: thread.id)
         guard let resolvedThread = resolveThreadForSend() else {
             showToast("Thread not ready. Try again.")
             viewLog.error("[send] thread_missing thread=\(thread.id.uuidString.prefix(8), privacy: .public)")
@@ -557,11 +641,18 @@ struct ThreadDetailView: View {
         }
         DebugModelValidators.assertMessageHasThread(m, context: "ThreadDetailView.send.beforeInsert")
         resolvedThread.messages.append(m)
+        DebugModelValidators.logDuplicateMessageIds(thread: resolvedThread, context: "ThreadDetailView.send.append")
         resolvedThread.lastActiveAt = Date()
         modelContext.insert(m)
+        try? modelContext.save()
 
         viewLog.info("[send] thread=\(thread.id.uuidString.prefix(8), privacy: .public) msg=\(m.id.uuidString.prefix(8), privacy: .public) len=\(text.count, privacy: .public)")
-        outboxService?.enqueueChat(thread: resolvedThread, userMessage: m)
+        draftSnapshotMessageId = m.id
+        autoScrollToLatest = true
+        showJumpToLatest = false
+        showNewMessagesPill = false
+        pendingScrollTargetId = m.persistentModelID
+        outboxService?.enqueueChat(threadId: resolvedThread.id, userMessageId: m.id)
     }
 
     private func resolveThreadForSend() -> ConversationThread? {
@@ -631,6 +722,7 @@ struct ThreadDetailView: View {
 
         if trimmed.isEmpty {
             if pendingSendClear {
+                pendingSendClear = false
                 return
             }
 
@@ -651,6 +743,29 @@ struct ThreadDetailView: View {
                 draftStore.upsertDraft(threadId: threadId, content: content)
             }
         }
+    }
+
+    private func refreshDraftSnapshotState() {
+        guard let snapshot = draftSnapshot, let messageId = draftSnapshotMessageId else { return }
+        guard let tx = transmissionByMessageId[messageId], tx.packet.packetType == "chat" else { return }
+
+        if tx.status == .pending || tx.status == .succeeded {
+            draftSnapshot = nil
+            draftSnapshotMessageId = nil
+            return
+        }
+
+        if tx.status == .failed {
+            restoreDraftFromSnapshot(snapshot)
+            draftSnapshot = nil
+            draftSnapshotMessageId = nil
+        }
+    }
+
+    private func restoreDraftFromSnapshot(_ snapshot: DraftSnapshot) {
+        guard composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        composerText = snapshot.content
+        draftStore.upsertDraft(threadId: thread.id, content: snapshot.content, updatedAt: snapshot.updatedAt)
     }
 
     private var latestSSEStage: SSEStatusStore.TransmissionStage? {
@@ -709,7 +824,7 @@ struct ThreadDetailView: View {
             )
         }
 
-        if sseStatus.syncPending {
+        if sseStatus.syncPending && (s.totalQueued + s.totalSending + s.totalPending > 0) {
             return AnyView(
                 HStack(spacing: 10) {
                     Image(systemName: "arrow.triangle.2.circlepath")
@@ -720,44 +835,27 @@ struct ThreadDetailView: View {
                     .padding(10)
                     .background(.thinMaterial)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .allowsHitTesting(false)
             )
         }
 
         if s.totalQueued + s.totalSending + s.totalPending > 0 {
-            let statusText: String
             let chatActive = s.chat.queued + s.chat.sending + s.chat.pending
             let memoryActive = s.memory.queued + s.memory.sending + s.memory.pending
 
             if chatActive == 0, memoryActive > 0 {
-                statusText = "Saving memory…"
-            } else if let stage = latestSSEStage, stage.kind == .runStarted {
-                statusText = "Thinking…"
-            } else if let stage = latestSSEStage, stage.kind == .txAccepted {
-                statusText = "Sent/Queued…"
-            } else if s.totalSending > 0 {
-                statusText = "Sending…"
-            } else if hasLongPending {
-                statusText = "Still processing… pending \(s.totalPending), queued \(s.totalQueued), sending \(s.totalSending)"
-            } else {
-                if chatActive > 0 && memoryActive > 0 {
-                    statusText = "Outbox: chat \(chatActive), memory \(memoryActive)"
-                } else if memoryActive > 0 {
-                    statusText = "Outbox: memory \(memoryActive)"
-                } else {
-                    statusText = "Outbox: queued \(s.totalQueued), pending \(s.totalPending), sending \(s.totalSending)"
-                }
+                return AnyView(
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text("Saving memory…")
+                            .font(.footnote)
+                        Spacer()
+                    }
+                        .padding(10)
+                        .background(.thinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                )
             }
-            return AnyView(
-                HStack(spacing: 10) {
-                    ProgressView()
-                    Text(statusText)
-                        .font(.footnote)
-                    Spacer()
-                }
-                    .padding(10)
-                    .background(.thinMaterial)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-            )
         }
 
         return nil
@@ -795,6 +893,85 @@ struct ThreadDetailView: View {
         var totalSending: Int { chat.sending + memory.sending }
         var totalPending: Int { chat.pending + memory.pending }
         var totalFailed: Int { chat.failed + memory.failed }
+    }
+
+    private func serverTransmissionId(for tx: Transmission) -> String? {
+        tx.deliveryAttempts
+            .reversed()
+            .compactMap { $0.transmissionId }
+            .first { !$0.isEmpty }
+    }
+
+    private func statusContext(for message: Message) -> MessageStatusContext? {
+        guard message.creatorType == .user else { return nil }
+        guard message.id == latestOutgoingUserMessageId else { return nil }
+        guard let tx = transmissionByMessageId[message.id], tx.packet.packetType == "chat" else { return nil }
+
+        let offlineQueued = tx.status == .queued && sseStatus.state == .disconnected
+        let serverTxId = serverTransmissionId(for: tx)
+        let isThinking = latestSSEStage?.kind == .runStarted
+            && (serverTxId == nil || latestSSEStage?.transmissionId == serverTxId)
+
+        if tx.status == .failed {
+            return MessageStatusContext(
+                text: "Not delivered",
+                showSpinner: false,
+                showRetry: true,
+                starlightState: .idle
+            )
+        }
+
+        if tx.status == .succeeded {
+            return MessageStatusContext(
+                text: "Delivered",
+                showSpinner: false,
+                showRetry: false,
+                starlightState: .idle
+            )
+        }
+
+        if isThinking {
+            return MessageStatusContext(
+                text: "Thinking…",
+                showSpinner: true,
+                showRetry: false,
+                starlightState: starlightState
+            )
+        }
+
+        if tx.status == .pending {
+            return MessageStatusContext(
+                text: "Processing…",
+                showSpinner: true,
+                showRetry: false,
+                starlightState: starlightState
+            )
+        }
+
+        if tx.status == .sending {
+            return MessageStatusContext(
+                text: "Sending…",
+                showSpinner: true,
+                showRetry: false,
+                starlightState: starlightState
+            )
+        }
+
+        if offlineQueued {
+            return MessageStatusContext(
+                text: "Queued (offline)",
+                showSpinner: true,
+                showRetry: false,
+                starlightState: starlightState
+            )
+        }
+
+        return MessageStatusContext(
+            text: "Processing…",
+            showSpinner: true,
+            showRetry: false,
+            starlightState: starlightState
+        )
     }
 
     // MARK: - ThreadMemento UI + state
@@ -837,7 +1014,7 @@ struct ThreadDetailView: View {
                             .font(.headline)
                         Text(memoryId)
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(BrandColors.timeLaneText)
                             .textSelection(.enabled)
                     }
                     .padding()
@@ -940,17 +1117,17 @@ struct ThreadDetailView: View {
                                         .lineLimit(2)
                                     Text(memoryId)
                                         .font(.caption2)
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(BrandColors.timeLaneText)
                                 }
                             } else {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(memoryId)
                                         .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(BrandColors.timeLaneText)
                                         .textSelection(.enabled)
                                     Text("Tap to fetch")
                                         .font(.caption2)
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(BrandColors.timeLaneText)
                                 }
                             }
                         }
@@ -1001,7 +1178,7 @@ struct ThreadDetailView: View {
             HStack {
                 Text("Thread memento")
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(BrandColors.statusText)
 
                 Spacer()
 
@@ -1348,11 +1525,11 @@ struct ThreadDetailView: View {
                     showToast("Already applied")
                     viewLog.info("[memento] accept already_accepted")
                 } else {
-                    showToast("Accept not applied")
+                    showToast("Apply not applied")
                     viewLog.info("[memento] accept not_applied reason=\(result.reason ?? "-", privacy: .public)")
                 }
             } catch {
-                showToast("Accept failed")
+                showToast("Apply failed")
                 viewLog.error("[memento] accept failed err=\(String(describing: error), privacy: .public)")
             }
 
@@ -1529,16 +1706,24 @@ struct ThreadDetailView: View {
 
     private func refreshStarlightFromSSE() {
         guard starlightState != .flash else { return }
+        let pendingSince = pendingChatSince()
         if sseStatus.isWorking {
+            guard let pendingSince else {
+                if starlightState == .pending {
+                    starlightState = .idle
+                    starlightPendingSince = nil
+                }
+                return
+            }
             if starlightState == .idle {
                 starlightState = .pending
             }
-            if starlightPendingSince == nil {
-                starlightPendingSince = Date()
+            if starlightPendingSince == nil || pendingSince < (starlightPendingSince ?? pendingSince) {
+                starlightPendingSince = pendingSince
             }
             return
         }
-        if pendingChatSince() == nil && starlightState == .pending {
+        if pendingSince == nil && starlightState == .pending {
             starlightState = .idle
             starlightPendingSince = nil
         }
@@ -1560,13 +1745,16 @@ struct ThreadDetailView: View {
         guard PhysicalityManager.canFireHaptics() else { return }
         let delta = starlightPendingSince.map { Date().timeIntervalSince($0) } ?? 0
         if delta < 1.2 {
-            GhostCardHaptics.softImpact()
+            HapticRouter.shared.arrivalPulseSoft(idempotencyKey: latestAssistantMessageId?.uuidString)
             return
         }
 
         let scaled = min(max((delta - 1.2) / 4.0, 0.0), 1.0)
         let intensity = min(1.2, 1.0 + (0.2 * scaled))
-        GhostCardHaptics.heartbeat(intensity: intensity)
+        HapticRouter.shared.arrivalPulseHeartbeat(
+            idempotencyKey: latestAssistantMessageId?.uuidString,
+            intensity: intensity
+        )
     }
 
     private func pendingSince(_ tx: Transmission) -> Date? {
@@ -1614,7 +1802,9 @@ struct ThreadDetailView: View {
                displayMessages.contains(where: { $0.id == lastViewedId }) {
                 autoScrollToLatest = false
                 showJumpToLatest = true
-                proxy.scrollTo(lastViewedId, anchor: .top)
+                if let rowKey = rowKey(for: lastViewedId) {
+                    proxy.scrollTo(rowKey, anchor: .top)
+                }
                 refreshNewMessagesPill(forceShow: true, state: state)
                 return
             }
@@ -1623,7 +1813,9 @@ struct ThreadDetailView: View {
                let fallbackUnread = computeFirstUnreadMessageId(readUpToId: state.readUpToMessageId) {
                 autoScrollToLatest = false
                 showJumpToLatest = true
-                proxy.scrollTo(fallbackUnread, anchor: .top)
+                if let rowKey = rowKey(for: fallbackUnread) {
+                    proxy.scrollTo(rowKey, anchor: .top)
+                }
                 refreshNewMessagesPill(forceShow: true, state: state)
                 return
             }
@@ -1632,7 +1824,7 @@ struct ThreadDetailView: View {
         if let last = displayMessages.last {
             autoScrollToLatest = true
             showNewMessagesPill = false
-            proxy.scrollTo(last.id, anchor: .bottom)
+            proxy.scrollTo(last.persistentModelID, anchor: .bottom)
         }
     }
 
@@ -1675,25 +1867,26 @@ struct ThreadDetailView: View {
             return
         }
 
-        newMessagesTargetId = firstUnread
+        newMessagesTargetId = rowKey(for: firstUnread)
         newMessagesCount = unreadCount(readUpToId: readUpToId)
         showNewMessagesPill = forceShow || !autoScrollToLatest
     }
 
-    private func updateVisibleAnchor(frames: [UUID: CGRect]) {
+    private func updateVisibleAnchor(frames: [PersistentIdentifier: CGRect]) {
         guard scrollViewportHeight > 0 else { return }
 
         let visible = frames.filter { frame in
             frame.value.maxY >= 0 && frame.value.minY <= scrollViewportHeight
         }
 
-        guard let newest = visible.max(by: { $0.value.maxY < $1.value.maxY })?.key else { return }
+        guard let newestKey = visible.max(by: { $0.value.maxY < $1.value.maxY })?.key,
+              let newestMessage = displayMessages.first(where: { $0.persistentModelID == newestKey }) else { return }
 
-        guard newest != lastVisibleAnchorId else { return }
-        lastVisibleAnchorId = newest
+        guard newestKey != lastVisibleAnchorId else { return }
+        lastVisibleAnchorId = newestKey
 
         if let unreadTracker {
-            Task { await unreadTracker.markViewed(threadId: thread.id, messageId: newest) }
+            Task { await unreadTracker.markViewed(threadId: thread.id, messageId: newestMessage.id) }
         }
 
         if !autoScrollToLatest {
@@ -1701,12 +1894,13 @@ struct ThreadDetailView: View {
         }
     }
 
-    private func updateAutoScroll(frames: [UUID: CGRect]) {
+    private func updateAutoScroll(frames: [PersistentIdentifier: CGRect]) {
         guard let last = displayMessages.last,
-              let frame = frames[last.id],
+              let frame = frames[last.persistentModelID],
               scrollViewportHeight > 0 else { return }
 
-        let isAtBottom = frame.maxY <= scrollViewportHeight + 4
+        let bottomTolerance = 8 + composerHeight + outboxBannerHeight
+        let isAtBottom = frame.maxY <= scrollViewportHeight + bottomTolerance
         if isAtBottom {
             if !autoScrollToLatest {
                 autoScrollToLatest = true
@@ -1723,9 +1917,9 @@ struct ThreadDetailView: View {
 }
 
 private struct MessageFramePreferenceKey: PreferenceKey {
-    static var defaultValue: [UUID: CGRect] = [:]
+    static var defaultValue: [PersistentIdentifier: CGRect] = [:]
 
-    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+    static func reduce(value: inout [PersistentIdentifier: CGRect], nextValue: () -> [PersistentIdentifier: CGRect]) {
         value.merge(nextValue()) { $1 }
     }
 }
@@ -1743,12 +1937,22 @@ enum JournalPresentationState: Equatable {
     }
 }
 
+private struct MessageStatusContext {
+    let text: String
+    let showSpinner: Bool
+    let showRetry: Bool
+    let starlightState: StarlightState
+}
+
 private struct MessageBubble: View {
     let message: Message
     let scrollViewportHeight: CGFloat
+    let scrollViewportWidth: CGFloat
+    let statusContext: MessageStatusContext?
     @Binding var handleAscendTrigger: Bool
     let onMemoryOfferAccept: ((String) -> Void)?
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.outboxService) private var outboxService
     @State private var showingClaims = false
     @State private var editorMode: MemoryEditorMode?
     @State private var showDeleteConfirm = false
@@ -1765,6 +1969,9 @@ private struct MessageBubble: View {
     @State private var journalShareCompletion: ((Bool, String?) -> Void)?
     @State private var journalOfferVisible = false
     @State private var journalOfferGateLogged = false
+    @State private var revealOffset: CGFloat = 0
+    @GestureState private var dragOffset: CGFloat = 0
+    @State private var showDetailsSheet = false
 
     private let eventStore = EKEventStore()
     private let log = Logger(subsystem: "com.sollabshq.solmobile", category: "MessageBubble")
@@ -1772,13 +1979,35 @@ private struct MessageBubble: View {
     init(
         message: Message,
         scrollViewportHeight: CGFloat,
+        scrollViewportWidth: CGFloat,
+        statusContext: MessageStatusContext? = nil,
         handleAscendTrigger: Binding<Bool> = .constant(false),
         onMemoryOfferAccept: ((String) -> Void)? = nil
     ) {
         self.message = message
         self.scrollViewportHeight = scrollViewportHeight
+        self.scrollViewportWidth = scrollViewportWidth
+        self.statusContext = statusContext
         self._handleAscendTrigger = handleAscendTrigger
         self.onMemoryOfferAccept = onMemoryOfferAccept
+    }
+
+    private var isUser: Bool {
+        message.creatorType == .user
+    }
+
+    private var bubbleBackground: some View {
+        ZStack {
+            if isUser {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(BrandColors.userBubbleFill)
+            } else {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(BrandColors.assistantBubble)
+            }
+        }
     }
 
     var body: some View {
@@ -1842,117 +2071,20 @@ private struct MessageBubble: View {
                     Text(errorMessage)
                 }
         } else {
-            HStack {
-                if message.creatorType == .user { Spacer(minLength: 40) }
+            ZStack(alignment: isUser ? .trailing : .leading) {
+                revealTimeLane
+                    .frame(width: maxRevealOffset, alignment: isUser ? .trailing : .leading)
 
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(message.text)
-                        .padding(10)
-                        .background(message.creatorType == .user ? Color.gray.opacity(0.2) : Color.blue.opacity(0.15))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-
-                    if shouldShowLatticeOfflineBadge {
-                        Text("LATTICE_OFFLINE")
-                            .font(.caption2)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .background(Color.red.opacity(0.15))
-                            .foregroundStyle(.red)
-                            .clipShape(Capsule())
-                            .padding(.top, 6)
-                            .padding(.horizontal, 10)
-                    }
-
-                    if message.creatorType == .assistant && hasClaimsBadge {
-                        Button {
-                            showingClaims = true
-                        } label: {
-                            Text("Evidence (\(message.claimsCount))")
-                                .font(.caption)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(Color.gray.opacity(0.15))
-                                .clipShape(Capsule())
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.top, 6)
-                        .padding(.horizontal, 10)
-                        .sheet(isPresented: $showingClaims) {
-                            EvidenceClaimsSheet(message: message)
-                        }
-                    }
-
-                    if message.creatorType == .assistant, let capture = message.captureSuggestion {
-                        CaptureSuggestionCard(message: message, suggestion: capture)
-                            .padding(.top, 6)
-                            .padding(.horizontal, 10)
-                    }
-
-                    if let offer = visibleJournalOffer {
-                        JournalOfferCard(
-                            offer: offer,
-                            onAssist: { handleOfferAccepted(offer: offer, mode: .assist) },
-                            onVerbatim: { handleOfferAccepted(offer: offer, mode: .verbatim) },
-                            onDecline: { handleOfferDeclined(offer: offer) },
-                            onTune: { showOfferTuning = true }
-                        )
-                        .padding(.top, 8)
-                        .padding(.horizontal, 10)
-                        .background(
-                            GeometryReader { geo in
-                                Color.clear
-                                    .onAppear {
-                                        updateJournalOfferVisibility(frame: geo.frame(in: .named("threadScroll")), offer: offer)
-                                    }
-                                    .onChange(of: geo.frame(in: .named("threadScroll"))) { _, newFrame in
-                                        updateJournalOfferVisibility(frame: newFrame, offer: offer)
-                                    }
-                            }
-                        )
-                        .confirmationDialog("Offer tuning", isPresented: $showOfferTuning, titleVisibility: .visible) {
-                            Button("Disable offers", role: .destructive) {
-                                handleOfferTuning(
-                                    offer: offer,
-                                    tuning: JournalOfferEventTuning(newCooldownMinutes: nil, avoidPeakOverwhelm: nil, offersEnabled: false)
-                                )
-                            }
-                            Button("Cooldown 30 minutes") {
-                                handleOfferTuning(
-                                    offer: offer,
-                                    tuning: JournalOfferEventTuning(newCooldownMinutes: 30, avoidPeakOverwhelm: nil, offersEnabled: nil)
-                                )
-                            }
-                            Button("Cooldown 120 minutes") {
-                                handleOfferTuning(
-                                    offer: offer,
-                                    tuning: JournalOfferEventTuning(newCooldownMinutes: 120, avoidPeakOverwhelm: nil, offersEnabled: nil)
-                                )
-                            }
-                            Button("Cancel", role: .cancel) { }
-                        }
-                    }
-
-                    // Evidence UI (PR #8) - only show for assistant messages with evidence
-                    if message.creatorType == .assistant && hasEvidence {
-                        EvidenceView(
-                            message: message,
-                            urlOpener: SystemURLOpener()
-                        )
-                        .padding(.horizontal, 10)
-                    }
-
-                    if message.creatorType == .assistant && !message.latticeMemoryIds.isEmpty {
-                        Button {
-                            showMemoryCitations = true
-                        } label: {
-                            Label("Memories (\(message.latticeMemoryIds.count))", systemImage: "brain")
-                                .font(.caption)
-                        }
-                        .padding(.horizontal, 10)
-                    }
-                }
-
-                if message.creatorType != .user { Spacer(minLength: 40) }
+                bubbleStack
+                    .frame(maxWidth: maxBubbleWidth, alignment: isUser ? .trailing : .leading)
+                    .offset(x: effectiveRevealOffset)
+            }
+            .simultaneousGesture(revealGesture)
+            .onLongPressGesture(minimumDuration: 0.35) {
+                showDetailsSheet = true
+            }
+            .onChange(of: message.id) { _, _ in
+                revealOffset = 0
             }
             .sheet(item: $activeDraft) { payload in
                 JournalDraftEditorView(
@@ -1969,6 +2101,9 @@ private struct MessageBubble: View {
             .sheet(isPresented: $showMemoryCitations) {
                 ThreadDetailView.MemoryCitationsSheet(memoryIds: message.latticeMemoryIds)
             }
+            .sheet(isPresented: $showDetailsSheet) {
+                MessageDetailsSheet(message: message)
+            }
             .onAppear {
                 logJournalOfferGateIfNeeded()
             }
@@ -1981,6 +2116,262 @@ private struct MessageBubble: View {
     private var hasEvidence: Bool {
         message.hasEvidence
     }
+
+    private var bubbleStack: some View {
+        VStack(alignment: isUser ? .trailing : .leading, spacing: 0) {
+            Text(message.text)
+                .foregroundStyle(isUser ? BrandColors.userBubbleText : BrandColors.assistantBubbleText)
+                .padding(10)
+                .background(bubbleBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(isUser ? .clear : BrandColors.gold.opacity(0.6), lineWidth: 1.1)
+                )
+                .overlay(alignment: .leading) {
+                    if !isUser {
+                        Capsule()
+                            .fill(BrandColors.gold.opacity(0.8))
+                            .frame(width: 2)
+                            .padding(.vertical, 4)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+            if message.creatorType == .assistant {
+                HStack(spacing: 6) {
+                    Button {
+                        UIPasteboard.general.string = message.text
+                        HapticRouter.shared.selectionTick()
+                    } label: {
+                        Image(systemName: "doc.on.doc")
+                            .font(.caption2)
+                            .foregroundStyle(BrandColors.iconAction)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Copy")
+                }
+                .padding(.top, 6)
+            }
+
+            if let statusContext {
+                StatusLineView(
+                    context: statusContext,
+                    onRetry: {
+                        outboxService?.retryFailed(kind: .chatSend)
+                    }
+                )
+                .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+                .padding(.top, 6)
+                .padding(.horizontal, 10)
+            }
+
+            if shouldShowLatticeOfflineBadge {
+                Text("LATTICE_OFFLINE")
+                    .font(.caption2)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(BrandColors.errorFill)
+                    .foregroundStyle(BrandColors.error)
+                    .clipShape(Capsule())
+                    .padding(.top, 6)
+                    .padding(.horizontal, 10)
+            }
+
+            if message.creatorType == .assistant && hasClaimsBadge {
+                Button {
+                    showingClaims = true
+                } label: {
+                    Text("Evidence (\(message.claimsCount))")
+                        .font(.caption)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(BrandColors.badgeFill)
+                        .foregroundStyle(BrandColors.badgeText)
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 6)
+                .padding(.horizontal, 10)
+                .sheet(isPresented: $showingClaims) {
+                    EvidenceClaimsSheet(message: message)
+                }
+            }
+
+            if message.creatorType == .assistant, let capture = message.captureSuggestion {
+                CaptureSuggestionCard(message: message, suggestion: capture)
+                    .padding(.top, 6)
+                    .padding(.horizontal, 10)
+            }
+
+            if let offer = visibleJournalOffer {
+                JournalOfferCard(
+                    offer: offer,
+                    onAssist: { handleOfferAccepted(offer: offer, mode: .assist) },
+                    onVerbatim: { handleOfferAccepted(offer: offer, mode: .verbatim) },
+                    onDecline: { handleOfferDeclined(offer: offer) },
+                    onTune: { showOfferTuning = true }
+                )
+                .padding(.top, 8)
+                .padding(.horizontal, 10)
+                .background(
+                    GeometryReader { geo in
+                        Color.clear
+                            .onAppear {
+                                updateJournalOfferVisibility(frame: geo.frame(in: .named("threadScroll")), offer: offer)
+                            }
+                            .onChange(of: geo.frame(in: .named("threadScroll"))) { _, newFrame in
+                                updateJournalOfferVisibility(frame: newFrame, offer: offer)
+                            }
+                    }
+                )
+                .confirmationDialog("Offer tuning", isPresented: $showOfferTuning, titleVisibility: .visible) {
+                    Button("Disable offers", role: .destructive) {
+                        handleOfferTuning(
+                            offer: offer,
+                            tuning: JournalOfferEventTuning(newCooldownMinutes: nil, avoidPeakOverwhelm: nil, offersEnabled: false)
+                        )
+                    }
+                    Button("Cooldown 30 minutes") {
+                        handleOfferTuning(
+                            offer: offer,
+                            tuning: JournalOfferEventTuning(newCooldownMinutes: 30, avoidPeakOverwhelm: nil, offersEnabled: nil)
+                        )
+                    }
+                    Button("Cooldown 120 minutes") {
+                        handleOfferTuning(
+                            offer: offer,
+                            tuning: JournalOfferEventTuning(newCooldownMinutes: 120, avoidPeakOverwhelm: nil, offersEnabled: nil)
+                        )
+                    }
+                    Button("Cancel", role: .cancel) { }
+                }
+            }
+
+            // Evidence UI (PR #8) - only show for assistant messages with evidence
+            if message.creatorType == .assistant && hasEvidence {
+                EvidenceView(
+                    message: message,
+                    urlOpener: SystemURLOpener()
+                )
+                .padding(.horizontal, 10)
+            }
+
+            if message.creatorType == .assistant && !message.latticeMemoryIds.isEmpty {
+                Button {
+                    showMemoryCitations = true
+                } label: {
+                    Label("Memories (\(message.latticeMemoryIds.count))", systemImage: "brain")
+                        .font(.caption)
+                }
+                .padding(.horizontal, 10)
+            }
+        }
+    }
+
+    private var effectiveRevealOffset: CGFloat {
+        let raw = revealOffset + dragOffset
+        return clampReveal(raw)
+    }
+
+    private var revealProgress: CGFloat {
+        let maxReveal = maxRevealOffset
+        guard maxReveal > 0 else { return 0 }
+        return min(abs(effectiveRevealOffset) / maxReveal, 1.0)
+    }
+
+    private var revealTimeLane: some View {
+        let hasTimestamp = revealTimestamp != nil
+        return Text(revealTimestampText)
+            .font(.caption2)
+            .foregroundStyle(BrandColors.timeLaneText)
+            .frame(width: maxRevealOffset, alignment: isUser ? .trailing : .leading)
+            .opacity(hasTimestamp ? Double(revealProgress) : 0.0)
+            .padding(isUser ? .trailing : .leading, 6)
+    }
+
+    private var revealGesture: some Gesture {
+        DragGesture(minimumDistance: 16)
+            .updating($dragOffset) { value, state, _ in
+                guard shouldHandleDrag(value) else { return }
+                state = clampReveal(value.translation.width)
+            }
+            .onEnded { value in
+                guard shouldHandleDrag(value) else { return }
+                let clamped = clampReveal(value.translation.width)
+                let shouldReveal = abs(clamped) > (maxRevealOffset * 0.4)
+                revealOffset = shouldReveal ? (clamped < 0 ? -maxRevealOffset : maxRevealOffset) : 0
+            }
+    }
+
+    private var revealTimestampText: String {
+        guard let stamp = revealTimestamp else { return "" }
+        return Self.revealTimestampFormatter.string(from: stamp)
+    }
+
+    private var revealTimestamp: Date? {
+        if isUser {
+            return associatedTransmission?.createdAt ?? message.createdAt
+        }
+        return message.createdAt
+    }
+
+    private var associatedTransmission: Transmission? {
+        let threadId = message.thread.id
+        let descriptor = FetchDescriptor<Transmission>(
+            predicate: #Predicate { tx in
+                tx.packet.threadId == threadId
+            }
+        )
+        let transmissions = (try? modelContext.fetch(descriptor)) ?? []
+        if message.creatorType == .user {
+            return transmissions.first(where: { $0.packet.messageIds.contains(message.id) })
+        }
+        if let txId = message.transmissionId, !txId.isEmpty {
+            return transmissions.first(where: { tx in
+                tx.deliveryAttempts.contains(where: { $0.transmissionId == txId })
+            })
+        }
+        return nil
+    }
+
+    private var maxBubbleWidth: CGFloat {
+        let base = scrollViewportWidth > 0 ? scrollViewportWidth : 360
+        let capped = base - 80
+        let target = base * 0.78
+        return max(180, min(target, capped))
+    }
+
+    private var maxRevealOffset: CGFloat {
+        72
+    }
+
+    private func clampReveal(_ raw: CGFloat) -> CGFloat {
+        let constrained = isUser ? min(0, raw) : max(0, raw)
+        return min(max(constrained, -maxRevealOffset), maxRevealOffset)
+    }
+
+    private func shouldHandleDrag(_ value: DragGesture.Value) -> Bool {
+        let dx = value.translation.width
+        let dy = value.translation.height
+        let absDx = abs(dx)
+        let absDy = abs(dy)
+        let horizontalThreshold: CGFloat = 30
+        let edgeGuard: CGFloat = 24
+        if value.startLocation.x < edgeGuard {
+            return false
+        }
+        guard absDx >= horizontalThreshold else { return false }
+        return absDx > absDy + 6
+    }
+
+    private static let revealTimestampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.timeZone = .autoupdatingCurrent
+        formatter.timeStyle = .short
+        formatter.dateStyle = .none
+        return formatter
+    }()
 
     private var shouldShowLatticeOfflineBadge: Bool {
         guard message.creatorType == .assistant else { return false }
@@ -2803,4 +3194,212 @@ private struct MessageBubble: View {
         return formatter
     }()
 
+}
+
+private struct StatusLineView: View {
+    let context: MessageStatusContext
+    let onRetry: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if context.starlightState != .idle {
+                StarlightPulseView(state: context.starlightState)
+                    .frame(width: 10, height: 10)
+            }
+            if context.showSpinner {
+                ProgressView()
+                    .scaleEffect(0.8)
+            }
+            Text(context.text)
+                .font(.caption)
+                .foregroundStyle(BrandColors.statusText)
+            if context.showRetry {
+                Button("Retry", action: onRetry)
+                    .font(.caption)
+            }
+            Spacer()
+        }
+    }
+}
+
+private struct MessageDetailsSheet: View {
+    @Environment(\.modelContext) private var modelContext
+    let message: Message
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    messageSection
+                    lifecycleSection
+                    identifiersSection
+                    attemptsSection
+                }
+                .padding(16)
+            }
+            .navigationTitle("Details")
+        }
+    }
+
+    private var lifecycleSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Lifecycle")
+                .font(.headline)
+            timelineRow(label: "clientQueuedAt", value: clientQueuedAt)
+            timelineRow(label: "serverAckAt", value: serverAcceptedAt)
+            timelineRow(label: "clientReceivedAt", value: clientReceivedAt)
+            timelineRow(label: "terminalFailureAt", value: terminalFailureAt)
+        }
+    }
+
+    private var messageSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Message")
+                .font(.headline)
+            Text(message.text.isEmpty ? "–" : message.text)
+                .font(.callout)
+                .textSelection(.enabled)
+        }
+    }
+
+    private var identifiersSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Identifiers")
+                .font(.headline)
+            detailRow(label: "messageId", value: message.id.uuidString)
+            detailRow(label: "serverMessageId", value: message.serverMessageId)
+            detailRow(label: "transmissionId", value: serverTransmissionId)
+            detailRow(label: "localTransmissionId", value: transmission?.id.uuidString)
+            detailRow(label: "requestId", value: transmission?.requestId)
+        }
+    }
+
+    private var attemptsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Delivery attempts")
+                .font(.headline)
+            if attempts.isEmpty {
+                Text("No attempts recorded")
+                    .font(.caption)
+                    .foregroundStyle(BrandColors.timeLaneText)
+            } else {
+                ForEach(attempts) { attempt in
+                    HStack(alignment: .top, spacing: 8) {
+                        Text(Self.detailTimeFormatter.string(from: attempt.createdAt))
+                            .font(.caption2)
+                            .frame(width: 90, alignment: .leading)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(attempt.source.rawValue) / \(attempt.outcome.rawValue)")
+                                .font(.caption)
+                            Text("HTTP \(attempt.statusCode)")
+                                .font(.caption2)
+                                .foregroundStyle(BrandColors.timeLaneText)
+                            if let txId = attempt.transmissionId, !txId.isEmpty {
+                                Text(txId)
+                                    .font(.caption2)
+                                    .foregroundStyle(BrandColors.timeLaneText)
+                                    .textSelection(.enabled)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func timelineRow(label: String, value: Date?) -> some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .font(.caption)
+                .frame(width: 140, alignment: .leading)
+            Text(value.map { Self.detailTimeFormatter.string(from: $0) } ?? "–")
+                .font(.caption)
+                .foregroundStyle(BrandColors.timeLaneText)
+                .textSelection(.enabled)
+            Spacer()
+        }
+    }
+
+    private func detailRow(label: String, value: String?) -> some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .font(.caption)
+                .frame(width: 140, alignment: .leading)
+            Text(value ?? "–")
+                .font(.caption)
+                .foregroundStyle(BrandColors.timeLaneText)
+                .textSelection(.enabled)
+            Spacer()
+        }
+    }
+
+    private var transmission: Transmission? {
+        fetchTransmission()
+    }
+
+    private var attempts: [DeliveryAttempt] {
+        transmission?.deliveryAttempts.sorted { $0.createdAt < $1.createdAt } ?? []
+    }
+
+    private var serverTransmissionId: String? {
+        if let id = message.transmissionId, !id.isEmpty {
+            return id
+        }
+        return attempts.reversed().compactMap { $0.transmissionId }.first { !$0.isEmpty }
+    }
+
+    private var clientQueuedAt: Date? {
+        transmission?.createdAt
+    }
+
+    private var serverAcceptedAt: Date? {
+        attempts.first(where: { $0.source == .send && ($0.outcome == .pending || $0.statusCode == 202) })?.createdAt
+    }
+
+    private var clientReceivedAt: Date? {
+        if message.creatorType == .assistant {
+            return message.createdAt
+        }
+        guard let txId = serverTransmissionId else { return nil }
+        let threadId = message.thread.id
+        let assistantRaw = "assistant"
+        let descriptor = FetchDescriptor<Message>(
+            predicate: #Predicate { msg in
+                msg.thread.id == threadId && msg.creatorTypeRaw == assistantRaw && msg.transmissionId == txId
+            }
+        )
+        return (try? modelContext.fetch(descriptor))?.first?.createdAt
+    }
+
+    private var terminalFailureAt: Date? {
+        guard transmission?.status == .failed else { return nil }
+        return attempts.reversed().first(where: { $0.outcome == .failed })?.createdAt
+    }
+
+    private func fetchTransmission() -> Transmission? {
+        let threadId = message.thread.id
+        let descriptor = FetchDescriptor<Transmission>(
+            predicate: #Predicate { tx in
+                tx.packet.threadId == threadId
+            }
+        )
+        let transmissions = (try? modelContext.fetch(descriptor)) ?? []
+        if message.creatorType == .user {
+            return transmissions.first(where: { $0.packet.messageIds.contains(message.id) })
+        }
+        if let txId = message.transmissionId, !txId.isEmpty {
+            return transmissions.first(where: { tx in
+                tx.deliveryAttempts.contains(where: { $0.transmissionId == txId })
+            })
+        }
+        return nil
+    }
+
+    private static let detailTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.timeZone = .autoupdatingCurrent
+        formatter.dateFormat = "MMM d, h:mm:ss a"
+        return formatter
+    }()
 }

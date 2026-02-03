@@ -13,6 +13,8 @@
 	<string>SolMobile uses your location to attach context to journal moments.</string>
 	<key>NSRemindersFullAccessUsageDescription</key>
 	<string>SolMobile needs reminders access to save tasks from conversations.</string>
+	<key>UILaunchStoryboardName</key>
+	<string>LaunchScreen</string>
 	<key>SOLSERVER_BASE_URL_PROD</key>
 	<string>https://api.sollabshq.com</string>
 	<key>SOLSERVER_BASE_URL_STAGING</key>

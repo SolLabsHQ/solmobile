@@ -128,7 +128,7 @@ struct GhostCardComponent: View {
                 if let bodyText = resolvedBody, !bodyText.isEmpty {
                     Text(bodyText)
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(BrandColors.statusText)
                         .accessibilityIdentifier("ghost_snippet_label")
                 }
 
@@ -138,7 +138,7 @@ struct GhostCardComponent: View {
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(Color.white.opacity(0.1), lineWidth: 0.5)
+                    .stroke(BrandColors.gold.opacity(0.6), lineWidth: 1.2)
             )
             .overlay(receiptGlowOverlay)
             .background(
@@ -212,7 +212,7 @@ struct GhostCardComponent: View {
     }
 
     private var accentTint: Color {
-        let base = Color.accentColor
+        let base = BrandColors.gold
         let opacity = colorScheme == .dark ? 0.08 : 0.05
         return base.opacity(opacity)
     }
@@ -419,7 +419,7 @@ struct GhostCardComponent: View {
 
     private func performForget(_ action: @escaping () -> Void) {
         if PhysicalityManager.isPhysicalityEnabled {
-            GhostCardHaptics.forget()
+            HapticRouter.shared.forgetHeavy()
         }
         withAnimation(.easeOut(duration: 0.2)) {
             isHidden = true
@@ -449,7 +449,7 @@ struct GhostCardComponent: View {
 
         if PhysicalityManager.canFireHaptics() {
             let intensity = PhysicalityManager.heartbeatIntensity(for: card.moodAnchor)
-            GhostCardHaptics.heartbeat(intensity: intensity)
+            HapticRouter.shared.ghostArrival(idempotencyKey: key, intensity: intensity)
         }
 
         if card.kind == .journalMoment {
@@ -524,7 +524,7 @@ struct GhostCardComponent: View {
         let success = await onAscend()
 
         if success {
-            GhostCardHaptics.releaseTick()
+            HapticRouter.shared.releaseTick()
             showAscendReceipt = true
             markAscended()
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
@@ -595,7 +595,7 @@ struct GhostCardComponent: View {
     @ViewBuilder
     private var receiptGlowOverlay: some View {
         if showReceiptGlow {
-            let glowColor = Color(red: 0.95, green: 0.82, blue: 0.32)
+            let glowColor = BrandColors.gold
             let glowRadius: CGFloat = card.rigorLevel == .high ? 18 : 12
             let pulseOpacity: Double = card.rigorLevel == .high ? (glowPulseOn ? 0.95 : 0.6) : 0.85
             RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -603,39 +603,5 @@ struct GhostCardComponent: View {
                 .shadow(color: glowColor.opacity(0.4), radius: glowRadius)
                 .transition(.opacity)
         }
-    }
-}
-
-enum GhostCardHaptics {
-    static func softImpact() {
-        guard PhysicalityManager.canFireHaptics() else { return }
-        let generator = UIImpactFeedbackGenerator(style: .soft)
-        generator.prepare()
-        generator.impactOccurred(intensity: 0.6)
-    }
-
-    static func heartbeat(intensity: Double) {
-        guard PhysicalityManager.canFireHaptics() else { return }
-        let clamped = max(0.0, min(intensity, 1.0))
-        let generator = UIImpactFeedbackGenerator(style: .medium)
-        generator.prepare()
-        generator.impactOccurred(intensity: CGFloat(clamped * 0.6))
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-            generator.impactOccurred(intensity: CGFloat(clamped * 0.9))
-        }
-    }
-
-    static func releaseTick() {
-        guard PhysicalityManager.canFireHaptics() else { return }
-        let generator = UISelectionFeedbackGenerator()
-        generator.prepare()
-        generator.selectionChanged()
-    }
-
-    static func forget() {
-        guard PhysicalityManager.canFireHaptics() else { return }
-        let generator = UIImpactFeedbackGenerator(style: .heavy)
-        generator.prepare()
-        generator.impactOccurred()
     }
 }

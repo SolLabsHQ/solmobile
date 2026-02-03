@@ -63,7 +63,7 @@ enum GhostCardReceipt {
 
         if PhysicalityManager.canFireHaptics() {
             DispatchQueue.main.async {
-                GhostCardHaptics.heartbeat(intensity: 1.0)
+                HapticRouter.shared.ghostArrival(idempotencyKey: newMemoryId, intensity: 1.0)
             }
         }
 

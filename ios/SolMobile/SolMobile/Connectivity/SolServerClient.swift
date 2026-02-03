@@ -783,9 +783,8 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision,
 
         let decoded = try JSONDecoder().decode(Response.self, from: data)
         let txId = headerTxId ?? decoded.transmissionId
-
         return ChatResponse(
-            text: decoded.assistant ?? "(no assistant text)",
+            text: decoded.assistant ?? "",
             statusCode: http.statusCode,
             transmissionId: txId,
             pending: decoded.pending ?? false,
@@ -852,7 +851,6 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision,
 
         let decoded = try JSONDecoder().decode(TransmissionResponse.self, from: data)
         let pending = decoded.pending ?? (decoded.transmission.status == "created")
-
         return ChatPollResponse(
             pending: pending,
             assistant: decoded.assistant,

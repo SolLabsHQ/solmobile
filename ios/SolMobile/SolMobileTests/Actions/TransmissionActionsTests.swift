@@ -187,6 +187,60 @@ final class TransmissionActionsTests: SwiftDataTestBase {
         XCTAssertEqual(drafts.count, 1)
     }
 
+    func test_enqueueChat_skipsWhenMessageMissing() async throws {
+        let thread = ConversationThread(title: "T1")
+        context.insert(thread)
+
+        let actions = TransmissionActions(modelContext: context, transport: FakeTransport())
+        actions.enqueueChat(threadId: thread.id, messageId: UUID())
+
+        let allTx = try context.fetch(FetchDescriptor<Transmission>())
+        XCTAssertTrue(allTx.isEmpty)
+    }
+
+    func test_processQueue_dedupesAssistantByServerMessageId() async throws {
+        let transport = FakeTransport()
+        transport.nextSend = {
+            ChatResponse(
+                text: "updated response",
+                statusCode: 200,
+                transmissionId: "tx-dup",
+                pending: false,
+                responseInfo: nil,
+                assistantMessageId: "assistant-1",
+                threadMemento: nil,
+                evidenceSummary: nil,
+                evidence: nil,
+                evidenceWarnings: nil,
+                outputEnvelope: nil
+            )
+        }
+
+        let thread = ConversationThread(title: "T1")
+        context.insert(thread)
+
+        let user = Message(thread: thread, creatorType: .user, text: "hi")
+        thread.messages.append(user)
+        context.insert(user)
+
+        let assistant = Message(thread: thread, creatorType: .assistant, text: "old response")
+        assistant.serverMessageId = "assistant-1"
+        thread.messages.append(assistant)
+        context.insert(assistant)
+
+        let actions = TransmissionActions(modelContext: context, transport: transport)
+        actions.enqueueChat(thread: thread, userMessage: user)
+
+        await actions.processQueue()
+
+        let assistants = thread.messages.filter { $0.creatorType == .assistant }
+        XCTAssertEqual(assistants.count, 1)
+        XCTAssertEqual(assistants.first?.text, "updated response")
+
+        let uniqueIds = Set(thread.messages.map { $0.id })
+        XCTAssertEqual(uniqueIds.count, thread.messages.count)
+    }
+
     func test_terminalFailure_doesNotBlockLaterQueued_transmission() async throws {
         let transport = TestTransport { _ in
             return ChatResponse(

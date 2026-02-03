@@ -42,6 +42,29 @@ nonisolated enum DebugModelValidators {
         #endif
     }
 
+    static func logDuplicateMessageIds(
+        thread: ConversationThread,
+        context: String,
+        file: StaticString = #fileID,
+        function: StaticString = #function,
+        line: UInt = #line
+    ) {
+        #if DEBUG
+        let ids = thread.messages.map { $0.id }
+        guard !ids.isEmpty else { return }
+        var counts: [UUID: Int] = [:]
+        for id in ids {
+            counts[id, default: 0] += 1
+        }
+        let dupes = counts.filter { $0.value > 1 }
+        guard !dupes.isEmpty else { return }
+        let keys = dupes.keys.map { $0.uuidString }.joined(separator: ",")
+        log.error(
+            "BUG: Duplicate Message.id values in thread. context=\(context, privacy: .public) thread=\(thread.id.uuidString, privacy: .public) dupes=\(keys, privacy: .public) file=\(String(describing: file), privacy: .public) func=\(String(describing: function), privacy: .public) line=\(line, privacy: .public)"
+        )
+        #endif
+    }
+
     static func threadOrNil(_ message: Message) -> ConversationThread? {
         extractThread(from: message)
     }
