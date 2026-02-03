@@ -8,8 +8,6 @@ import SwiftData
 
 struct MemoryVaultView: View {
     @Environment(\.modelContext) private var modelContext
-    @AppStorage(PhysicalityManager.storageKey) private var physicalityEnabled: Bool = true
-
     @Query(sort: \MemoryArtifact.createdAt, order: .reverse)
     private var memories: [MemoryArtifact]
 
@@ -24,10 +22,6 @@ struct MemoryVaultView: View {
 
     var body: some View {
         List {
-            Section("Physicality") {
-                Toggle("Physicality", isOn: $physicalityEnabled)
-            }
-
             Section("Memories") {
                 if pinnedMemories.isEmpty {
                     Text("No memories yet.")

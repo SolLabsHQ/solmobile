@@ -26,13 +26,13 @@ struct JournalOfferCard: View {
                     ForEach(why, id: \.self) { item in
                         Text("- \(item)")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(BrandColors.timeLaneText)
                     }
                 }
             } else {
                 Text("Save this as a quick journal entry.")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(BrandColors.timeLaneText)
             }
 
             HStack(spacing: 10) {
@@ -45,12 +45,12 @@ struct JournalOfferCard: View {
             HStack(spacing: 12) {
                 Button("Not now", action: onDecline)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(BrandColors.statusText)
                     .buttonStyle(.plain)
 
                 Button("Don't ask like this", action: onTune)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(BrandColors.statusText)
                     .buttonStyle(.plain)
             }
         }
@@ -58,7 +58,7 @@ struct JournalOfferCard: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
+                .stroke(BrandColors.glassStroke, lineWidth: 0.5)
         )
     }
 }

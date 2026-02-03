@@ -43,7 +43,7 @@ struct StarlightPulseView: View {
     }
 
     private var starlightColor: Color {
-        Color(red: 0.95, green: 0.82, blue: 0.32)
+        BrandColors.gold
     }
 
     private var baseOpacity: Double {

@@ -33,7 +33,7 @@ struct ThreadListView: View {
                                 .font(.headline)
                             Text(thread.lastActiveAt, style: .date)
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(BrandColors.timeLaneText)
 
                             Spacer()
                             if failedThreadIds.contains(thread.id) {

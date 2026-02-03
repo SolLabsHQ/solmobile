@@ -20,38 +20,47 @@ struct MemoryDetailView: View {
         List {
             Section("Snippet") {
                 Text(memory.snippet ?? "(no snippet)")
+                    .textSelection(.enabled)
             }
 
             if let summary = memory.summary, !summary.isEmpty {
                 Section("Summary") {
                     Text(summary)
+                        .textSelection(.enabled)
                 }
             }
 
             Section("Origin") {
                 if let threadId = memory.threadId {
                     Text("Thread: \(threadId)")
+                        .textSelection(.enabled)
                 }
             }
 
             Section("Metadata") {
                 if let kind = memory.memoryKindRaw {
                     Text("Kind: \(kind)")
+                        .textSelection(.enabled)
                 }
                 if let state = memory.lifecycleStateRaw {
                     Text("Lifecycle: \(state)")
+                        .textSelection(.enabled)
                 }
                 if let rigor = memory.rigorLevelRaw {
                     Text("Rigor: \(rigor)")
+                        .textSelection(.enabled)
                 }
                 if let mood = memory.moodAnchor {
                     Text("Mood: \(mood)")
+                        .textSelection(.enabled)
                 }
                 if let fidelity = memory.fidelityRaw {
                     Text("Fidelity: \(fidelity)")
+                        .textSelection(.enabled)
                 }
                 if let hazy = memory.transitionToHazyAt {
                     Text("Hazy At: \(hazy.formatted())")
+                        .textSelection(.enabled)
                 }
             }
 

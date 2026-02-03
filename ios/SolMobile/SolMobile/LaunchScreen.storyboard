@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0" toolsVersion="23095" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" launchScreen="YES" useTraitCollections="YES" useSafeAreas="YES" colorMatched="YES" initialViewController="T0T-lw-N2x">
+    <device id="retina6_12" orientation="portrait" appearance="light"/>
+    <scenes>
+        <!--Launch Screen-->
+        <scene sceneID="kR4-EJ-Tpj">
+            <objects>
+                <viewController id="T0T-lw-N2x" sceneMemberID="viewController">
+                    <view key="view" contentMode="scaleToFill" id="v1X-2T-nGv">
+                        <rect key="frame" x="0.0" y="0.0" width="390" height="844"/>
+                        <subviews>
+                            <imageView opaque="NO" clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFit" image="LaunchLogo" translatesAutoresizingMaskIntoConstraints="NO" id="e0h-bB-Gh0">
+                                <rect key="frame" x="115" y="327" width="160" height="160"/>
+                            </imageView>
+                        </subviews>
+                        <viewLayoutGuide key="safeArea" id="Hc3-e9-2c0"/>
+                        <color key="backgroundColor" name="BrandBlue"/>
+                        <constraints>
+                            <constraint firstItem="e0h-bB-Gh0" firstAttribute="centerX" secondItem="v1X-2T-nGv" secondAttribute="centerX" id="X9Q-IM-UVV"/>
+                            <constraint firstItem="e0h-bB-Gh0" firstAttribute="centerY" secondItem="v1X-2T-nGv" secondAttribute="centerY" id="rEW-Pg-XyG"/>
+                            <constraint firstItem="e0h-bB-Gh0" firstAttribute="height" constant="160" id="y3U-s8-gQJ"/>
+                            <constraint firstItem="e0h-bB-Gh0" firstAttribute="width" constant="160" id="z1q-tD-hx7"/>
+                        </constraints>
+                    </view>
+                </viewController>
+                <placeholder placeholderIdentifier="IBFirstResponder" id="08j-cx-NAs" userLabel="First Responder" sceneMemberID="firstResponder"/>
+            </objects>
+            <point key="canvasLocation" x="139" y="123"/>
+        </scene>
+    </scenes>
+    <resources>
+        <image name="LaunchLogo" width="256" height="256"/>
+        <namedColor name="BrandBlue">
+            <color red="0.0" green="0.094" blue="0.271" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+        </namedColor>
+    </resources>
+</document>

@@ -65,7 +65,7 @@ struct CaptureSuggestionCard: View {
                     Image(systemName: suggestion.suggestionType.iconName)
                     Text(suggestion.suggestionType.label)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(BrandColors.timeLaneText)
                     Spacer()
                 }
 
@@ -76,7 +76,7 @@ struct CaptureSuggestionCard: View {
                 if let body = suggestion.body, !body.isEmpty {
                     Text(body)
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(BrandColors.timeLaneText)
                 }
 
                 HStack(spacing: 8) {
@@ -97,12 +97,12 @@ struct CaptureSuggestionCard: View {
                             markCaptured(destination: .dismissed)
                         }
                         .buttonStyle(.bordered)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(BrandColors.statusText)
                     }
                 }
             }
             .padding(10)
-            .background(Color(.systemGray6))
+            .background(BrandColors.cardFill)
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .sheet(item: $activeSheet) { sheet in
                 switch sheet {
@@ -400,11 +400,11 @@ struct ReminderSaveView: View {
                     Text(reminder.title)
                     if let notes = reminder.notes, !notes.isEmpty {
                         Text(notes)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(BrandColors.timeLaneText)
                     }
                     if let alarmDate = reminder.alarms?.first?.absoluteDate {
                         Text(alarmDate.formatted(date: .abbreviated, time: .shortened))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(BrandColors.timeLaneText)
                     }
                 }
 

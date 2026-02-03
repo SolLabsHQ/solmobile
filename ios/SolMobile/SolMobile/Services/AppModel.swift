@@ -20,6 +20,7 @@ final class AppModel {
             || UITestNetworkStub.isEnabled
         container = ModelContainerFactory.makeContainer(isInMemoryOnly: useInMemory)
         if !useInMemory {
+            FirstLaunchSanitizer.runIfNeeded(container: container)
             var descriptor = FetchDescriptor<ConversationThread>()
             descriptor.fetchLimit = 1
             let context = ModelContext(container)

@@ -290,6 +290,7 @@ final class TransmissionActions {
     private let pendingSlowThresholdSeconds: TimeInterval = 60
     private let pendingSlowIntervalSeconds: TimeInterval = 20
     private let sendingStaleThresholdSeconds: TimeInterval = 60
+    private var activePolls: Set<String> = []
 
     init(
         modelContext: ModelContext,
@@ -357,17 +358,7 @@ final class TransmissionActions {
     }
 
     func enqueueChat(thread: ConversationThread, userMessage: Message) {
-        let shouldFail = userMessage.text
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-            .hasPrefix("/fail")
-
-        enqueueChat(
-            threadId: thread.id,
-            messageId: userMessage.id,
-            messageText: userMessage.text,
-            shouldFail: shouldFail
-        )
+        enqueueChat(threadId: thread.id, messageId: userMessage.id)
     }
 
     func enqueueMemoryDistill(
@@ -455,7 +446,22 @@ final class TransmissionActions {
         }
         return nil
     }
-    func enqueueChat(threadId: UUID, messageId: UUID, messageText: String?, shouldFail: Bool) {
+    func enqueueChat(threadId: UUID, messageId: UUID) {
+        guard let message = try? fetchMessage(id: messageId) else {
+            outboxLog.error("enqueueChat event=missing_message thread=\(short(threadId), privacy: .public) msg=\(short(messageId), privacy: .public)")
+            return
+        }
+        guard let thread = DebugModelValidators.threadOrNil(message), thread.id == threadId else {
+            outboxLog.error("enqueueChat event=missing_thread thread=\(short(threadId), privacy: .public) msg=\(short(messageId), privacy: .public)")
+            return
+        }
+
+        let messageText = message.text
+        let shouldFail = messageText
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .hasPrefix("/fail")
+
         outboxLog.info("enqueueChat thread=\(short(threadId), privacy: .public) msg=\(short(messageId), privacy: .public) shouldFail=\(shouldFail, privacy: .public)")
 
         let packet = Packet(
@@ -499,6 +505,20 @@ final class TransmissionActions {
         let runId = "sse-\(String(UUID().uuidString.prefix(8)))"
         guard let tx = fetchTransmissionByServerId(serverTransmissionId) else {
             outboxLog.debug("pollTransmission run=\(runId, privacy: .public) event=missing tx=\(shortOrDash(serverTransmissionId), privacy: .public) reason=\(reason, privacy: .public)")
+            return
+        }
+        if tx.status == .succeeded {
+            outboxLog.debug("pollTransmission run=\(runId, privacy: .public) event=skip_succeeded tx=\(short(tx.id), privacy: .public) reason=\(reason, privacy: .public)")
+            return
+        }
+        if let existing = findExistingAssistantMessage(
+            threadId: tx.packet.threadId,
+            transmissionId: serverTransmissionId,
+            assistantMessageId: nil
+        ) {
+            markTransmissionDelivered(txId: tx.id, reason: "poll_skip_existing")
+            outboxLog.info("pollTransmission run=\(runId, privacy: .public) event=skip_existing tx=\(short(tx.id), privacy: .public) msg=\(short(existing.id), privacy: .public) reason=\(reason, privacy: .public)")
+            try? modelContext.save()
             return
         }
 
@@ -837,6 +857,37 @@ final class TransmissionActions {
             )
             return nil
         }
+
+        if let existing = findExistingAssistantMessage(
+            threadId: threadId,
+            transmissionId: transmissionId,
+            assistantMessageId: assistantMessageId
+        ) {
+            if DebugModelValidators.threadOrNil(existing) == nil {
+                outboxLog.error(
+                    "processQueue run=\(runId, privacy: .public) event=assistant_orphan_repair tx=\(short(txId), privacy: .public) thread=\(short(threadId), privacy: .public) via=\(via, privacy: .public)"
+                )
+                existing.thread = thread
+            }
+            upsertAssistantMessage(
+                existing: existing,
+                thread: thread,
+                assistantText: assistantText,
+                transmissionId: transmissionId,
+                assistantMessageId: assistantMessageId,
+                evidence: evidence,
+                journalOffer: journalOffer,
+                outputEnvelope: outputEnvelope,
+                runId: runId,
+                txId: txId,
+                via: via
+            )
+            markTransmissionDelivered(txId: txId, reason: "dedupe_existing")
+            outboxLog.info(
+                "processQueue run=\(runId, privacy: .public) event=assistant_dedupe tx=\(short(txId), privacy: .public) via=\(via, privacy: .public)"
+            )
+            return existing
+        }
         let previousMessage = thread.messages.last
 
         let text: String
@@ -896,10 +947,15 @@ final class TransmissionActions {
             ghostKind: ghostKind
         )
 
-        thread.messages.append(assistantMessage)
+        if !thread.messages.contains(where: { $0.id == assistantMessage.id }) {
+            thread.messages.append(assistantMessage)
+        }
+        DebugModelValidators.logDuplicateMessageIds(thread: thread, context: "TransmissionActions.appendAssistantMessageIfPossible.append")
         thread.lastActiveAt = Date()
 
         modelContext.insert(assistantMessage)
+
+        markTransmissionDelivered(txId: txId, reason: "assistant_appended")
 
         if assistantMessage.journalOfferJson == nil, let offer = journalOffer {
             let snapshot = JournalOfferSnapshot(from: offer)
@@ -956,6 +1012,154 @@ final class TransmissionActions {
 
         outboxLog.info("processQueue run=\(runId, privacy: .public) event=assistant_appended tx=\(short(txId), privacy: .public) via=\(via, privacy: .public)")
         return assistantMessage
+    }
+
+    private func findExistingAssistantMessage(
+        threadId: UUID,
+        transmissionId: String?,
+        assistantMessageId: String?
+    ) -> Message? {
+        let assistantRaw = "assistant"
+
+        if let assistantMessageId, !assistantMessageId.isEmpty {
+            let descriptor = FetchDescriptor<Message>(
+                predicate: #Predicate { msg in
+                    msg.thread.id == threadId
+                    && msg.creatorTypeRaw == assistantRaw
+                    && msg.serverMessageId == assistantMessageId
+                }
+            )
+            if let existing = try? modelContext.fetch(descriptor).first {
+                return existing
+            }
+        }
+
+        if let transmissionId, !transmissionId.isEmpty {
+            let descriptor = FetchDescriptor<Message>(
+                predicate: #Predicate { msg in
+                    msg.thread.id == threadId
+                    && msg.creatorTypeRaw == assistantRaw
+                    && msg.transmissionId == transmissionId
+                }
+            )
+            if let existing = try? modelContext.fetch(descriptor).first {
+                return existing
+            }
+        }
+
+        return nil
+    }
+
+    private func upsertAssistantMessage(
+        existing: Message,
+        thread: ConversationThread,
+        assistantText: String?,
+        transmissionId: String?,
+        assistantMessageId: String?,
+        evidence: EvidenceDTO?,
+        journalOffer: JournalOffer?,
+        outputEnvelope: OutputEnvelopeDTO?,
+        runId: String,
+        txId: UUID,
+        via: String
+    ) {
+        if let assistantText, !assistantText.isEmpty {
+            existing.text = assistantText
+        }
+        if existing.serverMessageId == nil || existing.serverMessageId?.isEmpty == true {
+            applyServerMessageId(assistantMessageId ?? transmissionId, to: existing)
+        }
+        if (existing.transmissionId == nil || existing.transmissionId?.isEmpty == true),
+           let transmissionId, !transmissionId.isEmpty {
+            existing.transmissionId = transmissionId
+        }
+
+        let previousMemoryId = existing.ghostMemoryId
+        existing.applyOutputEnvelopeMeta(outputEnvelope)
+        let newMemoryId = existing.ghostMemoryId
+        let factNull = existing.ghostFactNull
+        let ghostKind = existing.ghostKind
+        prefetchLatticeMemoriesIfNeeded(for: existing)
+        GhostCardReceipt.fireCanonizationIfNeeded(
+            modelContext: modelContext,
+            previousMemoryId: previousMemoryId,
+            newMemoryId: newMemoryId,
+            factNull: factNull,
+            ghostKind: ghostKind
+        )
+
+        if let evidence {
+            let evidenceModels: (captures: [Capture], supports: [ClaimSupport], claims: [ClaimMapEntry])
+            do {
+                evidenceModels = try existing.buildEvidenceModels(from: evidence)
+            } catch {
+                outboxLog.error(
+                    "processQueue run=\(runId, privacy: .public) event=evidence_mapping_failed_existing tx=\(short(txId), privacy: .public) err=\(String(describing: error), privacy: .public)"
+                )
+                return
+            }
+
+            if let captures = existing.captures {
+                captures.forEach { modelContext.delete($0) }
+            }
+            if let supports = existing.supports {
+                supports.forEach { modelContext.delete($0) }
+            }
+            if let claims = existing.claims {
+                claims.forEach { modelContext.delete($0) }
+            }
+
+            existing.hasEvidence = !evidenceModels.captures.isEmpty
+                || !evidenceModels.supports.isEmpty
+                || !evidenceModels.claims.isEmpty
+
+            if !evidenceModels.captures.isEmpty {
+                existing.captures = evidenceModels.captures
+                evidenceModels.captures.forEach { modelContext.insert($0) }
+            }
+
+            if !evidenceModels.supports.isEmpty {
+                existing.supports = evidenceModels.supports
+                evidenceModels.supports.forEach { modelContext.insert($0) }
+            }
+
+            if !evidenceModels.claims.isEmpty {
+                existing.claims = evidenceModels.claims
+                evidenceModels.claims.forEach { modelContext.insert($0) }
+            }
+        }
+
+        if existing.journalOfferJson == nil, let offer = journalOffer {
+            let snapshot = JournalOfferSnapshot(from: offer)
+            existing.journalOfferJson = try? JSONEncoder().encode(snapshot)
+            if existing.journalOfferJson == nil {
+                outboxLog.error(
+                    "processQueue run=\(runId, privacy: .public) event=journal_offer_encode_failed_existing tx=\(short(txId), privacy: .public)"
+                )
+            } else {
+                outboxLog.info(
+                    "processQueue run=\(runId, privacy: .public) event=journal_offer_attached_existing tx=\(short(txId), privacy: .public) eligible=\(offer.offerEligible, privacy: .public) moment=\(offer.momentId, privacy: .public)"
+                )
+            }
+        }
+
+        if existing.isGhostCard {
+            upsertMemoryArtifact(from: existing)
+        }
+
+        if !thread.messages.contains(where: { $0.id == existing.id }) {
+            thread.messages.append(existing)
+        }
+        DebugModelValidators.logDuplicateMessageIds(thread: thread, context: "TransmissionActions.upsertAssistantMessage.append")
+        thread.lastActiveAt = Date()
+    }
+
+    private func markTransmissionDelivered(txId: UUID, reason: String) {
+        guard let tx = try? fetchTransmission(id: txId) else { return }
+        guard tx.status != .succeeded else { return }
+        tx.status = .succeeded
+        tx.lastError = nil
+        outboxLog.info("processQueue event=tx_delivered tx=\(short(txId), privacy: .public) reason=\(reason, privacy: .public)")
     }
 
     private func resolveThread(
@@ -1130,6 +1334,9 @@ final class TransmissionActions {
             outboxLog.info(
                 "processQueue run=\(runId, privacy: .public) event=budget_blocked tx=\(short(sel.txId), privacy: .public)"
             )
+            if sel.packetType == "chat" {
+                HapticRouter.shared.terminalFailure(idempotencyKey: attemptId.uuidString)
+            }
             try? modelContext.save()
             return
         }
@@ -1168,6 +1375,9 @@ final class TransmissionActions {
                 )
 
                 outboxLog.error("processQueue run=\(runId, privacy: .public) event=missing_text tx=\(short(sel.txId), privacy: .public)")
+                if sel.packetType == "chat" {
+                    HapticRouter.shared.terminalFailure(idempotencyKey: attemptId.uuidString)
+                }
                 try? modelContext.save()
                 return
             }
@@ -1217,6 +1427,12 @@ final class TransmissionActions {
                 retryAfterSeconds: nil,
                 finalURL: response.responseInfo?.finalURL?.absoluteString
             )
+
+            if sel.packetType == "chat",
+               response.pending || response.statusCode == 202 || response.statusCode == 200 {
+                let ackKey = response.transmissionId ?? attemptId.uuidString
+                HapticRouter.shared.acceptedTick(idempotencyKey: ackKey)
+            }
 
             if let m = response.threadMemento {
                 applyDraftMemento(runId: runId, freshTx: freshTx, txId: sel.txId, m: m, via: "send")
@@ -1290,6 +1506,11 @@ final class TransmissionActions {
 
             freshTx.status = decision.retryable ? .queued : .failed
             freshTx.lastError = msg
+
+            if sel.packetType == "chat", decision.retryable == false {
+                let failKey = decision.transmissionId ?? attemptId.uuidString
+                HapticRouter.shared.terminalFailure(idempotencyKey: failKey)
+            }
 
             let outcome = decision.retryable ? "queued" : "failed"
             outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(sel.txId), privacy: .public) to=\(outcome, privacy: .public) http=\(code, privacy: .public)")
@@ -1478,6 +1699,9 @@ final class TransmissionActions {
             )
 
             outboxLog.error("processQueue run=\(runId, privacy: .public) event=terminal_max_attempts tx=\(short(txId), privacy: .public) attempts=\(sendAttemptCount, privacy: .public)")
+            if tx.packet.packetType == "chat" {
+                HapticRouter.shared.terminalFailure(idempotencyKey: tx.id.uuidString)
+            }
             try? modelContext.save()
             return true
         }
@@ -1564,6 +1788,9 @@ final class TransmissionActions {
                 tx.status = .failed
                 tx.lastError = "Missing server transmission id for pending poll"
                 outboxLog.error("processQueue run=\(runId, privacy: .public) event=poll_missing_id tx=\(short(sel.txId), privacy: .public)")
+                if tx.packet.packetType == "chat" {
+                    HapticRouter.shared.terminalFailure(idempotencyKey: tx.id.uuidString)
+                }
             }
             return nil
         }
@@ -1571,6 +1798,25 @@ final class TransmissionActions {
         outboxLog.info("processQueue run=\(runId, privacy: .public) event=poll_ready tx=\(short(sel.txId), privacy: .public) serverTx=\(shortOrDash(serverTxId), privacy: .public)")
 
         guard let tx = try? fetchTransmission(id: sel.txId) else { return nil }
+        if tx.status == .succeeded {
+            outboxLog.debug("processQueue run=\(runId, privacy: .public) event=poll_skip_succeeded tx=\(short(sel.txId), privacy: .public)")
+            return nil
+        }
+        if let existing = findExistingAssistantMessage(
+            threadId: sel.threadId,
+            transmissionId: serverTxId,
+            assistantMessageId: nil
+        ) {
+            markTransmissionDelivered(txId: sel.txId, reason: "poll_existing")
+            outboxLog.info("processQueue run=\(runId, privacy: .public) event=poll_skip_existing tx=\(short(sel.txId), privacy: .public) msg=\(short(existing.id), privacy: .public)")
+            return existing
+        }
+        if activePolls.contains(serverTxId) {
+            outboxLog.debug("processQueue run=\(runId, privacy: .public) event=poll_skip_inflight tx=\(short(sel.txId), privacy: .public) serverTx=\(shortOrDash(serverTxId), privacy: .public)")
+            return nil
+        }
+        activePolls.insert(serverTxId)
+        defer { activePolls.remove(serverTxId) }
 
         let attemptId = UUID()
         let diagnostics = DiagnosticsContext(
@@ -1658,6 +1904,11 @@ final class TransmissionActions {
 
             freshTx.status = decision.retryable ? .pending : .failed
             freshTx.lastError = errorMessage(from: error)
+
+            if decision.retryable == false, freshTx.packet.packetType == "chat" {
+                let failKey = decision.transmissionId ?? attemptId.uuidString
+                HapticRouter.shared.terminalFailure(idempotencyKey: failKey)
+            }
 
             let outcome = decision.retryable ? "pending" : "failed"
             outboxLog.info("processQueue run=\(runId, privacy: .public) event=status tx=\(short(sel.txId), privacy: .public) to=\(outcome, privacy: .public) reason=poll_failed")

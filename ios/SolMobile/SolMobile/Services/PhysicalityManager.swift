@@ -8,17 +8,8 @@ import Foundation
 import UIKit
 
 enum PhysicalityManager {
-    static let storageKey = "sol.ghost.physicality.enabled"
-
     static var isPhysicalityEnabled: Bool {
-        if UserDefaults.standard.object(forKey: storageKey) == nil {
-            return true
-        }
-        return UserDefaults.standard.bool(forKey: storageKey)
-    }
-
-    static func setPhysicalityEnabled(_ enabled: Bool) {
-        UserDefaults.standard.set(enabled, forKey: storageKey)
+        true
     }
 
     static var supportsHaptics: Bool {
@@ -26,7 +17,7 @@ enum PhysicalityManager {
     }
 
     static func canFireHaptics() -> Bool {
-        isPhysicalityEnabled && supportsHaptics
+        supportsHaptics
     }
 
     static func heartbeatIntensity(for moodAnchor: MoodAnchor?) -> Double {
