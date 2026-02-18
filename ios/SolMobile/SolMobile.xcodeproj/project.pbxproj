@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		0C317F709B664B4AA8BE72D9 /* LDSwiftEventSource in Frameworks */ = {isa = PBXBuildFile; productRef = 54AFBA1C329445E4B6D699C6 /* LDSwiftEventSource */; };
+		0A4A70D52F44E30B00A03F4E /* LDSwiftEventSource in Frameworks */ = {isa = PBXBuildFile; productRef = 0A4A70D42F44E30B00A03F4E /* LDSwiftEventSource */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -73,7 +73,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				0C317F709B664B4AA8BE72D9 /* LDSwiftEventSource in Frameworks */,
+				0A4A70D52F44E30B00A03F4E /* LDSwiftEventSource in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -137,7 +137,7 @@
 			);
 			name = SolMobile;
 			packageProductDependencies = (
-				54AFBA1C329445E4B6D699C6 /* LDSwiftEventSource */,
+				0A4A70D42F44E30B00A03F4E /* LDSwiftEventSource */,
 			);
 			productName = SolMobile;
 			productReference = 0A9A002A2EF133AF003FE519 /* SolMobile.app */;
@@ -222,7 +222,7 @@
 			mainGroup = 0A9A00212EF133AF003FE519;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				A1629FCD30564ACEA0C691CA /* XCRemoteSwiftPackageReference "swift-eventsource" */,
+				0A4A70D32F44E30B00A03F4E /* XCRemoteSwiftPackageReference "swift-eventsource" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 0A9A002B2EF133AF003FE519 /* Products */;
@@ -425,22 +425,25 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = H4EJ28SSE4;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "SolMobile/Info-Debug.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = SolMobileDev;
+				INFOPLIST_KEY_NSCalendarsWriteOnlyAccessUsageDescription = "SolMobile needs calendar access to save events from conversations.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "SolMobile uses your location to attach context to journal moments.";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "SolMobile needs reminders access to save tasks from conversations.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = NO;
+				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.sollabshq.solmobile.dev;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -459,23 +462,26 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = H4EJ28SSE4;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "SolMobile/Info-Release.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = SolMobileDev;
+				INFOPLIST_KEY_NSCalendarsWriteOnlyAccessUsageDescription = "SolMobile needs calendar access to save events from conversations.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "SolMobile uses your location to attach context to journal moments.";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "SolMobile needs reminders access to save tasks from conversations.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = NO;
+				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.sollabshq.solmobile;
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sollabshq.SolMobile;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -613,9 +619,9 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		A1629FCD30564ACEA0C691CA /* XCRemoteSwiftPackageReference "swift-eventsource" */ = {
+		0A4A70D32F44E30B00A03F4E /* XCRemoteSwiftPackageReference "swift-eventsource" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/launchdarkly/swift-eventsource";
+			repositoryURL = "https://github.com/SolLabsHQ/swift-eventsource.git";
 			requirement = {
 				kind = upToNextMajorVersion;
 				minimumVersion = 3.3.0;
@@ -624,9 +630,9 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		54AFBA1C329445E4B6D699C6 /* LDSwiftEventSource */ = {
+		0A4A70D42F44E30B00A03F4E /* LDSwiftEventSource */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = A1629FCD30564ACEA0C691CA /* XCRemoteSwiftPackageReference "swift-eventsource" */;
+			package = 0A4A70D32F44E30B00A03F4E /* XCRemoteSwiftPackageReference "swift-eventsource" */;
 			productName = LDSwiftEventSource;
 		};
 /* End XCSwiftPackageProductDependency section */

@@ -7,6 +7,8 @@
 		<string>com.sollabshq.solmobile.cleanup</string>
 		<string>com.sollabshq.solmobile.outboxRefresh</string>
 	</array>
+	<key>LATTICE_DEV_BADGE</key>
+	<string>0</string>
 	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
 	<string>SolMobile needs calendar access to save events from conversations.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
@@ -19,8 +21,6 @@
 	<string>https://api.sollabshq.com</string>
 	<key>SOLSERVER_BASE_URL_STAGING</key>
 	<string>https://solserver-staging.sollabshq.com</string>
-	<key>LATTICE_DEV_BADGE</key>
-	<string>0</string>
 	<key>SOL_ENV</key>
 	<string>prod</string>
 </dict>
