@@ -90,6 +90,29 @@ nonisolated struct PacketEnvelope: Sendable {
     let requestId: String
     let contextRefsJson: String?
     let payloadJson: String?
+    let threadMemento: ThreadMementoDTO?
+
+    init(
+        packetId: UUID,
+        packetType: String,
+        threadId: UUID,
+        messageIds: [UUID],
+        messageText: String,
+        requestId: String,
+        contextRefsJson: String?,
+        payloadJson: String?,
+        threadMemento: ThreadMementoDTO? = nil
+    ) {
+        self.packetId = packetId
+        self.packetType = packetType
+        self.threadId = threadId
+        self.messageIds = messageIds
+        self.messageText = messageText
+        self.requestId = requestId
+        self.contextRefsJson = contextRefsJson
+        self.payloadJson = payloadJson
+        self.threadMemento = threadMemento
+    }
 }
 
 nonisolated struct DiagnosticsContext: Sendable {
@@ -1398,7 +1421,8 @@ final class TransmissionActions {
                 messageText: userText,
                 requestId: requestId,
                 contextRefsJson: nil,
-                payloadJson: nil
+                payloadJson: nil,
+                threadMemento: nil
             )
 
             outboxLog.info("processQueue run=\(runId, privacy: .public) event=send tx=\(short(sel.txId), privacy: .public)")
@@ -1571,7 +1595,8 @@ final class TransmissionActions {
             messageText: "",
             requestId: tx.requestId,
             contextRefsJson: nil,
-            payloadJson: payloadJson
+            payloadJson: payloadJson,
+            threadMemento: nil
         )
 
         do {

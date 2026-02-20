@@ -6,9 +6,38 @@
 - FIXLOG: ./FIXLOG.md
 
 ## Gates
-- unit: xcodebuild test -scheme SolMobile -destination 'platform=iOS Simulator,name=iPhone 15' -project ios/SolMobile/SolMobile.xcodeproj
-- lint: xcodebuild test -scheme SolMobile -destination 'platform=iOS Simulator,name=iPhone 15' -project ios/SolMobile/SolMobile.xcodeproj
-- integration: xcodebuild test -scheme SolMobile -destination 'platform=iOS Simulator,name=iPhone 15' -project ios/SolMobile/SolMobile.xcodeproj
+- unit: xcodebuild test -scheme SolMobile -destination 'platform=iOS Simulator,name=iPhone 17' -project ios/SolMobile/SolMobile.xcodeproj
+- lint: xcodebuild test -scheme SolMobile -destination 'platform=iOS Simulator,name=iPhone 17' -project ios/SolMobile/SolMobile.xcodeproj
+- integration: xcodebuild test -scheme SolMobile -destination 'platform=iOS Simulator,name=iPhone 17' -project ios/SolMobile/SolMobile.xcodeproj
+
+## Packet Source Docs
+- `infra-docs/codex/EPIC-042/AGENTPACK-EPIC-042.md`
+- `infra-docs/codex/EPIC-042/PR #42: ThreadMemento v0.2 & Markdown Rendering.md`
+
+## SolMobile EPIC-042 Scope (Backfill)
+### Key seams
+- `ios/SolMobile/SolMobile/Views/Chat/ThreadDetailView.swift`
+- `ios/SolMobile/SolMobile/Actions/TransmissionAction.swift`
+- `ios/SolMobile/SolMobile/Connectivity/SolServerClient.swift`
+- `ios/SolMobile/SolMobile/Services/SSEService.swift`
+- `ios/SolMobile/SolMobile/Services/OutboxService.swift`
+- `ios/SolMobile/SolMobile/Models/Message.swift`
+
+### Required behaviors
+- Assistant markdown rendering uses Textual in the assistant lane only and only for final assistant responses.
+- User messages remain plain text (no markdown rendering lane for user content).
+- Markdown image syntax is stripped in v0 before render.
+- `/v1/chat` request DTO supports optional `context.thread_memento`.
+
+### Acceptance criteria
+- ADR-031 alignment: request `context.thread_memento` support is wired and compatible with server precedence contract.
+- ADR-032 alignment: final-only assistant markdown lane remains in effect and remote image markdown is not rendered.
+- Packet readers can execute SolMobile EPIC-042 work from this packet without opening external docs.
+
+### Out of scope
+- Streaming markdown delta parsing.
+- Interactive markdown widgets.
+- Remote image rendering in markdown.
 
 <!-- BEGIN GENERATED: canonical-spec-anchor -->
 ## Canonical Spec Anchor (infra-docs)
