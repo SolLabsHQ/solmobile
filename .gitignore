@@ -21,3 +21,8 @@ Package.resolved
 # python
 __pycache__/
 *.pyc
+
+# local workspace artifacts
+.codex/
+.cursor/
+.vscode/
