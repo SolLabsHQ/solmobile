@@ -1,0 +1,849 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild test -scheme SolMobileTests -destination "platform=iOS Simulator,name=iPhone 17" -project ios/SolMobile/SolMobile.xcodeproj
+
+Resolve Package Graph
+
+
+Resolved source packages:
+  swiftui-math: https://github.com/gonzalezreal/swiftui-math @ 0.1.0
+  textual: https://github.com/gonzalezreal/Textual.git @ 0.3.1
+  swift-concurrency-extras: https://github.com/pointfreeco/swift-concurrency-extras @ 1.3.2
+  LDSwiftEventSource: https://github.com/SolLabsHQ/swift-eventsource.git @ 3.3.0
+
+ComputePackagePrebuildTargetDependencyGraph
+
+Prepare packages
+
+CreateBuildRequest
+
+SendProjectDescription
+
+CreateBuildOperation
+
+ComputeTargetDependencyGraph
+note: Building targets in dependency order
+note: Target dependency graph (13 targets)
+    Target 'SolMobileUITests' in project 'SolMobile'
+        ➜ Explicit dependency on target 'SolMobile' in project 'SolMobile'
+    Target 'SolMobileTests' in project 'SolMobile'
+        ➜ Explicit dependency on target 'SolMobile' in project 'SolMobile'
+    Target 'SolMobile' in project 'SolMobile'
+        ➜ Explicit dependency on target 'LDSwiftEventSource' in project 'LDSwiftEventSource'
+        ➜ Explicit dependency on target 'Textual' in project 'textual'
+    Target 'Textual' in project 'textual'
+        ➜ Explicit dependency on target 'Textual' in project 'textual'
+        ➜ Explicit dependency on target 'textual_Textual' in project 'textual'
+        ➜ Explicit dependency on target 'ConcurrencyExtras' in project 'swift-concurrency-extras'
+        ➜ Explicit dependency on target 'SwiftUIMath' in project 'swiftui-math'
+    Target 'Textual' in project 'textual'
+        ➜ Explicit dependency on target 'textual_Textual' in project 'textual'
+        ➜ Explicit dependency on target 'ConcurrencyExtras' in project 'swift-concurrency-extras'
+        ➜ Explicit dependency on target 'SwiftUIMath' in project 'swiftui-math'
+    Target 'SwiftUIMath' in project 'swiftui-math'
+        ➜ Explicit dependency on target 'SwiftUIMath' in project 'swiftui-math'
+        ➜ Explicit dependency on target 'swiftui-math_SwiftUIMath' in project 'swiftui-math'
+    Target 'SwiftUIMath' in project 'swiftui-math'
+        ➜ Explicit dependency on target 'swiftui-math_SwiftUIMath' in project 'swiftui-math'
+    Target 'swiftui-math_SwiftUIMath' in project 'swiftui-math' (no dependencies)
+    Target 'ConcurrencyExtras' in project 'swift-concurrency-extras'
+        ➜ Explicit dependency on target 'ConcurrencyExtras' in project 'swift-concurrency-extras'
+    Target 'ConcurrencyExtras' in project 'swift-concurrency-extras' (no dependencies)
+    Target 'textual_Textual' in project 'textual' (no dependencies)
+    Target 'LDSwiftEventSource' in project 'LDSwiftEventSource'
+        ➜ Explicit dependency on target 'LDSwiftEventSource' in project 'LDSwiftEventSource'
+    Target 'LDSwiftEventSource' in project 'LDSwiftEventSource' (no dependencies)
+
+GatherProvisioningInputs
+
+CreateBuildDescription
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc --version
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.2.sdk -x c -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/usr/bin/ibtool --version --output-format xml1
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/usr/bin/actool --print-asset-tag-combinations --output-format xml1 /Users/jmcnulty25/Documents/workspace/projects/SolLabsHQ/solmobile/ios/SolMobile/SolMobile/Assets.xcassets
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/usr/bin/actool --version --output-format xml1
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld -version_details
+
+ReadFileContents /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/share/docc/features.json
+
+Build description signature: 6ae8c3c4dd71d89f346cfa9bcd1f5f9c
+Build description path: /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SolMobile-gvswjyuxhcbcdyedwtgcpsecryok/Build/Intermediates.noindex/XCBuildData/6ae8c3c4dd71d89f346cfa9bcd1f5f9c.xcbuilddata
+ClangStatCache /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.2.sdk /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SDKStatCaches.noindex/iphonesimulator26.2-23C53-7d00a8b37fbd7999ea79df8ebc024bf0.sdkstatcache
+    cd /Users/jmcnulty25/Documents/workspace/projects/SolLabsHQ/solmobile/ios/SolMobile/SolMobile.xcodeproj
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.2.sdk -o /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SDKStatCaches.noindex/iphonesimulator26.2-23C53-7d00a8b37fbd7999ea79df8ebc024bf0.sdkstatcache
+
+ProcessInfoPlistFile /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SolMobile-gvswjyuxhcbcdyedwtgcpsecryok/Build/Products/Debug-iphonesimulator/swiftui-math_SwiftUIMath.bundle/Info.plist /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SolMobile-gvswjyuxhcbcdyedwtgcpsecryok/Build/Intermediates.noindex/swiftui-math.build/Debug-iphonesimulator/swiftui-math_SwiftUIMath.build/empty-swiftui-math_SwiftUIMath.plist (in target 'swiftui-math_SwiftUIMath' from project 'swiftui-math')
+    cd /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SolMobile-gvswjyuxhcbcdyedwtgcpsecryok/SourcePackages/checkouts/swiftui-math
+    builtin-infoPlistUtility /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SolMobile-gvswjyuxhcbcdyedwtgcpsecryok/Build/Intermediates.noindex/swiftui-math.build/Debug-iphonesimulator/swiftui-math_SwiftUIMath.build/empty-swiftui-math_SwiftUIMath.plist -producttype com.apple.product-type.bundle -expandbuildsettings -format binary -platform iphonesimulator -o /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SolMobile-gvswjyuxhcbcdyedwtgcpsecryok/Build/Products/Debug-iphonesimulator/swiftui-math_SwiftUIMath.bundle/Info.plist
+
+ProcessInfoPlistFile /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SolMobile-gvswjyuxhcbcdyedwtgcpsecryok/Build/Products/Debug-iphonesimulator/textual_Textual.bundle/Info.plist /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SolMobile-gvswjyuxhcbcdyedwtgcpsecryok/Build/Intermediates.noindex/textual.build/Debug-iphonesimulator/textual_Textual.build/empty-textual_Textual.plist (in target 'textual_Textual' from project 'textual')
+    cd /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SolMobile-gvswjyuxhcbcdyedwtgcpsecryok/SourcePackages/checkouts/Textual
+    builtin-infoPlistUtility /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SolMobile-gvswjyuxhcbcdyedwtgcpsecryok/Build/Intermediates.noindex/textual.build/Debug-iphonesimulator/textual_Textual.build/empty-textual_Textual.plist -producttype com.apple.product-type.bundle -expandbuildsettings -format binary -platform iphonesimulator -o /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SolMobile-gvswjyuxhcbcdyedwtgcpsecryok/Build/Products/Debug-iphonesimulator/textual_Textual.bundle/Info.plist
+
+CopySwiftLibs /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SolMobile-gvswjyuxhcbcdyedwtgcpsecryok/Build/Products/Debug-iphonesimulator/SolMobile.app (in target 'SolMobile' from project 'SolMobile')
+    cd /Users/jmcnulty25/Documents/workspace/projects/SolLabsHQ/solmobile/ios/SolMobile
+    builtin-swiftStdLibTool --copy --verbose --sign - --scan-executable /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SolMobile-gvswjyuxhcbcdyedwtgcpsecryok/Build/Products/Debug-iphonesimulator/SolMobile.app/SolMobile.debug.dylib --scan-folder /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SolMobile-gvswjyuxhcbcdyedwtgcpsecryok/Build/Products/Debug-iphonesimulator/SolMobile.app/Frameworks --scan-folder /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SolMobile-gvswjyuxhcbcdyedwtgcpsecryok/Build/Products/Debug-iphonesimulator/SolMobile.app/PlugIns --scan-folder /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SolMobile-gvswjyuxhcbcdyedwtgcpsecryok/Build/Products/Debug-iphonesimulator/SolMobile.app/SystemExtensions --scan-folder /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SolMobile-gvswjyuxhcbcdyedwtgcpsecryok/Build/Products/Debug-iphonesimulator/SolMobile.app/Extensions --platform iphonesimulator --toolchain /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --destination /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SolMobile-gvswjyuxhcbcdyedwtgcpsecryok/Build/Products/Debug-iphonesimulator/SolMobile.app/Frameworks --strip-bitcode --strip-bitcode-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/bitcode_strip --emit-dependency-info /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SolMobile-gvswjyuxhcbcdyedwtgcpsecryok/Build/Intermediates.noindex/SolMobile.build/Debug-iphonesimulator/SolMobile.build/SwiftStdLibToolInputDependencies.dep --filter-for-swift-os
+
+ProcessInfoPlistFile /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SolMobile-gvswjyuxhcbcdyedwtgcpsecryok/Build/Products/Debug-iphonesimulator/SolMobile.app/Info.plist /Users/jmcnulty25/Documents/workspace/projects/SolLabsHQ/solmobile/ios/SolMobile/SolMobile/Info-Debug.plist (in target 'SolMobile' from project 'SolMobile')
+    cd /Users/jmcnulty25/Documents/workspace/projects/SolLabsHQ/solmobile/ios/SolMobile
+    builtin-infoPlistUtility /Users/jmcnulty25/Documents/workspace/projects/SolLabsHQ/solmobile/ios/SolMobile/SolMobile/Info-Debug.plist -producttype com.apple.product-type.application -genpkginfo /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SolMobile-gvswjyuxhcbcdyedwtgcpsecryok/Build/Products/Debug-iphonesimulator/SolMobile.app/PkgInfo -expandbuildsettings -format binary -platform iphonesimulator -additionalcontentfile /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SolMobile-gvswjyuxhcbcdyedwtgcpsecryok/Build/Intermediates.noindex/SolMobile.build/Debug-iphonesimulator/SolMobile.build/LaunchScreen-SBPartialInfo.plist -additionalcontentfile /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SolMobile-gvswjyuxhcbcdyedwtgcpsecryok/Build/Intermediates.noindex/SolMobile.build/Debug-iphonesimulator/SolMobile.build/assetcatalog_generated_info.plist -scanforprivacyfile /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SolMobile-gvswjyuxhcbcdyedwtgcpsecryok/Build/Products/Debug-iphonesimulator/SolMobile.app/swiftui-math_SwiftUIMath.bundle -scanforprivacyfile /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SolMobile-gvswjyuxhcbcdyedwtgcpsecryok/Build/Products/Debug-iphonesimulator/SolMobile.app/textual_Textual.bundle -o /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SolMobile-gvswjyuxhcbcdyedwtgcpsecryok/Build/Products/Debug-iphonesimulator/SolMobile.app/Info.plist
+
+ProcessInfoPlistFile /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SolMobile-gvswjyuxhcbcdyedwtgcpsecryok/Build/Products/Debug-iphonesimulator/SolMobile.app/PlugIns/SolMobileTests.xctest/Info.plist /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SolMobile-gvswjyuxhcbcdyedwtgcpsecryok/Build/Intermediates.noindex/SolMobile.build/Debug-iphonesimulator/SolMobileTests.build/empty-SolMobileTests.plist (in target 'SolMobileTests' from project 'SolMobile')
+    cd /Users/jmcnulty25/Documents/workspace/projects/SolLabsHQ/solmobile/ios/SolMobile
+    builtin-infoPlistUtility /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SolMobile-gvswjyuxhcbcdyedwtgcpsecryok/Build/Intermediates.noindex/SolMobile.build/Debug-iphonesimulator/SolMobileTests.build/empty-SolMobileTests.plist -producttype com.apple.product-type.bundle.unit-test -expandbuildsettings -format binary -platform iphonesimulator -scanforprivacyfile /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SolMobile-gvswjyuxhcbcdyedwtgcpsecryok/Build/Products/Debug-iphonesimulator/SolMobile.app/PlugIns/SolMobileTests.xctest/swiftui-math_SwiftUIMath.bundle -scanforprivacyfile /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SolMobile-gvswjyuxhcbcdyedwtgcpsecryok/Build/Products/Debug-iphonesimulator/SolMobile.app/PlugIns/SolMobileTests.xctest/textual_Textual.bundle -o /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SolMobile-gvswjyuxhcbcdyedwtgcpsecryok/Build/Products/Debug-iphonesimulator/SolMobile.app/PlugIns/SolMobileTests.xctest/Info.plist
+
+ProcessInfoPlistFile /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SolMobile-gvswjyuxhcbcdyedwtgcpsecryok/Build/Products/Debug-iphonesimulator/SolMobileUITests-Runner.app/PlugIns/SolMobileUITests.xctest/Info.plist /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SolMobile-gvswjyuxhcbcdyedwtgcpsecryok/Build/Intermediates.noindex/SolMobile.build/Debug-iphonesimulator/SolMobileUITests.build/empty-SolMobileUITests.plist (in target 'SolMobileUITests' from project 'SolMobile')
+    cd /Users/jmcnulty25/Documents/workspace/projects/SolLabsHQ/solmobile/ios/SolMobile
+    builtin-infoPlistUtility /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SolMobile-gvswjyuxhcbcdyedwtgcpsecryok/Build/Intermediates.noindex/SolMobile.build/Debug-iphonesimulator/SolMobileUITests.build/empty-SolMobileUITests.plist -producttype com.apple.product-type.bundle.ui-testing -expandbuildsettings -format binary -platform iphonesimulator -additionalcontentfile /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SolMobile-gvswjyuxhcbcdyedwtgcpsecryok/Build/Intermediates.noindex/SolMobile.build/Debug-iphonesimulator/SolMobileUITests.build/ProductTypeInfoPlistAdditions.plist -o /Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SolMobile-gvswjyuxhcbcdyedwtgcpsecryok/Build/Products/Debug-iphonesimulator/SolMobileUITests-Runner.app/PlugIns/SolMobileUITests.xctest/Info.plist
+
+Testing started
+2026-02-19 22:56:11.770871-0800 SolMobile[91543:12585031] [LDEventSource] Starting EventSource client
+2026-02-19 22:56:11.771191-0800 SolMobile[91543:12584927] [OutboxService] kick reason=start processing=false
+2026-02-19 22:56:11.790832-0800 SolMobile[91543:12585035] [connection] nw_socket_handle_socket_event [C1:2] Socket SO_ERROR [61: Connection refused]
+2026-02-19 22:56:11.791000-0800 SolMobile[91543:12585035] [connection] nw_endpoint_flow_failed_with_error [C1 127.0.0.1:3333 in_progress socket-flow (satisfied (Path is satisfied), interface: lo0)] already failing, returning
+2026-02-19 22:56:11.791113-0800 SolMobile[91543:12585035] [Default] Connection 1: received failure notification
+2026-02-19 22:56:11.791206-0800 SolMobile[91543:12585035] [Default] Connection 1: failed to connect 1:61, reason -1
+2026-02-19 22:56:11.791263-0800 SolMobile[91543:12585035] [Default] Connection 1: encountered error(1:61)
+2026-02-19 22:56:11.791510-0800 SolMobile[91543:12585035] [connection] nw_connection_copy_protocol_metadata_internal_block_invoke [C1] Client called nw_connection_copy_protocol_metadata_internal on unconnected nw_connection
+2026-02-19 22:56:11.791550-0800 SolMobile[91543:12585035] [connection] nw_connection_copy_protocol_metadata_internal_block_invoke [C1] Client called nw_connection_copy_protocol_metadata_internal on unconnected nw_connection
+2026-02-19 22:56:11.791586-0800 SolMobile[91543:12585035] [connection] nw_connection_copy_connected_local_endpoint_block_invoke [C1] Client called nw_connection_copy_connected_local_endpoint on unconnected nw_connection
+2026-02-19 22:56:11.791700-0800 SolMobile[91543:12585035] [connection] nw_connection_copy_connected_remote_endpoint_block_invoke [C1] Client called nw_connection_copy_connected_remote_endpoint on unconnected nw_connection
+2026-02-19 22:56:11.792038-0800 SolMobile[91543:12585035] [Default] Task <63C045A9-E4BE-4982-B1A1-1336088E3C5B>.<1> HTTP load failed, 0/0 bytes (error code: -1004 [1:61])
+2026-02-19 22:56:11.792985-0800 SolMobile[91543:12585035] [Default] Task <63C045A9-E4BE-4982-B1A1-1336088E3C5B>.<1> finished with error [-1004] Error Domain=NSURLErrorDomain Code=-1004 "Could not connect to the server." UserInfo={_kCFStreamErrorCodeKey=61, NSUnderlyingError=0x600000c24600 {Error Domain=kCFErrorDomainCFNetwork Code=-1004 "(null)" UserInfo={_NSURLErrorNWPathKey=satisfied (Path is satisfied), interface: lo0, _kCFStreamErrorCodeKey=61, _kCFStreamErrorDomainKey=1}}, _NSURLErrorFailingURLSessionTaskErrorKey=LocalDataTask <63C045A9-E4BE-4982-B1A1-1336088E3C5B>.<1>, _NSURLErrorRelatedURLSessionTaskErrorKey=(
+    "LocalDataTask <63C045A9-E4BE-4982-B1A1-1336088E3C5B>.<1>"
+), NSLocalizedDescription=Could not connect to the server., NSErrorFailingURLStringKey=http://127.0.0.1:3333/v1/events, NSErrorFailingURLKey=http://127.0.0.1:3333/v1/events, _kCFStreamErrorDomainKey=1}
+2026-02-19 22:56:11.793428-0800 SolMobile[91543:12585031] [LDEventSource] Connection error: Could not connect to the server.
+2026-02-19 22:56:11.794236-0800 SolMobile[91543:12585031] [LDEventSource] Waiting 1.223 seconds before reconnecting...
+2026-02-19 22:56:12.062207-0800 SolMobile[91543:12585031] [General] Failed to send CA Event for app launch measurements for ca_event_type: 0 event_name: com.apple.app_launch_measurement.FirstFramePresentationMetric
+2026-02-19 22:56:12.065302-0800 SolMobile[91543:12584927] [OutboxService] run_once reason=start
+2026-02-19 22:56:12.065383-0800 SolMobile[91543:12584927] [OutboxService] kick reason=reachability processing=true
+Test Suite 'All tests' started at 2026-02-19 10:56:12.860 PM.
+Test Suite 'SolMobileTests.xctest' started at 2026-02-19 10:56:12.860 PM.
+Test Suite 'AssistantMarkdownRenderingTests' started at 2026-02-19 10:56:12.860 PM.
+Test Case '-[SolMobileTests.AssistantMarkdownRenderingTests test_assistantCreator_usesMarkdownRenderMode]' started.
+Test Case '-[SolMobileTests.AssistantMarkdownRenderingTests test_assistantCreator_usesMarkdownRenderMode]' passed (0.001 seconds).
+Test Case '-[SolMobileTests.AssistantMarkdownRenderingTests test_markdownSanitizer_appendsClosingFenceWhenUnbalanced]' started.
+Test Case '-[SolMobileTests.AssistantMarkdownRenderingTests test_markdownSanitizer_appendsClosingFenceWhenUnbalanced]' passed (0.001 seconds).
+Test Case '-[SolMobileTests.AssistantMarkdownRenderingTests test_markdownSanitizer_stripsInlineAndReferenceImages]' started.
+Test Case '-[SolMobileTests.AssistantMarkdownRenderingTests test_markdownSanitizer_stripsInlineAndReferenceImages]' passed (0.001 seconds).
+Test Case '-[SolMobileTests.AssistantMarkdownRenderingTests test_userAndSystemCreators_usePlainTextRenderMode]' started.
+Test Case '-[SolMobileTests.AssistantMarkdownRenderingTests test_userAndSystemCreators_usePlainTextRenderMode]' passed (0.000 seconds).
+Test Suite 'AssistantMarkdownRenderingTests' passed at 2026-02-19 10:56:12.864 PM.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.003 (0.004) seconds
+Test Suite 'ChatRequestContextEncodingTests' started at 2026-02-19 10:56:12.864 PM.
+Test Case '-[SolMobileTests.ChatRequestContextEncodingTests test_requestEncodesContextThreadMemento_whenProvided]' started.
+Test Case '-[SolMobileTests.ChatRequestContextEncodingTests test_requestEncodesContextThreadMemento_whenProvided]' passed (0.008 seconds).
+Test Case '-[SolMobileTests.ChatRequestContextEncodingTests test_requestOmitsContext_whenNoThreadMementoProvided]' started.
+Test Case '-[SolMobileTests.ChatRequestContextEncodingTests test_requestOmitsContext_whenNoThreadMementoProvided]' passed (0.001 seconds).
+Test Suite 'ChatRequestContextEncodingTests' passed at 2026-02-19 10:56:12.873 PM.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.008 (0.009) seconds
+Test Suite 'ChatResponseMessageIdTests' started at 2026-02-19 10:56:12.874 PM.
+Test Case '-[SolMobileTests.ChatResponseMessageIdTests test_response_decodesUserMessageIdFromMessageId]' started.
+Test Case '-[SolMobileTests.ChatResponseMessageIdTests test_response_decodesUserMessageIdFromMessageId]' passed (0.004 seconds).
+Test Suite 'ChatResponseMessageIdTests' passed at 2026-02-19 10:56:12.879 PM.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.004 (0.005) seconds
+Test Suite 'DiagnosticsStoreTests' started at 2026-02-19 10:56:12.879 PM.
+Test Case '-[SolMobileTests.DiagnosticsStoreTests testCurlCommandUsesRedactedAuthorizationAndContentType]' started.
+2026-02-19 22:56:12.880203-0800 SolMobile[91543:12584927] [OutboxService] kick reason=did_become_active processing=true
+2026-02-19 22:56:12.881962-0800 SolMobile[91543:12584927] [Outbox] processQueue run=975BD368 event=start
+2026-02-19 22:56:12.883594-0800 SolMobile[91543:12584927] [Outbox] processQueue run=975BD368 event=queued_count count=0
+2026-02-19 22:56:12.883780-0800 SolMobile[91543:12584927] [Outbox] processQueue run=975BD368 event=empty
+2026-02-19 22:56:12.883915-0800 SolMobile[91543:12584927] [Outbox] processQueue run=975BD368 event=end
+Test Case '-[SolMobileTests.DiagnosticsStoreTests testCurlCommandUsesRedactedAuthorizationAndContentType]' passed (0.005 seconds).
+Test Case '-[SolMobileTests.DiagnosticsStoreTests testExportIncludesRedactionMarker]' started.
+2026-02-19 22:56:12.885186-0800 SolMobile[91543:12584927] [OutboxService] kick reason=rerun processing=false
+2026-02-19 22:56:12.886545-0800 SolMobile[91543:12584927] [OutboxService] run_once reason=rerun
+Test Case '-[SolMobileTests.DiagnosticsStoreTests testExportIncludesRedactionMarker]' passed (0.002 seconds).
+Test Case '-[SolMobileTests.DiagnosticsStoreTests testRedactedRequestHeadersDropSensitiveFields]' started.
+2026-02-19 22:56:12.887613-0800 SolMobile[91543:12584927] [Outbox] processQueue run=AFB31F63 event=start
+2026-02-19 22:56:12.888019-0800 SolMobile[91543:12584927] [Outbox] processQueue run=AFB31F63 event=queued_count count=0
+2026-02-19 22:56:12.888185-0800 SolMobile[91543:12584927] [Outbox] processQueue run=AFB31F63 event=empty
+2026-02-19 22:56:12.888319-0800 SolMobile[91543:12584927] [Outbox] processQueue run=AFB31F63 event=end
+Test Case '-[SolMobileTests.DiagnosticsStoreTests testRedactedRequestHeadersDropSensitiveFields]' passed (0.001 seconds).
+Test Case '-[SolMobileTests.DiagnosticsStoreTests testRedactedURLStringMasksSensitiveQueryParams]' started.
+Test Case '-[SolMobileTests.DiagnosticsStoreTests testRedactedURLStringMasksSensitiveQueryParams]' passed (0.001 seconds).
+Test Case '-[SolMobileTests.DiagnosticsStoreTests testRingBufferTrimsToFiftyEntries]' started.
+Test Case '-[SolMobileTests.DiagnosticsStoreTests testRingBufferTrimsToFiftyEntries]' passed (0.001 seconds).
+Test Suite 'DiagnosticsStoreTests' passed at 2026-02-19 10:56:12.891 PM.
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.010 (0.012) seconds
+Test Suite 'DraftStoreTests' started at 2026-02-19 10:56:12.891 PM.
+Test Case '-[SolMobileTests.DraftStoreTests test_cleanupExpiredDrafts_removesStaleRecords]' started.
+/Users/jmcnulty25/Documents/workspace/projects/SolLabsHQ/solmobile/ios/SolMobile/SolMobileTests/Models/DraftStoreTests.swift:34: -[SolMobileTests.DraftStoreTests test_cleanupExpiredDrafts_removesStaleRecords] : Test skipped - SwiftData crash on iOS 26.x sim for DraftRecord
+Test Case '-[SolMobileTests.DraftStoreTests test_cleanupExpiredDrafts_removesStaleRecords]' skipped (0.007 seconds).
+Test Case '-[SolMobileTests.DraftStoreTests test_forceSaveNow_deletesOnEmpty]' started.
+/Users/jmcnulty25/Documents/workspace/projects/SolLabsHQ/solmobile/ios/SolMobile/SolMobileTests/Models/DraftStoreTests.swift:34: -[SolMobileTests.DraftStoreTests test_forceSaveNow_deletesOnEmpty] : Test skipped - SwiftData crash on iOS 26.x sim for DraftRecord
+Test Case '-[SolMobileTests.DraftStoreTests test_forceSaveNow_deletesOnEmpty]' skipped (0.001 seconds).
+Test Case '-[SolMobileTests.DraftStoreTests test_swiftDataSmoke_upsertFetch]' started.
+/Users/jmcnulty25/Documents/workspace/projects/SolLabsHQ/solmobile/ios/SolMobile/SolMobileTests/Models/DraftStoreTests.swift:34: -[SolMobileTests.DraftStoreTests test_swiftDataSmoke_upsertFetch] : Test skipped - SwiftData crash on iOS 26.x sim for DraftRecord
+Test Case '-[SolMobileTests.DraftStoreTests test_swiftDataSmoke_upsertFetch]' skipped (0.001 seconds).
+Test Case '-[SolMobileTests.DraftStoreTests test_upsertDraft_updatesExistingRecord]' started.
+/Users/jmcnulty25/Documents/workspace/projects/SolLabsHQ/solmobile/ios/SolMobile/SolMobileTests/Models/DraftStoreTests.swift:34: -[SolMobileTests.DraftStoreTests test_upsertDraft_updatesExistingRecord] : Test skipped - SwiftData crash on iOS 26.x sim for DraftRecord
+Test Case '-[SolMobileTests.DraftStoreTests test_upsertDraft_updatesExistingRecord]' skipped (0.001 seconds).
+Test Suite 'DraftStoreTests' passed at 2026-02-19 10:56:12.903 PM.
+	 Executed 4 tests, with 4 tests skipped and 0 failures (0 unexpected) in 0.010 (0.011) seconds
+Test Suite 'EvidenceDTOTests' started at 2026-02-19 10:56:12.903 PM.
+Test Case '-[SolMobileTests.EvidenceDTOTests testCaptureDTODecoding]' started.
+Test Case '-[SolMobileTests.EvidenceDTOTests testCaptureDTODecoding]' passed (0.002 seconds).
+Test Case '-[SolMobileTests.EvidenceDTOTests testClaimMapEntryDTODecoding]' started.
+Test Case '-[SolMobileTests.EvidenceDTOTests testClaimMapEntryDTODecoding]' passed (0.003 seconds).
+Test Case '-[SolMobileTests.EvidenceDTOTests testClaimSupportDTODecoding_TextSnippet]' started.
+Test Case '-[SolMobileTests.EvidenceDTOTests testClaimSupportDTODecoding_TextSnippet]' passed (0.002 seconds).
+Test Case '-[SolMobileTests.EvidenceDTOTests testClaimSupportDTODecoding_URLCapture]' started.
+Test Case '-[SolMobileTests.EvidenceDTOTests testClaimSupportDTODecoding_URLCapture]' passed (0.001 seconds).
+Test Case '-[SolMobileTests.EvidenceDTOTests testEvidenceSummaryDecoding]' started.
+Test Case '-[SolMobileTests.EvidenceDTOTests testEvidenceSummaryDecoding]' passed (0.001 seconds).
+Test Case '-[SolMobileTests.EvidenceDTOTests testEvidenceWarningDecoding]' started.
+Test Case '-[SolMobileTests.EvidenceDTOTests testEvidenceWarningDecoding]' passed (0.002 seconds).
+Test Case '-[SolMobileTests.EvidenceDTOTests testResponseDecoding_WithCaptureSuggestion]' started.
+Test Case '-[SolMobileTests.EvidenceDTOTests testResponseDecoding_WithCaptureSuggestion]' passed (0.007 seconds).
+Test Case '-[SolMobileTests.EvidenceDTOTests testResponseDecoding_WithEvidence]' started.
+Test Case '-[SolMobileTests.EvidenceDTOTests testResponseDecoding_WithEvidence]' passed (0.011 seconds).
+Test Case '-[SolMobileTests.EvidenceDTOTests testResponseDecoding_WithOutputEnvelopeClaims]' started.
+Test Case '-[SolMobileTests.EvidenceDTOTests testResponseDecoding_WithOutputEnvelopeClaims]' passed (0.006 seconds).
+Test Suite 'EvidenceDTOTests' passed at 2026-02-19 10:56:12.939 PM.
+	 Executed 9 tests, with 0 failures (0 unexpected) in 0.034 (0.036) seconds
+Test Suite 'EvidenceModelsTests' started at 2026-02-19 10:56:12.939 PM.
+Test Case '-[SolMobileTests.EvidenceModelsTests test_capture_json_encoding_uses_camelCase]' started.
+Test Case '-[SolMobileTests.EvidenceModelsTests test_capture_json_encoding_uses_camelCase]' passed (0.001 seconds).
+Test Case '-[SolMobileTests.EvidenceModelsTests test_capture_url_trimmed_to_max_length]' started.
+Test Case '-[SolMobileTests.EvidenceModelsTests test_capture_url_trimmed_to_max_length]' passed (0.007 seconds).
+Test Case '-[SolMobileTests.EvidenceModelsTests test_cascade_delete_removes_evidence_when_message_deleted]' started.
+2026-02-19 22:56:13.000320-0800 SolMobile[91543:12584927] [PersistentModel] Attempting to read a value after it has been invalidated, forKey: \ClaimMapEntry.message
+Test Case '-[SolMobileTests.EvidenceModelsTests test_cascade_delete_removes_evidence_when_message_deleted]' passed (0.058 seconds).
+Test Case '-[SolMobileTests.EvidenceModelsTests test_claim_map_entry_json_encoding_uses_camelCase]' started.
+Test Case '-[SolMobileTests.EvidenceModelsTests test_claim_map_entry_json_encoding_uses_camelCase]' passed (0.002 seconds).
+Test Case '-[SolMobileTests.EvidenceModelsTests test_claim_support_json_encoding_uses_camelCase]' started.
+Test Case '-[SolMobileTests.EvidenceModelsTests test_claim_support_json_encoding_uses_camelCase]' passed (0.001 seconds).
+Test Case '-[SolMobileTests.EvidenceModelsTests test_claim_text_trimmed_to_max_length]' started.
+Test Case '-[SolMobileTests.EvidenceModelsTests test_claim_text_trimmed_to_max_length]' passed (0.004 seconds).
+Test Case '-[SolMobileTests.EvidenceModelsTests test_dto_encode_fails_for_orphaned_capture_reference]' started.
+Test Case '-[SolMobileTests.EvidenceModelsTests test_dto_encode_fails_for_orphaned_capture_reference]' passed (0.005 seconds).
+Test Case '-[SolMobileTests.EvidenceModelsTests test_dto_encode_fails_for_orphaned_support_reference]' started.
+Test Case '-[SolMobileTests.EvidenceModelsTests test_dto_encode_fails_for_orphaned_support_reference]' passed (0.004 seconds).
+Test Case '-[SolMobileTests.EvidenceModelsTests test_evidence_payload_encoding_is_flat_and_camel_case]' started.
+Test Case '-[SolMobileTests.EvidenceModelsTests test_evidence_payload_encoding_is_flat_and_camel_case]' passed (0.011 seconds).
+Test Case '-[SolMobileTests.EvidenceModelsTests test_message_can_own_evidence_collections]' started.
+2026-02-19 22:56:13.039216-0800 SolMobile[91543:12585038] [LDEventSource] Starting EventSource client
+Test Case '-[SolMobileTests.EvidenceModelsTests test_message_can_own_evidence_collections]' passed (0.006 seconds).
+Test Case '-[SolMobileTests.EvidenceModelsTests test_snippet_text_trimmed_to_max_length]' started.
+2026-02-19 22:56:13.042626-0800 SolMobile[91543:12585036] [connection] nw_socket_handle_socket_event [C2:2] Socket SO_ERROR [61: Connection refused]
+2026-02-19 22:56:13.042744-0800 SolMobile[91543:12585036] [connection] nw_endpoint_flow_failed_with_error [C2 127.0.0.1:3333 in_progress socket-flow (satisfied (Path is satisfied), interface: lo0)] already failing, returning
+2026-02-19 22:56:13.042824-0800 SolMobile[91543:12585036] [Default] Connection 2: received failure notification
+2026-02-19 22:56:13.042868-0800 SolMobile[91543:12585036] [Default] Connection 2: failed to connect 1:61, reason -1
+2026-02-19 22:56:13.042909-0800 SolMobile[91543:12585036] [Default] Connection 2: encountered error(1:61)
+2026-02-19 22:56:13.042999-0800 SolMobile[91543:12585036] [connection] nw_connection_copy_protocol_metadata_internal_block_invoke [C2] Client called nw_connection_copy_protocol_metadata_internal on unconnected nw_connection
+2026-02-19 22:56:13.043077-0800 SolMobile[91543:12585036] [connection] nw_connection_copy_protocol_metadata_internal_block_invoke [C2] Client called nw_connection_copy_protocol_metadata_internal on unconnected nw_connection
+2026-02-19 22:56:13.043128-0800 SolMobile[91543:12585036] [connection] nw_connection_copy_connected_local_endpoint_block_invoke [C2] Client called nw_connection_copy_connected_local_endpoint on unconnected nw_connection
+2026-02-19 22:56:13.043199-0800 SolMobile[91543:12585036] [connection] nw_connection_copy_connected_remote_endpoint_block_invoke [C2] Client called nw_connection_copy_connected_remote_endpoint on unconnected nw_connection
+2026-02-19 22:56:13.043561-0800 SolMobile[91543:12585036] [Default] Task <E000A8BB-BEF7-4871-B8ED-73EFA226DAC2>.<2> HTTP load failed, 0/0 bytes (error code: -1004 [1:61])
+2026-02-19 22:56:13.043818-0800 SolMobile[91543:12585036] [Default] Task <E000A8BB-BEF7-4871-B8ED-73EFA226DAC2>.<2> finished with error [-1004] Error Domain=NSURLErrorDomain Code=-1004 "Could not connect to the server." UserInfo={_kCFStreamErrorCodeKey=61, NSUnderlyingError=0x600000c14750 {Error Domain=kCFErrorDomainCFNetwork Code=-1004 "(null)" UserInfo={_NSURLErrorNWPathKey=satisfied (Path is satisfied), interface: lo0, _kCFStreamErrorCodeKey=61, _kCFStreamErrorDomainKey=1}}, _NSURLErrorFailingURLSessionTaskErrorKey=LocalDataTask <E000A8BB-BEF7-4871-B8ED-73EFA226DAC2>.<2>, _NSURLErrorRelatedURLSessionTaskErrorKey=(
+    "LocalDataTask <E000A8BB-BEF7-4871-B8ED-73EFA226DAC2>.<2>"
+), NSLocalizedDescription=Could not connect to the server., NSErrorFailingURLStringKey=http://127.0.0.1:3333/v1/events, NSErrorFailingURLKey=http://127.0.0.1:3333/v1Test Case '-[SolMobileTests.EvidenceModelsTests test_snippet_text_trimmed_to_max_length]' passed (0.004 seconds).
+/events, _kCFStreamErrorDomainKey=1}
+2026-02-19 22:56:13.044081-0800 SolMobile[91543:12585037] [LDEventSource] Connection error: Could not connect to the server.
+2026-02-19 22:56:13.044177-0800 SolMobile[91543:12585037] [LDEventSource] Waiting 2.372 seconds before reconnecting...
+Test Case '-[SolMobileTests.EvidenceModelsTests test_support_ids_overflow_fails_in_init]' started.
+Test Case '-[SolMobileTests.EvidenceModelsTests test_support_ids_overflow_fails_in_init]' passed (0.004 seconds).
+Test Case '-[SolMobileTests.EvidenceModelsTests test_text_snippet_forbids_capture_id]' started.
+Test Case '-[SolMobileTests.EvidenceModelsTests test_text_snippet_forbids_capture_id]' passed (0.003 seconds).
+Test Case '-[SolMobileTests.EvidenceModelsTests test_text_snippet_support_requires_snippetText]' started.
+Test Case '-[SolMobileTests.EvidenceModelsTests test_text_snippet_support_requires_snippetText]' passed (0.004 seconds).
+Test Case '-[SolMobileTests.EvidenceModelsTests test_url_capture_forbids_snippet_text]' started.
+Test Case '-[SolMobileTests.EvidenceModelsTests test_url_capture_forbids_snippet_text]' passed (0.004 seconds).
+Test Case '-[SolMobileTests.EvidenceModelsTests test_url_capture_support_requires_captureId]' started.
+Test Case '-[SolMobileTests.EvidenceModelsTests test_url_capture_support_requires_captureId]' passed (0.003 seconds).
+Test Case '-[SolMobileTests.EvidenceModelsTests test_validation_fails_for_capture_count_overflow]' started.
+Test Case '-[SolMobileTests.EvidenceModelsTests test_validation_fails_for_capture_count_overflow]' passed (0.007 seconds).
+Test Case '-[SolMobileTests.EvidenceModelsTests test_validation_fails_for_orphaned_capture_reference]' started.
+Test Case '-[SolMobileTests.EvidenceModelsTests test_validation_fails_for_orphaned_capture_reference]' passed (0.005 seconds).
+Test Case '-[SolMobileTests.EvidenceModelsTests test_validation_fails_for_orphaned_support_reference]' started.
+Test Case '-[SolMobileTests.EvidenceModelsTests test_validation_fails_for_orphaned_support_reference]' passed (0.005 seconds).
+Test Case '-[SolMobileTests.EvidenceModelsTests test_validation_fails_for_support_count_overflow]' started.
+Test Case '-[SolMobileTests.EvidenceModelsTests test_validation_fails_for_support_count_overflow]' passed (0.009 seconds).
+Test Case '-[SolMobileTests.EvidenceModelsTests test_validation_passes_for_valid_references]' started.
+Test Case '-[SolMobileTests.EvidenceModelsTests test_validation_passes_for_valid_references]' passed (0.005 seconds).
+Test Suite 'EvidenceModelsTests' passed at 2026-02-19 10:56:13.096 PM.
+	 Executed 21 tests, with 0 failures (0 unexpected) in 0.150 (0.156) seconds
+Test Suite 'GhostCardCTATests' started at 2026-02-19 10:56:13.096 PM.
+Test Case '-[SolMobileTests.GhostCardCTATests test_canonizationReceipt_isIdempotent]' started.
+Test Case '-[SolMobileTests.GhostCardCTATests test_canonizationReceipt_isIdempotent]' passed (0.013 seconds).
+Test Case '-[SolMobileTests.GhostCardCTATests test_canonizationReceipt_skipsFactNull]' started.
+Test Case '-[SolMobileTests.GhostCardCTATests test_canonizationReceipt_skipsFactNull]' passed (0.005 seconds).
+Test Case '-[SolMobileTests.GhostCardCTATests test_highRigor_requiresConfirm_andAllowsForget]' started.
+Test Case '-[SolMobileTests.GhostCardCTATests test_highRigor_requiresConfirm_andAllowsForget]' passed (0.005 seconds).
+Test Case '-[SolMobileTests.GhostCardCTATests test_manualEntry_isEditOnly]' started.
+Test Case '-[SolMobileTests.GhostCardCTATests test_manualEntry_isEditOnly]' passed (0.006 seconds).
+Test Suite 'GhostCardCTATests' passed at 2026-02-19 10:56:13.126 PM.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.029 (0.031) seconds
+Test Suite 'GhostCardMetadataTests' started at 2026-02-19 10:56:13.127 PM.
+Test Case '-[SolMobileTests.GhostCardMetadataTests test_isAscendEligible_requiresGhostKindRaw]' started.
+Test Case '-[SolMobileTests.GhostCardMetadataTests test_isAscendEligible_requiresGhostKindRaw]' passed (0.001 seconds).
+Test Suite 'GhostCardMetadataTests' passed at 2026-02-19 10:56:13.127 PM.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+Test Suite 'HealthCheckPolicyTests' started at 2026-02-19 10:56:13.128 PM.
+Test Case '-[SolMobileTests.HealthCheckPolicyTests testHealthCheckSuccessIncludesAny2xx]' started.
+Test Case '-[SolMobileTests.HealthCheckPolicyTests testHealthCheckSuccessIncludesAny2xx]' passed (0.001 seconds).
+Test Suite 'HealthCheckPolicyTests' passed at 2026-02-19 10:56:13.129 PM.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.001 (0.002) seconds
+Test Suite 'JournalDonationServiceTests' started at 2026-02-19 10:56:13.129 PM.
+Test Case '-[SolMobileTests.JournalDonationServiceTests test_donateMoment_returnsUnavailableWhenDirectDonationUnsupported]' started.
+2026-02-19 22:56:13.132632-0800 SolMobile[91543:12585041] [AudioConverter]     AudioConverterOOP.cpp:1084  Failed to prepare AudioConverterService: -302
+Test Case '-[SolMobileTests.JournalDonationServiceTests test_donateMoment_returnsUnavailableWhenDirectDonationUnsupported]' passed (0.004 seconds).
+Test Suite 'JournalDonationServiceTests' passed at 2026-02-19 10:56:13.133 PM.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.004 (0.004) seconds
+Test Suite 'JournalDraftRequestEncodingTests' started at 2026-02-19 10:56:13.134 PM.
+Test Case '-[SolMobileTests.JournalDraftRequestEncodingTests test_journalDraftRequest_encodesCpbRefs]' started.
+Test Case '-[SolMobileTests.JournalDraftRequestEncodingTests test_journalDraftRequest_encodesCpbRefs]' passed (0.013 seconds).
+Test Suite 'JournalDraftRequestEncodingTests' passed at 2026-02-19 10:56:13.146 PM.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.013 (0.013) seconds
+Test Suite 'JournalOfferDecodingTests' started at 2026-02-19 10:56:13.147 PM.
+Test Case '-[SolMobileTests.JournalOfferDecodingTests test_outputEnvelope_decodesJournalOfferCamelCase]' started.
+Test Case '-[SolMobileTests.JournalOfferDecodingTests test_outputEnvelope_decodesJournalOfferCamelCase]' passed (0.006 seconds).
+Test Suite 'JournalOfferDecodingTests' passed at 2026-02-19 10:56:13.153 PM.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.006 (0.006) seconds
+Test Suite 'JournalPresentationStateTests' started at 2026-02-19 10:56:13.153 PM.
+Test Case '-[SolMobileTests.JournalPresentationStateTests test_alertDismissTransitionsToIdleWhenNotFlagged]' started.
+Test Case '-[SolMobileTests.JournalPresentationStateTests test_alertDismissTransitionsToIdleWhenNotFlagged]' passed (0.001 seconds).
+Test Case '-[SolMobileTests.JournalPresentationStateTests test_alertDismissTransitionsToShareSheetWhenFlagged]' started.
+Test Case '-[SolMobileTests.JournalPresentationStateTests test_alertDismissTransitionsToShareSheetWhenFlagged]' passed (0.001 seconds).
+Test Suite 'JournalPresentationStateTests' passed at 2026-02-19 10:56:13.155 PM.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.001 (0.002) seconds
+Test Suite 'ModelWiringTests' started at 2026-02-19 10:56:13.155 PM.
+Test Case '-[SolMobileTests.ModelWiringTests test_delivery_attempt_backlink_points_to_transmission]' started.
+Test Case '-[SolMobileTests.ModelWiringTests test_delivery_attempt_backlink_points_to_transmission]' passed (0.085 seconds).
+Test Case '-[SolMobileTests.ModelWiringTests test_swiftdata_inmemory_container_can_insert_core_models]' started.
+Test Case '-[SolMobileTests.ModelWiringTests test_swiftdata_inmemory_container_can_insert_core_models]' passed (0.012 seconds).
+Test Case '-[SolMobileTests.ModelWiringTests test_transmissions_can_be_filtered_by_thread_via_packet_threadId]' started.
+Test Case '-[SolMobileTests.ModelWiringTests test_transmissions_can_be_filtered_by_thread_via_packet_threadId]' passed (0.008 seconds).
+Test Suite 'ModelWiringTests' passed at 2026-02-19 10:56:13.261 PM.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.105 (0.106) seconds
+Test Suite 'OutputEnvelopeStorageTests' started at 2026-02-19 10:56:13.261 PM.
+Test Case '-[SolMobileTests.OutputEnvelopeStorageTests test_applyOutputEnvelopeMeta_storesCaptureSuggestion]' started.
+Test Case '-[SolMobileTests.OutputEnvelopeStorageTests test_applyOutputEnvelopeMeta_storesCaptureSuggestion]' passed (0.011 seconds).
+Test Case '-[SolMobileTests.OutputEnvelopeStorageTests test_applyOutputEnvelopeMeta_storesClaimsJsonAndScalars]' started.
+Test Case '-[SolMobileTests.OutputEnvelopeStorageTests test_applyOutputEnvelopeMeta_storesClaimsJsonAndScalars]' passed (0.011 seconds).
+Test Case '-[SolMobileTests.OutputEnvelopeStorageTests test_applyOutputEnvelopeMeta_truncatesOversizedClaimsJson]' started.
+Test Case '-[SolMobileTests.OutputEnvelopeStorageTests test_applyOutputEnvelopeMeta_truncatesOversizedClaimsJson]' passed (0.004 seconds).
+Test Suite 'OutputEnvelopeStorageTests' passed at 2026-02-19 10:56:13.287 PM.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.025 (0.026) seconds
+Test Suite 'RedirectTrackerTests' started at 2026-02-19 10:56:13.288 PM.
+Test Case '-[SolMobileTests.RedirectTrackerTests test_redirectTracker_recordsAndCapsChain]' started.
+Test Case '-[SolMobileTests.RedirectTrackerTests test_redirectTracker_recordsAndCapsChain]' passed (0.001 seconds).
+Test Suite 'RedirectTrackerTests' passed at 2026-02-19 10:56:13.289 PM.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+Test Suite 'RetryPolicyTests' started at 2026-02-19 10:56:13.289 PM.
+Test Case '-[SolMobileTests.RetryPolicyTests test_400_invalidRequest_isTerminalWithoutRetryableField]' started.
+Test Case '-[SolMobileTests.RetryPolicyTests test_400_invalidRequest_isTerminalWithoutRetryableField]' passed (0.001 seconds).
+Test Case '-[SolMobileTests.RetryPolicyTests test_422_parseFailure_defaultsTerminal]' started.
+Test Case '-[SolMobileTests.RetryPolicyTests test_422_parseFailure_defaultsTerminal]' passed (0.000 seconds).
+Test Case '-[SolMobileTests.RetryPolicyTests test_429_isRetryable_andRespectsRetryAfter]' started.
+Test Case '-[SolMobileTests.RetryPolicyTests test_429_isRetryable_andRespectsRetryAfter]' passed (0.001 seconds).
+Test Case '-[SolMobileTests.RetryPolicyTests test_driverBlock422_isTerminal]' started.
+Test Case '-[SolMobileTests.RetryPolicyTests test_driverBlock422_isTerminal]' passed (0.001 seconds).
+Test Suite 'RetryPolicyTests' passed at 2026-02-19 10:56:13.292 PM.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.002 (0.003) seconds
+Test Suite 'SolMobileSmokeTests' started at 2026-02-19 10:56:13.292 PM.
+Test Case '-[SolMobileTests.SolMobileSmokeTests testModuleLoadsAndCoreTypesLink]' started.
+Test Case '-[SolMobileTests.SolMobileSmokeTests testModuleLoadsAndCoreTypesLink]' passed (0.000 seconds).
+Test Suite 'SolMobileSmokeTests' passed at 2026-02-19 10:56:13.293 PM.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+Test Suite 'SolServerClientDecodingTests' started at 2026-02-19 10:56:13.293 PM.
+Test Case '-[SolMobileTests.SolServerClientDecodingTests test_chatResponse_decodes_pending_shape_202]' started.
+Test Case '-[SolMobileTests.SolServerClientDecodingTests test_chatResponse_decodes_pending_shape_202]' passed (0.004 seconds).
+Test Case '-[SolMobileTests.SolServerClientDecodingTests test_chatResponse_decodes_success_shape_200]' started.
+Test Case '-[SolMobileTests.SolServerClientDecodingTests test_chatResponse_decodes_success_shape_200]' passed (0.002 seconds).
+Test Case '-[SolMobileTests.SolServerClientDecodingTests test_decisionResult_decodes_minimal_shape]' started.
+Test Case '-[SolMobileTests.SolServerClientDecodingTests test_decisionResult_decodes_minimal_shape]' passed (0.002 seconds).
+Test Case '-[SolMobileTests.SolServerClientDecodingTests test_threadMementoDTO_decodes_from_solserver_shape]' started.
+Test Case '-[SolMobileTests.SolServerClientDecodingTests test_threadMementoDTO_decodes_from_solserver_shape]' passed (0.001 seconds).
+Test Case '-[SolMobileTests.SolServerClientDecodingTests test_transportError_httpStatus_carriesCodeAndBody]' started.
+Test Case '-[SolMobileTests.SolServerClientDecodingTests test_transportError_httpStatus_carriesCodeAndBody]' passed (0.001 seconds).
+Test Suite 'SolServerClientDecodingTests' passed at 2026-02-19 10:56:13.304 PM.
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.009 (0.011) seconds
+Test Suite 'SolServerClientHTTPSGuardTests' started at 2026-02-19 10:56:13.306 PM.
+Test Case '-[SolMobileTests.SolServerClientHTTPSGuardTests test_insecureBaseURL_isBlockedInStaging]' started.
+Test Case '-[SolMobileTests.SolServerClientHTTPSGuardTests test_insecureBaseURL_isBlockedInStaging]' passed (0.007 seconds).
+Test Suite 'SolServerClientHTTPSGuardTests' passed at 2026-02-19 10:56:13.313 PM.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.007 (0.008) seconds
+Test Suite 'SolServerClientRequestTests' started at 2026-02-19 10:56:13.314 PM.
+Test Case '-[SolMobileTests.SolServerClientRequestTests test_chat_200_buildsRequest_andDecodesResponse]' started.
+Test Case '-[SolMobileTests.SolServerClientRequestTests test_chat_200_buildsRequest_andDecodesResponse]' passed (0.018 seconds).
+Test Case '-[SolMobileTests.SolServerClientRequestTests test_chat_202_pending_decodes_andPreservesTransmissionId]' started.
+Test Case '-[SolMobileTests.SolServerClientRequestTests test_chat_202_pending_decodes_andPreservesTransmissionId]' passed (0.005 seconds).
+Test Case '-[SolMobileTests.SolServerClientRequestTests test_chat_500_throws_andCarriesBody]' started.
+Test Case '-[SolMobileTests.SolServerClientRequestTests test_chat_500_throws_andCarriesBody]' passed (0.005 seconds).
+Test Case '-[SolMobileTests.SolServerClientRequestTests test_chat_simulateStatus_setsHeader]' started.
+Test Case '-[SolMobileTests.SolServerClientRequestTests test_chat_simulateStatus_setsHeader]' passed (0.005 seconds).
+Test Case '-[SolMobileTests.SolServerClientRequestTests test_mementoDecision_200_postsCorrectShape_andDecodes]' started.
+Test Case '-[SolMobileTests.SolServerClientRequestTests test_mementoDecision_200_postsCorrectShape_andDecodes]' passed (0.007 seconds).
+Test Case '-[SolMobileTests.SolServerClientRequestTests test_mementoDecision_non2xx_throwsHttpStatus_withBody]' started.
+Test Case '-[SolMobileTests.SolServerClientRequestTests test_mementoDecision_non2xx_throwsHttpStatus_withBody]' passed (0.004 seconds).
+Test Case '-[SolMobileTests.SolServerClientRequestTests test_transmission_200_buildsRequest_andDecodesResponse]' started.
+Test Case '-[SolMobileTests.SolServerClientRequestTests test_transmission_200_buildsRequest_andDecodesResponse]' passed (0.006 seconds).
+Test Case '-[SolMobileTests.SolServerClientRequestTests test_transmission_non2xx_throwsHttpStatus_withBody]' started.
+Test Case '-[SolMobileTests.SolServerClientRequestTests test_transmission_non2xx_throwsHttpStatus_withBody]' passed (0.004 seconds).
+Test Suite 'SolServerClientRequestTests' passed at 2026-02-19 10:56:13.371 PM.
+	 Executed 8 tests, with 0 failures (0 unexpected) in 0.055 (0.058) seconds
+Test Suite 'StorageCleanupTests' started at 2026-02-19 10:56:13.371 PM.
+Test Case '-[SolMobileTests.StorageCleanupTests test_cleanupDeletesEmptyUnpinnedThreads]' started.
+/Users/jmcnulty25/Documents/workspace/projects/SolLabsHQ/solmobile/ios/SolMobile/SolMobileTests/Models/StorageCleanupTests.swift:14: -[SolMobileTests.StorageCleanupTests test_cleanupDeletesEmptyUnpinnedThreads] : Test skipped - SwiftData crash on iOS 26.x sim for cleanup deletes
+Test Case '-[SolMobileTests.StorageCleanupTests test_cleanupDeletesEmptyUnpinnedThreads]' skipped (0.014 seconds).
+Test Case '-[SolMobileTests.StorageCleanupTests test_cleanupDeletesOnlyUnpinnedOldMessages]' started.
+/Users/jmcnulty25/Documents/workspace/projects/SolLabsHQ/solmobile/ios/SolMobile/SolMobileTests/Models/StorageCleanupTests.swift:14: -[SolMobileTests.StorageCleanupTests test_cleanupDeletesOnlyUnpinnedOldMessages] : Test skipped - SwiftData crash on iOS 26.x sim for cleanup deletes
+Test Case '-[SolMobileTests.StorageCleanupTests test_cleanupDeletesOnlyUnpinnedOldMessages]' skipped (0.005 seconds).
+Test Case '-[SolMobileTests.StorageCleanupTests test_cleanupRespectsSevenDayBoundary]' started.
+/Users/jmcnulty25/Documents/workspace/projects/SolLabsHQ/solmobile/ios/SolMobile/SolMobileTests/Models/StorageCleanupTests.swift:14: -[SolMobileTests.StorageCleanupTests test_cleanupRespectsSevenDayBoundary] : Test skipped - SwiftData crash on iOS 26.x sim for cleanup deletes
+Test Case '-[SolMobileTests.StorageCleanupTests test_cleanupRespectsSevenDayBoundary]' skipped (0.005 seconds).
+Test Case '-[SolMobileTests.StorageCleanupTests test_newMessagesInPinnedThreadDefaultToPinned]' started.
+/Users/jmcnulty25/Documents/workspace/projects/SolLabsHQ/solmobile/ios/SolMobile/SolMobileTests/Models/StorageCleanupTests.swift:14: -[SolMobileTests.StorageCleanupTests test_newMessagesInPinnedThreadDefaultToPinned] : Test skipped - SwiftData crash on iOS 26.x sim for cleanup deletes
+Test Case '-[SolMobileTests.StorageCleanupTests test_newMessagesInPinnedThreadDefaultToPinned]' skipped (0.005 seconds).
+Test Case '-[SolMobileTests.StorageCleanupTests test_saveToMemoryPinsThreadAndMessages]' started.
+/Users/jmcnulty25/Documents/workspace/projects/SolLabsHQ/solmobile/ios/SolMobile/SolMobileTests/Models/StorageCleanupTests.swift:14: -[SolMobileTests.StorageCleanupTests test_saveToMemoryPinsThreadAndMessages] : Test skipped - SwiftData crash on iOS 26.x sim for cleanup deletes
+Test Case '-[SolMobileTests.StorageCleanupTests test_saveToMemoryPinsThreadAndMessages]' skipped (0.005 seconds).
+Test Suite 'StorageCleanupTests' passed at 2026-02-19 10:56:13.408 PM.
+	 Executed 5 tests, with 5 tests skipped and 0 failures (0 unexpected) in 0.035 (0.036) seconds
+Test Suite 'ThreadMementoDecisionTests' started at 2026-02-19 10:56:13.408 PM.
+Test Case '-[SolMobileTests.ThreadMementoDecisionTests test_accept_clears_local_draft_fields_for_matching_transmissions]' started.
+2026-02-19 22:56:13.416066-0800 SolMobile[91543:12584927] [Outbox] enqueueChat thread=7F84D0CA msg=FCB48027 shouldFail=false
+2026-02-19 22:56:13.416185-0800 SolMobile[91543:12584927] [Outbox] enqueueChat packet=5F72196E type=chat
+2026-02-19 22:56:13.416282-0800 SolMobile[91543:12584927] [Outbox] enqueueChat tx=1F39481C status=queued
+2026-02-19 22:56:13.420121-0800 SolMobile[91543:12584927] [Outbox] memento_decision run=4466306B event=start thread=7F84D0CA decision=accept memento=draft-123
+2026-02-19 22:56:13.421694-0800 SolMobile[91543:12584927] [Outbox] memento_decision run=4466306B event=server_ok http=200 applied=true reason=applied
+2026-02-19 22:56:13.422636-0800 SolMobile[91543:12584927] [Outbox] memento_decision run=4466306B event=local_cleared count=1
+Test Case '-[SolMobileTests.ThreadMementoDecisionTests test_accept_clears_local_draft_fields_for_matching_transmissions]' passed (0.015 seconds).
+Test Case '-[SolMobileTests.ThreadMementoDecisionTests test_decideThreadMemento_unsupportedTransport_throws]' started.
+2026-02-19 22:56:13.429570-0800 SolMobile[91543:12584927] [Outbox] memento_decision run=6A0991F4 event=start thread=A00CB1AF decision=accept memento=draft-789
+2026-02-19 22:56:13.434353-0800 SolMobile[91543:12584927] [Outbox] memento_decision run=6A0991F4 event=unsupported transport=MockChatTransportOnly
+Test Case '-[SolMobileTests.ThreadMementoDecisionTests test_decideThreadMemento_unsupportedTransport_throws]' passed (0.011 seconds).
+Test Case '-[SolMobileTests.ThreadMementoDecisionTests test_revoke_clears_local_draft_fields_for_matching_transmissions]' started.
+2026-02-19 22:56:13.440583-0800 SolMobile[91543:12584927] [Outbox] enqueueChat thread=4EE656FA msg=C5E542E2 shouldFail=false
+2026-02-19 22:56:13.440649-0800 SolMobile[91543:12584927] [Outbox] enqueueChat packet=8A2D23D9 type=chat
+2026-02-19 22:56:13.440733-0800 SolMobile[91543:12584927] [Outbox] enqueueChat tx=153B7479 status=queued
+2026-02-19 22:56:13.442575-0800 SolMobile[91543:12584927] [Outbox] memento_decision run=846F405E event=start thread=4EE656FA decision=revoke memento=draft-456
+2026-02-19 22:56:13.442811-0800 SolMobile[91543:12584927] [Outbox] memento_decision run=846F405E event=server_ok http=200 applied=true reason=applied
+2026-02-19 22:56:13.443326-0800 SolMobile[91543:12584927] [Outbox] memento_decision run=846F405E event=local_cleared count=1
+Test Case '-[SolMobileTests.ThreadMementoDecisionTests test_revoke_clears_local_draft_fields_for_matching_transmissions]' passed (0.009 seconds).
+Test Suite 'ThreadMementoDecisionTests' passed at 2026-02-19 10:56:13.444 PM.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.035 (0.036) seconds
+Test Suite 'TraceEventsEncodingTests' started at 2026-02-19 10:56:13.444 PM.
+Test Case '-[SolMobileTests.TraceEventsEncodingTests test_deviceMuseObservation_isMechanismOnly]' started.
+Test Case '-[SolMobileTests.TraceEventsEncodingTests test_deviceMuseObservation_isMechanismOnly]' passed (0.004 seconds).
+Test Case '-[SolMobileTests.TraceEventsEncodingTests test_traceEventsRequest_encodesUnion]' started.
+Test Case '-[SolMobileTests.TraceEventsEncodingTests test_traceEventsRequest_encodesUnion]' passed (0.007 seconds).
+Test Suite 'TraceEventsEncodingTests' passed at 2026-02-19 10:56:13.456 PM.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.011 (0.012) seconds
+Test Suite 'TransmissionActionsPollingTests' started at 2026-02-19 10:56:13.457 PM.
+Test Case '-[SolMobileTests.TransmissionActionsPollingTests test_pending202_poll_pending_requeues_and_does_not_append_assistant]' started.
+2026-02-19 22:56:13.463108-0800 SolMobile[91543:12584927] [Outbox] enqueueChat thread=3764C11A msg=E0C4CA5F shouldFail=false
+2026-02-19 22:56:13.463253-0800 SolMobile[91543:12584927] [Outbox] enqueueChat packet=BA57FC63 type=chat
+2026-02-19 22:56:13.463341-0800 SolMobile[91543:12584927] [Outbox] enqueueChat tx=3768A990 status=queued
+2026-02-19 22:56:13.464806-0800 SolMobile[91543:12584927] [Outbox] processQueue run=9B21C9FA event=start
+2026-02-19 22:56:13.465284-0800 SolMobile[91543:12584927] [Outbox] processQueue run=9B21C9FA event=queued_count count=1
+2026-02-19 22:56:13.467906-0800 SolMobile[91543:12584927] [Outbox] processQueue run=9B21C9FA event=selected tx=3768A990 packet=BA57FC63 type=chat thread=3764C11A
+2026-02-19 22:56:13.470438-0800 SolMobile[91543:12584927] [Outbox] processQueue run=9B21C9FA event=status tx=3768A990 to=sending
+2026-02-19 22:56:13.470654-0800 SolMobile[91543:12584927] [Outbox] processQueue run=9B21C9FA event=send tx=3768A990
+2026-02-19 22:56:13.470721-0800 SolMobile[91543:12584927] [Outbox] processQueue run=9B21C9FA event=transport_ok tx=3768A990 http=202 pending=true ms=2.0
+2026-02-19 22:56:13.471993-0800 SolMobile[91543:12584927] [Outbox] processQueue run=9B21C9FA event=status tx=3768A990 to=pending reason=pending
+2026-02-19 22:56:13.473982-0800 SolMobile[91543:12584927] [Outbox] processQueue run=9B21C9FA event=poll_ready tx=3768A990 serverTx=tx-pending-still
+2026-02-19 22:56:13.475061-0800 SolMobile[91543:12584927] [Outbox] processQueue run=9B21C9FA event=status tx=3768A990 to=pending reason=pending_poll
+2026-02-19 22:56:13.476632-0800 SolMobile[91543:12584927] [Outbox] processQueue run=9B21C9FA event=poll_backoff tx=3768A990 waitSec=2.000000 nextAt=10:56:15 PM
+2026-02-19 22:56:13.476700-0800 SolMobile[91543:12584927] [Outbox] processQueue run=9B21C9FA event=end
+Test Case '-[SolMobileTests.TransmissionActionsPollingTests test_pending202_poll_pending_requeues_and_does_not_append_assistant]' passed (0.021 seconds).
+Test Case '-[SolMobileTests.TransmissionActionsPollingTests test_pending202_poll_throw_requeues_and_records_failed_attempt]' started.
+2026-02-19 22:56:13.484255-0800 SolMobile[91543:12584927] [Outbox] enqueueChat thread=5D408AF3 msg=167E34C0 shouldFail=false
+2026-02-19 22:56:13.484367-0800 SolMobile[91543:12584927] [Outbox] enqueueChat packet=2D2A6D18 type=chat
+2026-02-19 22:56:13.484450-0800 SolMobile[91543:12584927] [Outbox] enqueueChat tx=48164F62 status=queued
+2026-02-19 22:56:13.485776-0800 SolMobile[91543:12584927] [Outbox] processQueue run=16244E96 event=start
+2026-02-19 22:56:13.486216-0800 SolMobile[91543:12584927] [Outbox] processQueue run=16244E96 event=queued_count count=1
+2026-02-19 22:56:13.486617-0800 SolMobile[91543:12584927] [Outbox] processQueue run=16244E96 event=selected tx=48164F62 packet=2D2A6D18 type=chat thread=5D408AF3
+2026-02-19 22:56:13.486871-0800 SolMobile[91543:12584927] [Outbox] processQueue run=16244E96 event=status tx=48164F62 to=sending
+2026-02-19 22:56:13.486914-0800 SolMobile[91543:12584927] [Outbox] processQueue run=16244E96 event=send tx=48164F62
+2026-02-19 22:56:13.486968-0800 SolMobile[91543:12584927] [Outbox] processQueue run=16244E96 event=transport_ok tx=48164F62 http=202 pending=true ms=0.2
+2026-02-19 22:56:13.487632-0800 SolMobile[91543:12584927] [Outbox] processQueue run=16244E96 event=status tx=48164F62 to=pending reason=pending
+2026-02-19 22:56:13.488796-0800 SolMobile[91543:12584927] [Outbox] processQueue run=16244E96 event=poll_ready tx=48164F62 serverTx=tx-pending-throw
+2026-02-19 22:56:13.494118-0800 SolMobile[91543:12584927] [Outbox] processQueue run=16244E96 event=poll_failed tx=48164F62 err=httpStatus(SolMobile.HTTPErrorInfo(code: 503, body: "unavailable", headers: [:], finalURL: nil, redirectChain: []))
+2026-02-19 22:56:13.494952-0800 SolMobile[91543:12584927] [Outbox] processQueue run=16244E96 event=status tx=48164F62 to=pending reason=poll_failed
+2026-02-19 22:56:13.497355-0800 SolMobile[91543:12584927] [Outbox] processQueue run=16244E96 event=poll_backoff tx=48164F62 waitSec=2.000000 nextAt=10:56:15 PM
+2026-02-19 22:56:13.497461-0800 SolMobile[91543:12584927] [Outbox] processQueue run=16244E96 event=end
+Test Case '-[SolMobileTests.TransmissionActionsPollingTests test_pending202_poll_throw_requeues_and_records_failed_attempt]' passed (0.020 seconds).
+Test Case '-[SolMobileTests.TransmissionActionsPollingTests test_pending202_poll_transient_error_recovers_and_completes]' started.
+2026-02-19 22:56:13.505441-0800 SolMobile[91543:12584927] [Outbox] enqueueChat thread=6D3C923C msg=4357B573 shouldFail=false
+2026-02-19 22:56:13.505552-0800 SolMobile[91543:12584927] [Outbox] enqueueChat packet=ADE60C84 type=chat
+2026-02-19 22:56:13.505624-0800 SolMobile[91543:12584927] [Outbox] enqueueChat tx=4F6DAC39 status=queued
+2026-02-19 22:56:13.507050-0800 SolMobile[91543:12584927] [Outbox] processQueue run=561DA581 event=start
+2026-02-19 22:56:13.507564-0800 SolMobile[91543:12584927] [Outbox] processQueue run=561DA581 event=queued_count count=1
+2026-02-19 22:56:13.507977-0800 SolMobile[91543:12584927] [Outbox] processQueue run=561DA581 event=selected tx=4F6DAC39 packet=ADE60C84 type=chat thread=6D3C923C
+2026-02-19 22:56:13.508332-0800 SolMobile[91543:12584927] [Outbox] processQueue run=561DA581 event=status tx=4F6DAC39 to=sending
+2026-02-19 22:56:13.508392-0800 SolMobile[91543:12584927] [Outbox] processQueue run=561DA581 event=send tx=4F6DAC39
+2026-02-19 22:56:13.508439-0800 SolMobile[91543:12584927] [Outbox] processQueue run=561DA581 event=transport_ok tx=4F6DAC39 http=202 pending=true ms=0.2
+2026-02-19 22:56:13.509034-0800 SolMobile[91543:12584927] [Outbox] processQueue run=561DA581 event=status tx=4F6DAC39 to=pending reason=pending
+2026-02-19 22:56:13.510281-0800 SolMobile[91543:12584927] [Outbox] processQueue run=561DA581 event=poll_ready tx=4F6DAC39 serverTx=tx-pending-transient
+2026-02-19 22:56:13.510708-0800 SolMobile[91543:12584927] [Outbox] processQueue run=561DA581 event=poll_failed tx=4F6DAC39 err=httpStatus(SolMobile.HTTPErrorInfo(code: 503, body: "unavailable", headers: [:], finalURL: nil, redirectChain: []))
+2026-02-19 22:56:13.511048-0800 SolMobile[91543:12584927] [Outbox] processQueue run=561DA581 event=status tx=4F6DAC39 to=pending reason=poll_failed
+2026-02-19 22:56:13.512563-0800 SolMobile[91543:12584927] [Outbox] processQueue run=561DA581 event=poll_backoff tx=4F6DAC39 waitSec=2.000000 nextAt=10:56:15 PM
+2026-02-19 22:56:13.512633-0800 SolMobile[91543:12584927] [Outbox] processQueue run=561DA581 event=end
+2026-02-19 22:56:13.513279-0800 SolMobile[91543:12584927] [Outbox] processQueue run=447F1CF4 event=start
+2026-02-19 22:56:13.514061-0800 SolMobile[91543:12584927] [Outbox] processQueue run=447F1CF4 event=poll_ready tx=4F6DAC39 serverTx=tx-pending-transient
+2026-02-19 22:56:13.515637-0800 SolMobile[91543:12584927] [Outbox] processQueue event=tx_delivered tx=4F6DAC39 reason=assistant_appended
+2026-02-19 22:56:13.518893-0800 SolMobile[91543:12584927] [Outbox] processQueue run=447F1CF4 event=assistant_appended tx=4F6DAC39 via=poll
+2026-02-19 22:56:13.519035-0800 SolMobile[91543:12584927] [Outbox] processQueue run=447F1CF4 event=status tx=4F6DAC39 to=succeeded reason=poll_complete
+2026-02-19 22:56:13.520692-0800 SolMobile[91543:12584927] [Outbox] processQueue run=447F1CF4 event=queued_count count=0
+2026-02-19 22:56:13.520825-0800 SolMobile[91543:12584927] [Outbox] processQueue run=447F1CF4 event=empty
+2026-02-19 22:56:13.520973-0800 SolMobile[91543:12584927] [Outbox] processQueue run=447F1CF4 event=end
+Test Case '-[SolMobileTests.TransmissionActionsPollingTests test_pending202_poll_transient_error_recovers_and_completes]' passed (0.023 seconds).
+Test Case '-[SolMobileTests.TransmissionActionsPollingTests test_pending202_then_poll_completes_and_appends_assistant]' started.
+2026-02-19 22:56:13.528011-0800 SolMobile[91543:12584927] [Outbox] enqueueChat thread=FE23FC40 msg=6B0EC9D5 shouldFail=false
+2026-02-19 22:56:13.528118-0800 SolMobile[91543:12584927] [Outbox] enqueueChat packet=D7B0EDFA type=chat
+2026-02-19 22:56:13.528201-0800 SolMobile[91543:12584927] [Outbox] enqueueChat tx=59CD6358 status=queued
+2026-02-19 22:56:13.529430-0800 SolMobile[91543:12584927] [Outbox] processQueue run=6D1FA940 event=start
+2026-02-19 22:56:13.529824-0800 SolMobile[91543:12584927] [Outbox] processQueue run=6D1FA940 event=queued_count count=1
+2026-02-19 22:56:13.530188-0800 SolMobile[91543:12584927] [Outbox] processQueue run=6D1FA940 event=selected tx=59CD6358 packet=D7B0EDFA type=chat thread=FE23FC40
+2026-02-19 22:56:13.530411-0800 SolMobile[91543:12584927] [Outbox] processQueue run=6D1FA940 event=status tx=59CD6358 to=sending
+2026-02-19 22:56:13.530454-0800 SolMobile[91543:12584927] [Outbox] processQueue run=6D1FA940 event=send tx=59CD6358
+2026-02-19 22:56:13.530503-0800 SolMobile[91543:12584927] [Outbox] processQueue run=6D1FA940 event=transport_ok tx=59CD6358 http=202 pending=true ms=0.2
+2026-02-19 22:56:13.531031-0800 SolMobile[91543:12584927] [Outbox] processQueue run=6D1FA940 event=status tx=59CD6358 to=pending reason=pending
+2026-02-19 22:56:13.532098-0800 SolMobile[91543:12584927] [Outbox] processQueue run=6D1FA940 event=poll_ready tx=59CD6358 serverTx=tx-pending-1
+2026-02-19 22:56:13.533483-0800 SolMobile[91543:12584927] [Outbox] processQueue event=tx_delivered tx=59CD6358 reason=assistant_appended
+2026-02-19 22:56:13.533771-0800 SolMobile[91543:12584927] [Outbox] processQueue run=6D1FA940 event=assistant_appended tx=59CD6358 via=poll
+2026-02-19 22:56:13.533817-0800 SolMobile[91543:12584927] [Outbox] processQueue run=6D1FA940 event=status tx=59CD6358 to=succeeded reason=poll_complete
+2026-02-19 22:56:13.535190-0800 SolMobile[91543:12584927] [Outbox] processQueue run=6D1FA940 event=end
+Test Case '-[SolMobileTests.TransmissionActionsPollingTests test_pending202_then_poll_completes_and_appends_assistant]' passed (0.014 seconds).
+Test Case '-[SolMobileTests.TransmissionActionsPollingTests test_pending202_withoutPollingCapability_marks_failed_on_second_pass]' started.
+2026-02-19 22:56:13.542895-0800 SolMobile[91543:12584927] [Outbox] enqueueChat thread=BEF2333E msg=F8255EDC shouldFail=false
+2026-02-19 22:56:13.543006-0800 SolMobile[91543:12584927] [Outbox] enqueueChat packet=4FD93EB8 type=chat
+2026-02-19 22:56:13.543082-0800 SolMobile[91543:12584927] [Outbox] enqueueChat tx=16305990 status=queued
+2026-02-19 22:56:13.544432-0800 SolMobile[91543:12584927] [Outbox] processQueue run=CFB8E313 event=start
+2026-02-19 22:56:13.544883-0800 SolMobile[91543:12584927] [Outbox] processQueue run=CFB8E313 event=queued_count count=1
+2026-02-19 22:56:13.545369-0800 SolMobile[91543:12584927] [Outbox] processQueue run=CFB8E313 event=selected tx=16305990 packet=4FD93EB8 type=chat thread=BEF2333E
+2026-02-19 22:56:13.545656-0800 SolMobile[91543:12584927] [Outbox] processQueue run=CFB8E313 event=status tx=16305990 to=sending
+2026-02-19 22:56:13.545711-0800 SolMobile[91543:12584927] [Outbox] processQueue run=CFB8E313 event=send tx=16305990
+2026-02-19 22:56:13.545777-0800 SolMobile[91543:12584927] [Outbox] processQueue run=CFB8E313 event=transport_ok tx=16305990 http=202 pending=true ms=0.2
+2026-02-19 22:56:13.546499-0800 SolMobile[91543:12584927] [Outbox] processQueue run=CFB8E313 event=status tx=16305990 to=pending reason=pending
+2026-02-19 22:56:13.547871-0800 SolMobile[91543:12584927] [Outbox] processQueue run=CFB8E313 event=poll_ready tx=16305990 serverTx=tx-pending-nopoll
+2026-02-19 22:56:13.548252-0800 SolMobile[91543:12584927] [Outbox] processQueue run=CFB8E313 event=poll_unavailable tx=16305990
+2026-02-19 22:56:13.548763-0800 SolMobile[91543:12584927] [Outbox] processQueue run=CFB8E313 event=end
+Test Case '-[SolMobileTests.TransmissionActionsPollingTests test_pending202_withoutPollingCapability_marks_failed_on_second_pass]' passed (0.013 seconds).
+Test Case '-[SolMobileTests.TransmissionActionsPollingTests test_pending_survives_restart_and_resolves]' started.
+2026-02-19 22:56:13.555142-0800 SolMobile[91543:12584927] [Outbox] enqueueChat thread=6E6DA4E7 msg=A26525D6 shouldFail=false
+2026-02-19 22:56:13.555217-0800 SolMobile[91543:12584927] [Outbox] enqueueChat packet=93948018 type=chat
+2026-02-19 22:56:13.555280-0800 SolMobile[91543:12584927] [Outbox] enqueueChat tx=7B58EDFF status=queued
+2026-02-19 22:56:13.556458-0800 SolMobile[91543:12584927] [Outbox] processQueue run=7217F1C3 event=start
+2026-02-19 22:56:13.556859-0800 SolMobile[91543:12584927] [Outbox] processQueue run=7217F1C3 event=queued_count count=1
+2026-02-19 22:56:13.557274-0800 SolMobile[91543:12584927] [Outbox] processQueue run=7217F1C3 event=selected tx=7B58EDFF packet=93948018 type=chat thread=6E6DA4E7
+2026-02-19 22:56:13.557491-0800 SolMobile[91543:12584927] [Outbox] processQueue run=7217F1C3 event=status tx=7B58EDFF to=sending
+2026-02-19 22:56:13.557534-0800 SolMobile[91543:12584927] [Outbox] processQueue run=7217F1C3 event=send tx=7B58EDFF
+2026-02-19 22:56:13.557581-0800 SolMobile[91543:12584927] [Outbox] processQueue run=7217F1C3 event=transport_ok tx=7B58EDFF http=202 pending=true ms=0.2
+2026-02-19 22:56:13.558110-0800 SolMobile[91543:12584927] [Outbox] processQueue run=7217F1C3 event=status tx=7B58EDFF to=pending reason=pending
+2026-02-19 22:56:13.559582-0800 SolMobile[91543:12584927] [Outbox] processQueue run=7217F1C3 event=poll_ready tx=7B58EDFF serverTx=tx-pending-still
+2026-02-19 22:56:13.560272-0800 SolMobile[91543:12584927] [Outbox] processQueue run=7217F1C3 event=status tx=7B58EDFF to=pending reason=pending_poll
+2026-02-19 22:56:13.561759-0800 SolMobile[91543:12584927] [Outbox] processQueue run=7217F1C3 event=poll_backoff tx=7B58EDFF waitSec=2.000000 nextAt=10:56:15 PM
+2026-02-19 22:56:13.561844-0800 SolMobile[91543:12584927] [Outbox] processQueue run=7217F1C3 event=end
+2026-02-19 22:56:13.563371-0800 SolMobile[91543:12584927] [Outbox] processQueue run=974CA2A5 event=start
+2026-02-19 22:56:13.564401-0800 SolMobile[91543:12584927] [Outbox] processQueue run=974CA2A5 event=poll_ready tx=7B58EDFF serverTx=tx-pending-still
+2026-02-19 22:56:13.566252-0800 SolMobile[91543:12584927] [Outbox] processQueue event=tx_delivered tx=7B58EDFF reason=assistant_appended
+2026-02-19 22:56:13.566605-0800 SolMobile[91543:12584927] [Outbox] processQueue run=974CA2A5 event=assistant_appended tx=7B58EDFF via=poll
+2026-02-19 22:56:13.566659-0800 SolMobile[91543:12584927] [Outbox] processQueue run=974CA2A5 event=status tx=7B58EDFF to=succeeded reason=poll_complete
+2026-02-19 22:56:13.568266-0800 SolMobile[91543:12584927] [Outbox] processQueue run=974CA2A5 event=queued_count count=0
+2026-02-19 22:56:13.568433-0800 SolMobile[91543:12584927] [Outbox] processQueue run=974CA2A5 event=empty
+2026-02-19 22:56:13.568566-0800 SolMobile[91543:12584927] [Outbox] processQueue run=974CA2A5 event=end
+Test Case '-[SolMobileTests.TransmissionActionsPollingTests test_pending_survives_restart_and_resolves]' passed (0.020 seconds).
+Test Case '-[SolMobileTests.TransmissionActionsPollingTests test_pendingLong_does_not_fail_terminally]' started.
+2026-02-19 22:56:13.577720-0800 SolMobile[91543:12584927] [Outbox] enqueueChat thread=ADFE2296 msg=90B52FFC shouldFail=false
+2026-02-19 22:56:13.577804-0800 SolMobile[91543:12584927] [Outbox] enqueueChat packet=F737CC88 type=chat
+2026-02-19 22:56:13.577889-0800 SolMobile[91543:12584927] [Outbox] enqueueChat tx=F2AD3416 status=queued
+2026-02-19 22:56:13.579523-0800 SolMobile[91543:12584927] [Outbox] processQueue run=BF786164 event=start
+2026-02-19 22:56:13.580125-0800 SolMobile[91543:12584927] [Outbox] processQueue run=BF786164 event=poll_ready tx=F2AD3416 serverTx=tx-pending-still
+2026-02-19 22:56:13.580666-0800 SolMobile[91543:12584927] [Outbox] processQueue run=BF786164 event=status tx=F2AD3416 to=pending reason=pending_poll
+2026-02-19 22:56:13.581640-0800 SolMobile[91543:12584927] [Outbox] processQueue run=BF786164 event=queued_count count=0
+2026-02-19 22:56:13.581755-0800 SolMobile[91543:12584927] [Outbox] processQueue run=BF786164 event=empty
+2026-02-19 22:56:13.582646-0800 SolMobile[91543:12584927] [Outbox] processQueue run=BF786164 event=poll_backoff tx=F2AD3416 waitSec=20.000000 nextAt=10:56:33 PM
+2026-02-19 22:56:13.582744-0800 SolMobile[91543:12584927] [Outbox] processQueue run=BF786164 event=end
+Test Case '-[SolMobileTests.TransmissionActionsPollingTests test_pendingLong_does_not_fail_terminally]' passed (0.014 seconds).
+Test Case '-[SolMobileTests.TransmissionActionsPollingTests test_poll_backoff_allows_after_wait]' started.
+2026-02-19 22:56:13.591575-0800 SolMobile[91543:12584927] [Outbox] processQueue run=314752C7 event=start
+2026-02-19 22:56:13.592224-0800 SolMobile[91543:12584927] [Outbox] processQueue run=314752C7 event=poll_ready tx=707EEE30 serverTx=tx-backoff-ready
+2026-02-19 22:56:13.592914-0800 SolMobile[91543:12584927] [Outbox] processQueue run=314752C7 event=status tx=707EEE30 to=pending reason=pending_poll
+2026-02-19 22:56:13.593716-0800 SolMobile[91543:12584927] [Outbox] processQueue run=314752C7 event=queued_count count=0
+2026-02-19 22:56:13.593818-0800 SolMobile[91543:12584927] [Outbox] processQueue run=314752C7 event=empty
+2026-02-19 22:56:13.594406-0800 SolMobile[91543:12584927] [Outbox] processQueue run=314752C7 event=poll_backoff tx=707EEE30 waitSec=2.000000 nextAt=10:56:15 PM
+2026-02-19 22:56:13.594447-0800 SolMobile[91543:12584927] [Outbox] processQueue run=314752C7 event=end
+Test Case '-[SolMobileTests.TransmissionActionsPollingTests test_poll_backoff_allows_after_wait]' passed (0.012 seconds).
+Test Case '-[SolMobileTests.TransmissionActionsPollingTests test_poll_backoff_skips_when_too_soon]' started.
+2026-02-19 22:56:13.603015-0800 SolMobile[91543:12584927] [Outbox] processQueue run=F8B4C809 event=start
+2026-02-19 22:56:13.603808-0800 SolMobile[91543:12584927] [Outbox] processQueue run=F8B4C809 event=poll_backoff tx=F2190FF6 waitSec=2.000000 nextAt=10:56:15 PM
+2026-02-19 22:56:13.603947-0800 SolMobile[91543:12584927] [Outbox] processQueue run=F8B4C809 event=queued_count count=0
+2026-02-19 22:56:13.604070-0800 SolMobile[91543:12584927] [Outbox] processQueue run=F8B4C809 event=empty
+2026-02-19 22:56:13.604557-0800 SolMobile[91543:12584927] [Outbox] processQueue run=F8B4C809 event=poll_backoff tx=F2190FF6 waitSec=2.000000 nextAt=10:56:15 PM
+2026-02-19 22:56:13.604612-0800 SolMobile[91543:12584927] [Outbox] processQueue run=F8B4C809 event=end
+Test Case '-[SolMobileTests.TransmissionActionsPollingTests test_poll_backoff_skips_when_too_soon]' passed (0.009 seconds).
+Test Case '-[SolMobileTests.TransmissionActionsPollingTests test_send_first_avoids_slow_poll_blocking_send]' started.
+2026-02-19 22:56:13.611860-0800 SolMobile[91543:12584927] [Outbox] enqueueChat thread=FD15233C msg=69946E62 shouldFail=false
+2026-02-19 22:56:13.611967-0800 SolMobile[91543:12584927] [Outbox] enqueueChat packet=F1F4BBD5 type=chat
+2026-02-19 22:56:13.612046-0800 SolMobile[91543:12584927] [Outbox] enqueueChat tx=AB9CC0C2 status=queued
+2026-02-19 22:56:13.614027-0800 SolMobile[91543:12584927] [Outbox] processQueue run=AAEB5FB1 event=start
+2026-02-19 22:56:13.614392-0800 SolMobile[91543:12584927] [Outbox] processQueue run=AAEB5FB1 event=queued_count count=1
+2026-02-19 22:56:13.614783-0800 SolMobile[91543:12584927] [Outbox] processQueue run=AAEB5FB1 event=selected tx=AB9CC0C2 packet=F1F4BBD5 type=chat thread=FD15233C
+2026-02-19 22:56:13.615001-0800 SolMobile[91543:12584927] [Outbox] processQueue run=AAEB5FB1 event=status tx=AB9CC0C2 to=sending
+2026-02-19 22:56:13.615043-0800 SolMobile[91543:12584927] [Outbox] processQueue run=AAEB5FB1 event=send tx=AB9CC0C2
+2026-02-19 22:56:13.615133-0800 SolMobile[91543:12584927] [Outbox] processQueue run=AAEB5FB1 event=transport_ok tx=AB9CC0C2 http=200 pending=false ms=0.2
+2026-02-19 22:56:13.616394-0800 SolMobile[91543:12584927] [Outbox] processQueue event=tx_delivered tx=AB9CC0C2 reason=assistant_appended
+2026-02-19 22:56:13.616712-0800 SolMobile[91543:12584927] [Outbox] processQueue run=AAEB5FB1 event=assistant_appended tx=AB9CC0C2 via=send
+2026-02-19 22:56:13.616758-0800 SolMobile[91543:12584927] [Outbox] processQueue run=AAEB5FB1 event=status tx=AB9CC0C2 to=succeeded
+2026-02-19 22:56:13.618754-0800 SolMobile[91543:12584927] [Outbox] processQueue run=AAEB5FB1 event=poll_ready tx=63DA4FF7 serverTx=tx-slow
+2026-02-19 22:56:13.637957-0800 SolMobile[91543:12585038] [General] Failed to send CA Event for app launch measurements for ca_event_type: 1 event_name: com.apple.app_launch_measurement.ExtendedLaunchMetrics
+2026-02-19 22:56:13.820204-0800 SolMobile[91543:12584927] [Outbox] processQueue run=AAEB5FB1 event=status tx=63DA4FF7 to=pending reason=pending_poll
+2026-02-19 22:56:13.821084-0800 SolMobile[91543:12584927] [Outbox] processQueue run=AAEB5FB1 event=end
+Test Case '-[SolMobileTests.TransmissionActionsPollingTests test_send_first_avoids_slow_poll_blocking_send]' passed (0.216 seconds).
+Test Suite 'TransmissionActionsPollingTests' passed at 2026-02-19 10:56:13.822 PM.
+	 Executed 10 tests, with 0 failures (0 unexpected) in 0.363 (0.366) seconds
+Test Suite 'TransmissionActionsRetryPolicyTests' started at 2026-02-19 10:56:13.822 PM.
+Test Case '-[SolMobileTests.TransmissionActionsRetryPolicyTests test_processQueue_ignores_poll_attempts_for_send_limits]' started.
+2026-02-19 22:56:13.828578-0800 SolMobile[91543:12584927] [Outbox] enqueueChat thread=CC2E9B59 msg=024AEE69 shouldFail=false
+2026-02-19 22:56:13.828702-0800 SolMobile[91543:12584927] [Outbox] enqueueChat packet=3A337CAF type=chat
+2026-02-19 22:56:13.828791-0800 SolMobile[91543:12584927] [Outbox] enqueueChat tx=4363E1D7 status=queued
+2026-02-19 22:56:13.833969-0800 SolMobile[91543:12584927] [Outbox] processQueue run=1E85AF96 event=start
+2026-02-19 22:56:13.834392-0800 SolMobile[91543:12584927] [Outbox] processQueue run=1E85AF96 event=queued_count count=1
+2026-02-19 22:56:13.834893-0800 SolMobile[91543:12584927] [Outbox] processQueue run=1E85AF96 event=selected tx=4363E1D7 packet=3A337CAF type=chat thread=CC2E9B59
+2026-02-19 22:56:13.836382-0800 SolMobile[91543:12584927] [Outbox] processQueue run=1E85AF96 event=status tx=4363E1D7 to=sending
+2026-02-19 22:56:13.836492-0800 SolMobile[91543:12584927] [Outbox] processQueue run=1E85AF96 event=send tx=4363E1D7
+2026-02-19 22:56:13.836607-0800 SolMobile[91543:12584927] [Outbox] processQueue run=1E85AF96 event=transport_ok tx=4363E1D7 http=200 pending=false ms=0.3
+2026-02-19 22:56:13.838034-0800 SolMobile[91543:12584927] [Outbox] processQueue event=tx_delivered tx=4363E1D7 reason=assistant_appended
+2026-02-19 22:56:13.838323-0800 SolMobile[91543:12584927] [Outbox] processQueue run=1E85AF96 event=assistant_appended tx=4363E1D7 via=send
+2026-02-19 22:56:13.838379-0800 SolMobile[91543:12584927] [Outbox] processQueue run=1E85AF96 event=status tx=4363E1D7 to=succeeded
+2026-02-19 22:56:13.840169-0800 SolMobile[91543:12584927] [Outbox] processQueue run=1E85AF96 event=end
+Test Case '-[SolMobileTests.TransmissionActionsRetryPolicyTests test_processQueue_ignores_poll_attempts_for_send_limits]' passed (0.019 seconds).
+Test Case '-[SolMobileTests.TransmissionActionsRetryPolicyTests test_processQueue_maxAttempts_marksFailed_terminal]' started.
+2026-02-19 22:56:13.845576-0800 SolMobile[91543:12584927] [Outbox] enqueueChat thread=264D7C8D msg=88A52A37 shouldFail=false
+2026-02-19 22:56:13.845644-0800 SolMobile[91543:12584927] [Outbox] enqueueChat packet=22A2E829 type=chat
+2026-02-19 22:56:13.845728-0800 SolMobile[91543:12584927] [Outbox] enqueueChat tx=D4FD58A0 status=queued
+2026-02-19 22:56:13.848596-0800 SolMobile[91543:12584927] [Outbox] processQueue run=276038C4 event=start
+2026-02-19 22:56:13.848948-0800 SolMobile[91543:12584927] [Outbox] processQueue run=276038C4 event=queued_count count=1
+2026-02-19 22:56:13.849320-0800 SolMobile[91543:12584927] [Outbox] processQueue run=276038C4 event=selected tx=D4FD58A0 packet=22A2E829 type=chat thread=264D7C8D
+2026-02-19 22:56:13.850275-0800 SolMobile[91543:12584927] [Outbox] processQueue run=276038C4 event=terminal_max_attempts tx=D4FD58A0 attempts=6
+2026-02-19 22:56:13.851158-0800 SolMobile[91543:12584927] [Outbox] processQueue run=276038C4 event=end
+Test Case '-[SolMobileTests.TransmissionActionsRetryPolicyTests test_processQueue_maxAttempts_marksFailed_terminal]' passed (0.011 seconds).
+Test Case '-[SolMobileTests.TransmissionActionsRetryPolicyTests test_processQueue_respectsBackoff_doesNotSendTooSoon]' started.
+2026-02-19 22:56:13.857334-0800 SolMobile[91543:12584927] [Outbox] enqueueChat thread=80F982CC msg=1365206B shouldFail=false
+2026-02-19 22:56:13.857411-0800 SolMobile[91543:12584927] [Outbox] enqueueChat packet=BDEDD7D1 type=chat
+2026-02-19 22:56:13.857486-0800 SolMobile[91543:12584927] [Outbox] enqueueChat tx=993A4CE8 status=queued
+2026-02-19 22:56:13.859615-0800 SolMobile[91543:12584927] [Outbox] processQueue run=1FC9845C event=start
+2026-02-19 22:56:13.859990-0800 SolMobile[91543:12584927] [Outbox] processQueue run=1FC9845C event=queued_count count=1
+2026-02-19 22:56:13.860367-0800 SolMobile[91543:12584927] [Outbox] processQueue run=1FC9845C event=selected tx=993A4CE8 packet=BDEDD7D1 type=chat thread=80F982CC
+2026-02-19 22:56:13.860567-0800 SolMobile[91543:12584927] [Outbox] processQueue run=1FC9845C event=backoff tx=993A4CE8 waitSec=1.000000 nextAt=10:56:14 PM
+2026-02-19 22:56:13.860680-0800 SolMobile[91543:12584927] [Outbox] processQueue run=1FC9845C event=end
+Test Case '-[SolMobileTests.TransmissionActionsRetryPolicyTests test_processQueue_respectsBackoff_doesNotSendTooSoon]' passed (0.008 seconds).
+Test Case '-[SolMobileTests.TransmissionActionsRetryPolicyTests test_processQueue_respectsRetryAfterHeader]' started.
+2026-02-19 22:56:13.865787-0800 SolMobile[91543:12584927] [Outbox] enqueueChat thread=8299D6F8 msg=C77D2B4E shouldFail=false
+2026-02-19 22:56:13.865864-0800 SolMobile[91543:12584927] [Outbox] enqueueChat packet=EBE8E2EC type=chat
+2026-02-19 22:56:13.865943-0800 SolMobile[91543:12584927] [Outbox] enqueueChat tx=68D2A5CB status=queued
+2026-02-19 22:56:13.868065-0800 SolMobile[91543:12584927] [Outbox] processQueue run=DE91833C event=start
+2026-02-19 22:56:13.868430-0800 SolMobile[91543:12584927] [Outbox] processQueue run=DE91833C event=queued_count count=1
+2026-02-19 22:56:13.868814-0800 SolMobile[91543:12584927] [Outbox] processQueue run=DE91833C event=selected tx=68D2A5CB packet=EBE8E2EC type=chat thread=8299D6F8
+2026-02-19 22:56:13.869868-0800 SolMobile[91543:12584927] [Outbox] processQueue run=DE91833C event=backoff tx=68D2A5CB waitSec=60.000000 nextAt=10:57:13 PM
+2026-02-19 22:56:13.870149-0800 SolMobile[91543:12584927] [Outbox] processQueue run=DE91833C event=end
+Test Case '-[SolMobileTests.TransmissionActionsRetryPolicyTests test_processQueue_respectsRetryAfterHeader]' passed (0.009 seconds).
+Test Case '-[SolMobileTests.TransmissionActionsRetryPolicyTests test_requestId_stays_stable_across_retries]' started.
+2026-02-19 22:56:13.876828-0800 SolMobile[91543:12584927] [Outbox] enqueueChat thread=62D435B5 msg=B2F65320 shouldFail=false
+2026-02-19 22:56:13.876945-0800 SolMobile[91543:12584927] [Outbox] enqueueChat packet=96CA8E58 type=chat
+2026-02-19 22:56:13.877044-0800 SolMobile[91543:12584927] [Outbox] enqueueChat tx=34430F46 status=queued
+2026-02-19 22:56:13.878414-0800 SolMobile[91543:12584927] [Outbox] processQueue run=BB57C9FE event=start
+2026-02-19 22:56:13.878928-0800 SolMobile[91543:12584927] [Outbox] processQueue run=BB57C9FE event=queued_count count=1
+2026-02-19 22:56:13.879372-0800 SolMobile[91543:12584927] [Outbox] processQueue run=BB57C9FE event=selected tx=34430F46 packet=96CA8E58 type=chat thread=62D435B5
+2026-02-19 22:56:13.879695-0800 SolMobile[91543:12584927] [Outbox] processQueue run=BB57C9FE event=status tx=34430F46 to=sending
+2026-02-19 22:56:13.879747-0800 SolMobile[91543:12584927] [Outbox] processQueue run=BB57C9FE event=send tx=34430F46
+2026-02-19 22:56:13.879874-0800 SolMobile[91543:12584927] [Outbox] processQueue run=BB57C9FE event=transport_failed tx=34430F46 ms=0.2 err=httpStatus(SolMobile.HTTPErrorInfo(code: 500, body: "boom", headers: [:], finalURL: nil, redirectChain: []))
+2026-02-19 22:56:13.880226-0800 SolMobile[91543:12584927] [Outbox] processQueue run=BB57C9FE event=status tx=34430F46 to=queued http=500
+2026-02-19 22:56:13.881111-0800 SolMobile[91543:12584927] [Outbox] processQueue run=BB57C9FE event=end
+2026-02-19 22:56:13.881833-0800 SolMobile[91543:12584927] [Outbox] processQueue run=9A44C630 event=start
+2026-02-19 22:56:13.882194-0800 SolMobile[91543:12584927] [Outbox] processQueue run=9A44C630 event=queued_count count=1
+2026-02-19 22:56:13.882683-0800 SolMobile[91543:12584927] [Outbox] processQueue run=9A44C630 event=selected tx=34430F46 packet=96CA8E58 type=chat thread=62D435B5
+2026-02-19 22:56:13.883124-0800 SolMobile[91543:12584927] [Outbox] processQueue run=9A44C630 event=status tx=34430F46 to=sending
+2026-02-19 22:56:13.883180-0800 SolMobile[91543:12584927] [Outbox] processQueue run=9A44C630 event=send tx=34430F46
+2026-02-19 22:56:13.883232-0800 SolMobile[91543:12584927] [Outbox] processQueue run=9A44C630 event=transport_ok tx=34430F46 http=200 pending=false ms=0.2
+2026-02-19 22:56:13.884541-0800 SolMobile[91543:12584927] [Outbox] processQueue event=tx_delivered tx=34430F46 reason=assistant_appended
+2026-02-19 22:56:13.884784-0800 SolMobile[91543:12584927] [Outbox] processQueue run=9A44C630 event=assistant_appended tx=34430F46 via=send
+2026-02-19 22:56:13.884822-0800 SolMobile[91543:12584927] [Outbox] processQueue run=9A44C630 event=status tx=34430F46 to=succeeded
+2026-02-19 22:56:13.886337-0800 SolMobile[91543:12584927] [Outbox] processQueue run=9A44C630 event=end
+Test Case '-[SolMobileTests.TransmissionActionsRetryPolicyTests test_requestId_stays_stable_across_retries]' passed (0.016 seconds).
+Test Case '-[SolMobileTests.TransmissionActionsRetryPolicyTests test_retryFailed_persists_changes_on_reload]' started.
+2026-02-19 22:56:13.891986-0800 SolMobile[91543:12584927] [Outbox] enqueueChat thread=39F739B2 msg=6F402546 shouldFail=false
+2026-02-19 22:56:13.892065-0800 SolMobile[91543:12584927] [Outbox] enqueueChat packet=291871D6 type=chat
+2026-02-19 22:56:13.892131-0800 SolMobile[91543:12584927] [Outbox] enqueueChat tx=CF3B9706 status=queued
+2026-02-19 22:56:13.893820-0800 SolMobile[91543:12584927] [Outbox] retryFailed event=start
+2026-02-19 22:56:13.893993-0800 SolMobile[91543:12584927] [Outbox] retryFailed event=failed_count count=1
+2026-02-19 22:56:13.894168-0800 SolMobile[91543:12584927] [Outbox] retryFailed event=tx tx=CF3B9706 packetType=chat
+2026-02-19 22:56:13.894212-0800 SolMobile[91543:12584927] [Outbox] retryFailed event=status tx=CF3B9706 to=queued
+2026-02-19 22:56:13.894554-0800 SolMobile[91543:12584927] [Outbox] retryFailed event=end
+Test Case '-[SolMobileTests.TransmissionActionsRetryPolicyTests test_retryFailed_persists_changes_on_reload]' passed (0.008 seconds).
+Test Suite 'TransmissionActionsRetryPolicyTests' passed at 2026-02-19 10:56:13.895 PM.
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.071 (0.073) seconds
+Test Suite 'TransmissionActionsTests' started at 2026-02-19 10:56:13.896 PM.
+Test Case '-[SolMobileTests.TransmissionActionsTests test_blockedState_preventsSend]' started.
+2026-02-19 22:56:13.902259-0800 SolMobile[91543:12584927] [Outbox] enqueueChat thread=2C3F232A msg=00CF2F02 shouldFail=false
+2026-02-19 22:56:13.902389-0800 SolMobile[91543:12584927] [Outbox] enqueueChat packet=DE76717A type=chat
+2026-02-19 22:56:13.902461-0800 SolMobile[91543:12584927] [Outbox] enqueueChat tx=704F8435 status=queued
+2026-02-19 22:56:13.903762-0800 SolMobile[91543:12584927] [Outbox] processQueue run=B1F66BE8 event=start
+2026-02-19 22:56:13.904193-0800 SolMobile[91543:12584927] [Outbox] processQueue run=B1F66BE8 event=queued_count count=1
+2026-02-19 22:56:13.904571-0800 SolMobile[91543:12584927] [Outbox] processQueue run=B1F66BE8 event=selected tx=704F8435 packet=DE76717A type=chat thread=2C3F232A
+2026-02-19 22:56:13.904957-0800 SolMobile[91543:12584927] [Outbox] processQueue run=B1F66BE8 event=budget_blocked tx=704F8435
+2026-02-19 22:56:13.905744-0800 SolMobile[91543:12584927] [Outbox] processQueue run=B1F66BE8 event=end
+Test Case '-[SolMobileTests.TransmissionActionsTests test_blockedState_preventsSend]' passed (0.011 seconds).
+Test Case '-[SolMobileTests.TransmissionActionsTests test_blockedUntil_past_unblocks]' started.
+2026-02-19 22:56:13.914280-0800 SolMobile[91543:12584927] [BudgetStore] budget block expired
+Test Case '-[SolMobileTests.TransmissionActionsTests test_blockedUntil_past_unblocks]' passed (0.010 seconds).
+Test Case '-[SolMobileTests.TransmissionActionsTests test_budgetExceeded_blocksAndPersists]' started.
+2026-02-19 22:56:13.924513-0800 SolMobile[91543:12584927] [Outbox] enqueueChat thread=B4A0E0BE msg=218CFF92 shouldFail=false
+2026-02-19 22:56:13.924616-0800 SolMobile[91543:12584927] [Outbox] enqueueChat packet=880CDB6C type=chat
+2026-02-19 22:56:13.924700-0800 SolMobile[91543:12584927] [Outbox] enqueueChat tx=8E885875 status=queued
+2026-02-19 22:56:13.926032-0800 SolMobile[91543:12584927] [Outbox] processQueue run=6D44E498 event=start
+2026-02-19 22:56:13.926468-0800 SolMobile[91543:12584927] [Outbox] processQueue run=6D44E498 event=queued_count count=1
+2026-02-19 22:56:13.926877-0800 SolMobile[91543:12584927] [Outbox] processQueue run=6D44E498 event=selected tx=8E885875 packet=880CDB6C type=chat thread=B4A0E0BE
+2026-02-19 22:56:13.927118-0800 SolMobile[91543:12584927] [Outbox] processQueue run=6D44E498 event=status tx=8E885875 to=sending
+2026-02-19 22:56:13.927222-0800 SolMobile[91543:12584927] [Outbox] processQueue run=6D44E498 event=send tx=8E885875
+2026-02-19 22:56:13.927409-0800 SolMobile[91543:12584927] [Outbox] processQueue run=6D44E498 event=transport_failed tx=8E885875 ms=0.3 err=httpStatus(SolMobile.HTTPErrorInfo(code: 422, body: "{\"error\":\"budget_exceeded\"}", headers: [:], finalURL: nil, redirectChain: []))
+2026-02-19 22:56:13.928891-0800 SolMobile[91543:12584927] [Outbox] processQueue run=6D44E498 event=status tx=8E885875 to=failed http=422
+2026-02-19 22:56:13.930115-0800 SolMobile[91543:12584927] [Outbox] processQueue run=6D44E498 event=end
+Test Case '-[SolMobileTests.TransmissionActionsTests test_budgetExceeded_blocksAndPersists]' passed (0.014 seconds).
+Test Case '-[SolMobileTests.TransmissionActionsTests test_budgetState_persistsAcrossReload]' started.
+Test Case '-[SolMobileTests.TransmissionActionsTests test_budgetState_persistsAcrossReload]' passed (0.007 seconds).
+Test Case '-[SolMobileTests.TransmissionActionsTests test_enqueueChat_skipsWhenMessageMissing]' started.
+2026-02-19 22:56:13.946345-0800 SolMobile[91543:12584927] [Outbox] enqueueChat event=missing_message thread=ED3DAC5D msg=BAE32056
+Test Case '-[SolMobileTests.TransmissionActionsTests test_enqueueChat_skipsWhenMessageMissing]' passed (0.007 seconds).
+Test Case '-[SolMobileTests.TransmissionActionsTests test_memoryDistill_bypassesMissingText_andSends]' started.
+2026-02-19 22:56:13.960790-0800 SolMobile[91543:12584927] [Outbox] enqueue_distill event=created tx=3F7616FE thread=09A3DFE0
+2026-02-19 22:56:13.960900-0800 SolMobile[91543:12584927] [Outbox] processQueue run=D0CBA4C5 event=start
+2026-02-19 22:56:13.961373-0800 SolMobile[91543:12584927] [Outbox] processQueue run=D0CBA4C5 event=queued_count count=1
+2026-02-19 22:56:13.961787-0800 SolMobile[91543:12584927] [Outbox] processQueue run=D0CBA4C5 event=selected tx=3F7616FE packet=FC4F4106 type=memory_distill thread=09A3DFE0
+2026-02-19 22:56:13.962025-0800 SolMobile[91543:12584927] [Outbox] processQueue run=D0CBA4C5 event=status tx=3F7616FE to=sending
+2026-02-19 22:56:13.962101-0800 SolMobile[91543:12584927] [Outbox] processQueue run=D0CBA4C5 event=send_distill tx=3F7616FE
+2026-02-19 22:56:13.962178-0800 SolMobile[91543:12584927] [Outbox] processQueue run=D0CBA4C5 event=transport_ok tx=3F7616FE http=202 pending=true ms=0.2
+2026-02-19 22:56:13.962676-0800 SolMobile[91543:12584927] [Outbox] processQueue run=D0CBA4C5 event=status tx=3F7616FE to=pending reason=pending
+2026-02-19 22:56:13.963947-0800 SolMobile[91543:12584927] [Outbox] processQueue run=D0CBA4C5 event=poll_ready tx=3F7616FE serverTx=tx-distill
+2026-02-19 22:56:13.965721-0800 SolMobile[91543:12584927] [Outbox] processQueue event=tx_delivered tx=3F7616FE reason=assistant_appended
+2026-02-19 22:56:13.966117-0800 SolMobile[91543:12584927] [Outbox] processQueue run=D0CBA4C5 event=assistant_appended tx=3F7616FE via=poll
+2026-02-19 22:56:13.966168-0800 SolMobile[91543:12584927] [Outbox] processQueue run=D0CBA4C5 event=status tx=3F7616FE to=succeeded reason=poll_complete
+2026-02-19 22:56:13.967759-0800 SolMobile[91543:12584927] [Outbox] processQueue run=D0CBA4C5 event=end
+Test Case '-[SolMobileTests.TransmissionActionsTests test_memoryDistill_bypassesMissingText_andSends]' passed (0.021 seconds).
+Test Case '-[SolMobileTests.TransmissionActionsTests test_processQueue_dedupesAssistantByServerMessageId]' started.
+2026-02-19 22:56:13.974347-0800 SolMobile[91543:12584927] [Outbox] enqueueChat thread=81A87EC0 msg=0C67D2AE shouldFail=false
+2026-02-19 22:56:13.974451-0800 SolMobile[91543:12584927] [Outbox] enqueueChat packet=1878A939 type=chat
+2026-02-19 22:56:13.974537-0800 SolMobile[91543:12584927] [Outbox] enqueueChat tx=17473D40 status=queued
+2026-02-19 22:56:13.975906-0800 SolMobile[91543:12584927] [Outbox] processQueue run=80A41AFD event=start
+2026-02-19 22:56:13.976326-0800 SolMobile[91543:12584927] [Outbox] processQueue run=80A41AFD event=queued_count count=1
+2026-02-19 22:56:13.976778-0800 SolMobile[91543:12584927] [Outbox] processQueue run=80A41AFD event=selected tx=17473D40 packet=1878A939 type=chat thread=81A87EC0
+2026-02-19 22:56:13.977018-0800 SolMobile[91543:12584927] [Outbox] processQueue run=80A41AFD event=status tx=17473D40 to=sending
+2026-02-19 22:56:13.977063-0800 SolMobile[91543:12584927] [Outbox] processQueue run=80A41AFD event=send tx=17473D40
+2026-02-19 22:56:13.977105-0800 SolMobile[91543:12584927] [Outbox] processQueue run=80A41AFD event=transport_ok tx=17473D40 http=200 pending=false ms=0.2
+2026-02-19 22:56:13.978327-0800 SolMobile[91543:12584927] [Outbox] processQueue event=tx_delivered tx=17473D40 reason=dedupe_existing
+2026-02-19 22:56:13.978376-0800 SolMobile[91543:12584927] [Outbox] processQueue run=80A41AFD event=assistant_dedupe tx=17473D40 via=send
+2026-02-19 22:56:13.978417-0800 SolMobile[91543:12584927] [Outbox] processQueue run=80A41AFD event=status tx=17473D40 to=succeeded
+2026-02-19 22:56:13.979861-0800 SolMobile[91543:12584927] [Outbox] processQueue run=80A41AFD event=end
+Test Case '-[SolMobileTests.TransmissionActionsTests test_processQueue_dedupesAssistantByServerMessageId]' passed (0.011 seconds).
+Test Case '-[SolMobileTests.TransmissionActionsTests test_processQueue_http500_requeues_recordsAttempt_andDoesNotAppendAssistant]' started.
+2026-02-19 22:56:13.985570-0800 SolMobile[91543:12584927] [Outbox] enqueueChat thread=1FFB4DD4 msg=1861D788 shouldFail=false
+2026-02-19 22:56:13.985646-0800 SolMobile[91543:12584927] [Outbox] enqueueChat packet=79986738 type=chat
+2026-02-19 22:56:13.985720-0800 SolMobile[91543:12584927] [Outbox] enqueueChat tx=46E67AC2 status=queued
+2026-02-19 22:56:13.988302-0800 SolMobile[91543:12584927] [Outbox] processQueue run=430236A1 event=start
+2026-02-19 22:56:13.988904-0800 SolMobile[91543:12584927] [Outbox] processQueue run=430236A1 event=queued_count count=1
+2026-02-19 22:56:13.989303-0800 SolMobile[91543:12584927] [Outbox] processQueue run=430236A1 event=selected tx=46E67AC2 packet=79986738 type=chat thread=1FFB4DD4
+2026-02-19 22:56:13.989545-0800 SolMobile[91543:12584927] [Outbox] processQueue run=430236A1 event=status tx=46E67AC2 to=sending
+2026-02-19 22:56:13.989606-0800 SolMobile[91543:12584927] [Outbox] processQueue run=430236A1 event=send tx=46E67AC2
+2026-02-19 22:56:13.989761-0800 SolMobile[91543:12584927] [Outbox] processQueue run=430236A1 event=transport_failed tx=46E67AC2 ms=0.3 err=httpStatus(SolMobile.HTTPErrorInfo(code: 500, body: "boom", headers: [:], finalURL: nil, redirectChain: []))
+2026-02-19 22:56:13.990093-0800 SolMobile[91543:12584927] [Outbox] processQueue run=430236A1 event=status tx=46E67AC2 to=queued http=500
+2026-02-19 22:56:13.990932-0800 SolMobile[91543:12584927] [Outbox] processQueue run=430236A1 event=end
+Test Case '-[SolMobileTests.TransmissionActionsTests test_processQueue_http500_requeues_recordsAttempt_andDoesNotAppendAssistant]' passed (0.011 seconds).
+Test Case '-[SolMobileTests.TransmissionActionsTests test_processQueue_success_marksSucceeded_andAppendsAssistant]' started.
+2026-02-19 22:56:13.997622-0800 SolMobile[91543:12584927] [Outbox] enqueueChat thread=56B5A431 msg=E7B2C238 shouldFail=false
+2026-02-19 22:56:13.997717-0800 SolMobile[91543:12584927] [Outbox] enqueueChat packet=19B07C47 type=chat
+2026-02-19 22:56:13.997796-0800 SolMobile[91543:12584927] [Outbox] enqueueChat tx=37384F72 status=queued
+2026-02-19 22:56:13.999227-0800 SolMobile[91543:12584927] [Outbox] processQueue run=F640DB28 event=start
+2026-02-19 22:56:13.999653-0800 SolMobile[91543:12584927] [Outbox] processQueue run=F640DB28 event=queued_count count=1
+2026-02-19 22:56:14.000049-0800 SolMobile[91543:12584927] [Outbox] processQueue run=F640DB28 event=selected tx=37384F72 packet=19B07C47 type=chat thread=56B5A431
+2026-02-19 22:56:14.000283-0800 SolMobile[91543:12584927] [Outbox] processQueue run=F640DB28 event=status tx=37384F72 to=sending
+2026-02-19 22:56:14.000326-0800 SolMobile[91543:12584927] [Outbox] processQueue run=F640DB28 event=send tx=37384F72
+2026-02-19 22:56:14.000368-0800 SolMobile[91543:12584927] [Outbox] processQueue run=F640DB28 event=transport_ok tx=37384F72 http=200 pending=false ms=0.2
+2026-02-19 22:56:14.001650-0800 SolMobile[91543:12584927] [Outbox] processQueue event=tx_delivered tx=37384F72 reason=assistant_appended
+2026-02-19 22:56:14.003594-0800 SolMobile[91543:12584927] [Outbox] processQueue run=F640DB28 event=assistant_appended tx=37384F72 via=send
+2026-02-19 22:56:14.003656-0800 SolMobile[91543:12584927] [Outbox] processQueue run=F640DB28 event=status tx=37384F72 to=succeeded
+2026-02-19 22:56:14.004219-0800 SolMobile[91543:12584927] [Outbox] processQueue run=F640DB28 event=end
+Test Case '-[SolMobileTests.TransmissionActionsTests test_processQueue_success_marksSucceeded_andAppendsAssistant]' passed (0.013 seconds).
+Test Case '-[SolMobileTests.TransmissionActionsTests test_retryFailed_flipsChatFailToChat_requeues_andThenSucceeds]' started.
+2026-02-19 22:56:14.011028-0800 SolMobile[91543:12584927] [Outbox] enqueueChat thread=F6825053 msg=A6E68AB7 shouldFail=true
+2026-02-19 22:56:14.011118-0800 SolMobile[91543:12584927] [Outbox] enqueueChat packet=F11C5D39 type=chat_fail
+2026-02-19 22:56:14.011195-0800 SolMobile[91543:12584927] [Outbox] enqueueChat tx=508499CA status=queued
+2026-02-19 22:56:14.012453-0800 SolMobile[91543:12584927] [Outbox] processQueue run=374C2177 event=start
+2026-02-19 22:56:14.012901-0800 SolMobile[91543:12584927] [Outbox] processQueue run=374C2177 event=queued_count count=1
+2026-02-19 22:56:14.013305-0800 SolMobile[91543:12584927] [Outbox] processQueue run=374C2177 event=selected tx=508499CA packet=F11C5D39 type=chat_fail thread=F6825053
+2026-02-19 22:56:14.013549-0800 SolMobile[91543:12584927] [Outbox] processQueue run=374C2177 event=status tx=508499CA to=sending
+2026-02-19 22:56:14.013602-0800 SolMobile[91543:12584927] [Outbox] processQueue run=374C2177 event=send tx=508499CA
+2026-02-19 22:56:14.013759-0800 SolMobile[91543:12584927] [Outbox] processQueue run=374C2177 event=transport_failed tx=508499CA ms=0.3 err=httpStatus(SolMobile.HTTPErrorInfo(code: 422, body: "{\"error\":\"driver_block_enforcement_failed\"}", headers: [:], finalURL: nil, redirectChain: []))
+2026-02-19 22:56:14.014100-0800 SolMobile[91543:12584927] [Outbox] processQueue run=374C2177 event=status tx=508499CA to=failed http=422
+2026-02-19 22:56:14.014932-0800 SolMobile[91543:12584927] [Outbox] processQueue run=374C2177 event=end
+2026-02-19 22:56:14.015271-0800 SolMobile[91543:12584927] [Outbox] retryFailed event=start
+2026-02-19 22:56:14.015448-0800 SolMobile[91543:12584927] [Outbox] retryFailed event=failed_count count=1
+2026-02-19 22:56:14.015608-0800 SolMobile[91543:12584927] [Outbox] retryFailed event=tx tx=508499CA packetType=chat_fail
+2026-02-19 22:56:14.015657-0800 SolMobile[91543:12584927] [Outbox] retryFailed event=flip_one_shot tx=508499CA from=chat_fail to=chat
+2026-02-19 22:56:14.015731-0800 SolMobile[91543:12584927] [Outbox] retryFailed event=status tx=508499CA to=queued
+2026-02-19 22:56:14.016281-0800 SolMobile[91543:12584927] [Outbox] retryFailed event=end
+2026-02-19 22:56:14.017056-0800 SolMobile[91543:12584927] [Outbox] processQueue run=3827E495 event=start
+2026-02-19 22:56:14.017445-0800 SolMobile[91543:12584927] [Outbox] processQueue run=3827E495 event=queued_count count=1
+2026-02-19 22:56:14.017814-0800 SolMobile[91543:12584927] [Outbox] processQueue run=3827E495 event=selected tx=508499CA packet=F11C5D39 type=chat thread=F6825053
+2026-02-19 22:56:14.018231-0800 SolMobile[91543:12584927] [Outbox] processQueue run=3827E495 event=status tx=508499CA to=sending
+2026-02-19 22:56:14.018288-0800 SolMobile[91543:12584927] [Outbox] processQueue run=3827E495 event=send tx=508499CA
+2026-02-19 22:56:14.018396-0800 SolMobile[91543:12584927] [Outbox] processQueue run=3827E495 event=transport_ok tx=508499CA http=200 pending=false ms=0.2
+2026-02-19 22:56:14.019667-0800 SolMobile[91543:12584927] [Outbox] processQueue event=tx_delivered tx=508499CA reason=assistant_appended
+2026-02-19 22:56:14.019996-0800 SolMobile[91543:12584927] [Outbox] processQueue run=3827E495 event=assistant_appended tx=508499CA via=send
+2026-02-19 22:56:14.020042-0800 SolMobile[91543:12584927] [Outbox] processQueue run=3827E495 event=status tx=508499CA to=succeeded
+2026-02-19 22:56:14.021446-0800 SolMobile[91543:12584927] [Outbox] processQueue run=3827E495 event=end
+Test Case '-[SolMobileTests.TransmissionActionsTests test_retryFailed_flipsChatFailToChat_requeues_andThenSucceeds]' passed (0.017 seconds).
+Test Case '-[SolMobileTests.TransmissionActionsTests test_staleSending_requeues_and_sends]' started.
+2026-02-19 22:56:14.028705-0800 SolMobile[91543:12584927] [Outbox] processQueue run=0EF10C78 event=start
+2026-02-19 22:56:14.029007-0800 SolMobile[91543:12584927] [Outbox] processQueue run=0EF10C78 event=sending_recovered tx=C2A486AE
+2026-02-19 22:56:14.029644-0800 SolMobile[91543:12584927] [Outbox] processQueue run=0EF10C78 event=queued_count count=1
+2026-02-19 22:56:14.029888-0800 SolMobile[91543:12584927] [Outbox] processQueue run=0EF10C78 event=selected tx=C2A486AE packet=31C47435 type=chat thread=50B57D37
+2026-02-19 22:56:14.030115-0800 SolMobile[91543:12584927] [Outbox] processQueue run=0EF10C78 event=status tx=C2A486AE to=sending
+2026-02-19 22:56:14.030161-0800 SolMobile[91543:12584927] [Outbox] processQueue run=0EF10C78 event=send tx=C2A486AE
+2026-02-19 22:56:14.030262-0800 SolMobile[91543:12584927] [Outbox] processQueue run=0EF10C78 event=transport_ok tx=C2A486AE http=200 pending=false ms=0.2
+2026-02-19 22:56:14.031413-0800 SolMobile[91543:12584927] [Outbox] processQueue event=tx_delivered tx=C2A486AE reason=assistant_appended
+2026-02-19 22:56:14.031767-0800 SolMobile[91543:12584927] [Outbox] processQueue run=0EF10C78 event=assistant_appended tx=C2A486AE via=send
+2026-02-19 22:56:14.031810-0800 SolMobile[91543:12584927] [Outbox] processQueue run=0EF10C78 event=status tx=C2A486AE to=succeeded
+2026-02-19 22:56:14.033245-0800 SolMobile[91543:12584927] [Outbox] processQueue run=0EF10C78 event=end
+Test Case '-[SolMobileTests.TransmissionActionsTests test_staleSending_requeues_and_sends]' passed (0.011 seconds).
+Test Case '-[SolMobileTests.TransmissionActionsTests test_terminalFailure_doesNotBlockLaterQueued_transmission]' started.
+2026-02-19 22:56:14.039648-0800 SolMobile[91543:12584927] [Outbox] enqueueChat thread=287CAAAE msg=52D94C39 shouldFail=false
+2026-02-19 22:56:14.039751-0800 SolMobile[91543:12584927] [Outbox] enqueueChat packet=569B99B0 type=chat
+2026-02-19 22:56:14.039825-0800 SolMobile[91543:12584927] [Outbox] enqueueChat tx=1BD2FE9E status=queued
+2026-02-19 22:56:14.041696-0800 SolMobile[91543:12584927] [Outbox] enqueueChat thread=287CAAAE msg=4C9E5899 shouldFail=false
+2026-02-19 22:56:14.041753-0800 SolMobile[91543:12584927] [Outbox] enqueueChat packet=61819770 type=chat
+2026-02-19 22:56:14.041861-0800 SolMobile[91543:12584927] [Outbox] enqueueChat tx=B44F1DB8 status=queued
+2026-02-19 22:56:14.043075-0800 SolMobile[91543:12584927] [Outbox] processQueue run=CF75BDB0 event=start
+2026-02-19 22:56:14.043415-0800 SolMobile[91543:12584927] [Outbox] processQueue run=CF75BDB0 event=queued_count count=1
+2026-02-19 22:56:14.043806-0800 SolMobile[91543:12584927] [Outbox] processQueue run=CF75BDB0 event=selected tx=B44F1DB8 packet=61819770 type=chat thread=287CAAAE
+2026-02-19 22:56:14.044063-0800 SolMobile[91543:12584927] [Outbox] processQueue run=CF75BDB0 event=status tx=B44F1DB8 to=sending
+2026-02-19 22:56:14.044120-0800 SolMobile[91543:12584927] [Outbox] processQueue run=CF75BDB0 event=send tx=B44F1DB8
+2026-02-19 22:56:14.044216-0800 SolMobile[91543:12584927] [Outbox] processQueue run=CF75BDB0 event=transport_ok tx=B44F1DB8 http=200 pending=false ms=0.2
+2026-02-19 22:56:14.045424-0800 SolMobile[91543:12584927] [Outbox] processQueue event=tx_delivered tx=B44F1DB8 reason=assistant_appended
+2026-02-19 22:56:14.045745-0800 SolMobile[91543:12584927] [Outbox] processQueue run=CF75BDB0 event=assistant_appended tx=B44F1DB8 via=send
+2026-02-19 22:56:14.045794-0800 SolMobile[91543:12584927] [Outbox] processQueue run=CF75BDB0 event=status tx=B44F1DB8 to=succeeded
+2026-02-19 22:56:14.047436-0800 SolMobile[91543:12584927] [Outbox] processQueue run=CF75BDB0 event=end
+Test Case '-[SolMobileTests.TransmissionActionsTests test_terminalFailure_doesNotBlockLaterQueued_transmission]' passed (0.014 seconds).
+Test Suite 'TransmissionActionsTests' passed at 2026-02-19 10:56:14.049 PM.
+	 Executed 12 tests, with 0 failures (0 unexpected) in 0.149 (0.153) seconds
+Test Suite 'SolMobileTests.xctest' passed at 2026-02-19 10:56:14.049 PM.
+	 Executed 121 tests, with 9 tests skipped and 0 failures (0 unexpected) in 1.144 (1.188) seconds
+Test Suite 'All tests' passed at 2026-02-19 10:56:14.049 PM.
+	 Executed 121 tests, with 9 tests skipped and 0 failures (0 unexpected) in 1.144 (1.189) seconds
+2026-02-19 22:56:14.331 xcodebuild[91277:12582586] [MT] IDETestOperationsObserverDebug: 21.550 elapsed -- Testing started completed.
+2026-02-19 22:56:14.331 xcodebuild[91277:12582586] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-02-19 22:56:14.331 xcodebuild[91277:12582586] [MT] IDETestOperationsObserverDebug: 21.550 sec, +21.550 sec -- end
+
+Test session results, code coverage, and logs:
+	/Users/jmcnulty25/Library/Developer/Xcode/DerivedData/SolMobile-gvswjyuxhcbcdyedwtgcpsecryok/Logs/Test/Test-SolMobileTests-2026.02.19_10-55-50--0800.xcresult
+
+** TEST SUCCEEDED **
+

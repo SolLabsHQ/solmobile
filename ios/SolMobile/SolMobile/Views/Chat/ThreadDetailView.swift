@@ -2119,7 +2119,7 @@ private struct MessageBubble: View {
 
     private var bubbleStack: some View {
         VStack(alignment: isUser ? .trailing : .leading, spacing: 0) {
-            Text(message.text)
+            messageTextContent
                 .foregroundStyle(isUser ? BrandColors.userBubbleText : BrandColors.assistantBubbleText)
                 .padding(10)
                 .background(bubbleBackground)
@@ -2265,6 +2265,16 @@ private struct MessageBubble: View {
                 }
                 .padding(.horizontal, 10)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var messageTextContent: some View {
+        switch AssistantMarkdownPolicy.renderMode(for: message.creatorType) {
+        case .assistantMarkdown:
+            AssistantMarkdownView(markdown: message.text)
+        case .plainText:
+            Text(message.text)
         }
     }
 
