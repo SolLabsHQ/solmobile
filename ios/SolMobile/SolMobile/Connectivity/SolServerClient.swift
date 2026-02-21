@@ -12,6 +12,15 @@ struct Request: Codable {
     let threadId: String
     let clientRequestId: String
     let message: String
+    let context: RequestContext?
+}
+
+struct RequestContext: Codable {
+    let threadMemento: ThreadMementoDTO
+
+    enum CodingKeys: String, CodingKey {
+        case threadMemento = "thread_memento"
+    }
 }
 
 struct ModeDecision: Codable {
@@ -520,7 +529,14 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision,
         if let simulateStatus {
             req.setValue(String(simulateStatus), forHTTPHeaderField: "x-sol-simulate-status")
         }
-        req.httpBody = try JSONEncoder().encode(Request(threadId: threadId, clientRequestId: clientRequestId, message: message))
+        req.httpBody = try JSONEncoder().encode(
+            Request(
+                threadId: threadId,
+                clientRequestId: clientRequestId,
+                message: message,
+                context: nil
+            )
+        )
 
         let (data, http, responseInfo) = try await requestJSON(req)
         DevTelemetry.persistLastChat(statusCode: http.statusCode, method: req.httpMethod ?? "POST", url: req.url)
@@ -744,7 +760,8 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision,
         let dto = Request(
             threadId: envelope.threadId.uuidString,
             clientRequestId: envelope.requestId,
-            message: envelope.messageText
+            message: envelope.messageText,
+            context: envelope.threadMemento.map { RequestContext(threadMemento: $0) }
         )
         req.httpBody = try JSONEncoder().encode(dto)
 

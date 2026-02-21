@@ -10,20 +10,25 @@ on:
 
 jobs:
   test:
-    runs-on: macos-latest
+    runs-on: macos-15
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Verify PR packet spec lock (if present)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/verify_spec_lock.sh
       
       - name: Setup Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: '15.4'
+          xcode-version: '26.2.0'
       
       - name: Run tests
         run: |
           xcodebuild test \
             -scheme SolMobile \
-            -destination 'platform=iOS Simulator,name=iPhone 15' \
+            -destination 'platform=iOS Simulator,OS=26.2,name=iPhone 17' \
             -project ios/SolMobile/SolMobile.xcodeproj
