@@ -1867,43 +1867,44 @@ final class TransmissionActions {
             sortBy: [SortDescriptor(\Transmission.createdAt, order: .reverse)]
         )
 
-        guard
-            let transmissions = try? modelContext.fetch(descriptor),
-            let source = transmissions.first(where: {
-                $0.serverThreadMementoPayloadJSON?.isEmpty == false
-                || $0.serverThreadMementoSummary?.isEmpty == false
-                || $0.serverThreadMementoId?.isEmpty == false
-            })
-        else {
+        guard let transmissions = try? modelContext.fetch(descriptor) else {
             return nil
         }
 
-        if let payload = source.serverThreadMementoPayloadJSON, !payload.isEmpty {
-            if let data = payload.data(using: .utf8),
-               let decoded = try? JSONDecoder().decode(ThreadMementoDTO.self, from: data) {
-                outboxLog.info("processQueue run=\(runId, privacy: .public) event=memento_context_source tx=\(short(txId), privacy: .public) source=structured_payload_json memento=\(decoded.id, privacy: .public)")
-                return decoded
+        for source in transmissions {
+            let hasContextCandidate =
+                source.serverThreadMementoPayloadJSON?.isEmpty == false
+                || source.serverThreadMementoSummary?.isEmpty == false
+                || source.serverThreadMementoId?.isEmpty == false
+            guard hasContextCandidate else { continue }
+
+            if let payload = source.serverThreadMementoPayloadJSON, !payload.isEmpty {
+                if let data = payload.data(using: .utf8),
+                   let decoded = try? JSONDecoder().decode(ThreadMementoDTO.self, from: data) {
+                    outboxLog.info("processQueue run=\(runId, privacy: .public) event=memento_context_source tx=\(short(txId), privacy: .public) source=structured_payload_json memento=\(decoded.id, privacy: .public)")
+                    return decoded
+                }
+                outboxLog.error("processQueue run=\(runId, privacy: .public) event=memento_context_decode_failed tx=\(short(txId), privacy: .public) source=structured_payload_json")
             }
-            outboxLog.error("processQueue run=\(runId, privacy: .public) event=memento_context_decode_failed tx=\(short(txId), privacy: .public) source=structured_payload_json")
-        }
 
-        if
-            let summary = source.serverThreadMementoSummary,
-            let mementoId = source.serverThreadMementoId,
-            !summary.isEmpty,
-            !mementoId.isEmpty
-        {
-            let createdAt = source.serverThreadMementoCreatedAtISO
-                ?? ISO8601DateFormatter().string(from: source.createdAt)
+            if
+                let summary = source.serverThreadMementoSummary,
+                let mementoId = source.serverThreadMementoId,
+                !summary.isEmpty,
+                !mementoId.isEmpty
+            {
+                let createdAt = source.serverThreadMementoCreatedAtISO
+                    ?? ISO8601DateFormatter().string(from: source.createdAt)
 
-            if let parsed = ThreadMementoFormatter.parseSummary(
-                id: mementoId,
-                threadId: threadId.uuidString,
-                createdAt: createdAt,
-                summary: summary
-            ) {
-                outboxLog.info("processQueue run=\(runId, privacy: .public) event=memento_context_source tx=\(short(txId), privacy: .public) source=summary_parse memento=\(parsed.id, privacy: .public)")
-                return parsed
+                if let parsed = ThreadMementoFormatter.parseSummary(
+                    id: mementoId,
+                    threadId: threadId.uuidString,
+                    createdAt: createdAt,
+                    summary: summary
+                ) {
+                    outboxLog.info("processQueue run=\(runId, privacy: .public) event=memento_context_source tx=\(short(txId), privacy: .public) source=summary_parse memento=\(parsed.id, privacy: .public)")
+                    return parsed
+                }
             }
         }
 

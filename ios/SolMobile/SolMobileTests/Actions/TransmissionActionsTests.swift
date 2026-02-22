@@ -664,4 +664,65 @@ final class TransmissionActionsTests: SwiftDataTestBase {
         let envelope = try XCTUnwrap(capturedEnvelope)
         XCTAssertNil(envelope.threadMemento)
     }
+
+    func test_sendOnce_usesOlderValidMemento_whenLatestCandidateIsMalformed() async throws {
+        let sentEnvelope = CapturedEnvelopeStore()
+        let transport = TestTransport { envelope in
+            await sentEnvelope.set(envelope)
+            return ChatResponse(
+                text: "ok",
+                statusCode: 200,
+                transmissionId: "tx-older-fallback",
+                pending: false,
+                responseInfo: nil,
+                threadMemento: nil,
+                evidenceSummary: nil,
+                evidence: nil,
+                evidenceWarnings: nil,
+                outputEnvelope: nil
+            )
+        }
+
+        let thread = ConversationThread(title: "T1")
+        context.insert(thread)
+
+        let olderPacket = Packet(threadId: thread.id, messageIds: [], messageText: "")
+        context.insert(olderPacket)
+        let olderTx = Transmission(packet: olderPacket)
+        olderTx.status = .succeeded
+        olderTx.createdAt = Date(timeIntervalSince1970: 1_700_000_000)
+        olderTx.serverThreadMementoId = "m-older-valid"
+        olderTx.serverThreadMementoCreatedAtISO = "2026-02-20T00:00:00Z"
+        olderTx.serverThreadMementoPayloadJSON = """
+        {"id":"m-older-valid","threadId":"\(thread.id.uuidString)","createdAt":"2026-02-20T00:00:00Z","version":"memento-v0.2","arc":"Older Valid Arc","active":["carry-this"],"parked":[],"decisions":[],"next":[]}
+        """
+        context.insert(olderTx)
+
+        let latestPacket = Packet(threadId: thread.id, messageIds: [], messageText: "")
+        context.insert(latestPacket)
+        let latestTx = Transmission(packet: latestPacket)
+        latestTx.status = .succeeded
+        latestTx.createdAt = Date(timeIntervalSince1970: 1_800_000_000)
+        latestTx.serverThreadMementoId = "m-latest-bad"
+        latestTx.serverThreadMementoCreatedAtISO = "2026-02-21T00:00:00Z"
+        latestTx.serverThreadMementoPayloadJSON = "{bad-json"
+        latestTx.serverThreadMementoSummary = "not parseable"
+        context.insert(latestTx)
+
+        let user = Message(thread: thread, creatorType: .user, text: "hello")
+        thread.messages.append(user)
+        context.insert(user)
+        try context.save()
+
+        let actions = TransmissionActions(modelContext: context, transport: transport)
+        actions.enqueueChat(thread: thread, userMessage: user)
+        await actions.processQueue()
+
+        let capturedEnvelope = await sentEnvelope.get()
+        let envelope = try XCTUnwrap(capturedEnvelope)
+        let memento = try XCTUnwrap(envelope.threadMemento)
+        XCTAssertEqual(memento.id, "m-older-valid")
+        XCTAssertEqual(memento.arc, "Older Valid Arc")
+        XCTAssertEqual(memento.active, ["carry-this"])
+    }
 }

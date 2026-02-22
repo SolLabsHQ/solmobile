@@ -29,6 +29,6 @@ jobs:
       - name: Run tests
         run: |
           xcodebuild test \
-            -scheme SolMobile \
+            -scheme SolMobileTests \
             -destination 'platform=iOS Simulator,OS=26.2,name=iPhone 17' \
             -project ios/SolMobile/SolMobile.xcodeproj
