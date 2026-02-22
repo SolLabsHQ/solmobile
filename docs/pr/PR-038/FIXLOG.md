@@ -34,3 +34,35 @@ Receipts:
 No gaps detected.
 
 
+### 2026-02-21 21:39 — Builder gates run
+
+- unit: `xcodebuild test -scheme SolMobileTests -destination 'platform=iOS Simulator,name=iPhone 17' -project ios/SolMobile/SolMobile.xcodeproj`
+- lint: `xcodebuild test -scheme SolMobileTests -destination 'platform=iOS Simulator,name=iPhone 17' -project ios/SolMobile/SolMobile.xcodeproj`
+- integration: `xcodebuild test -scheme SolMobileTests -destination 'platform=iOS Simulator,name=iPhone 17' -project ios/SolMobile/SolMobile.xcodeproj`
+
+Results:
+- unit rc: 0
+- lint rc: 0
+- integration rc: 0
+
+Receipts:
+- `receipts/unit.log`
+- `receipts/lint.log`
+- `receipts/integration.log`
+
+## Verifier Report (2026-02-21 21:41)
+- Status: PASS
+- Commands run:
+- unit: `xcodebuild test -scheme SolMobileTests -destination 'platform=iOS Simulator,name=iPhone 17' -project ios/SolMobile/SolMobile.xcodeproj`
+- lint: `xcodebuild test -scheme SolMobileTests -destination 'platform=iOS Simulator,name=iPhone 17' -project ios/SolMobile/SolMobile.xcodeproj`
+- integration: `xcodebuild test -scheme SolMobileTests -destination 'platform=iOS Simulator,name=iPhone 17' -project ios/SolMobile/SolMobile.xcodeproj`
+
+- Results:
+- verify unit rc: 0
+- verify lint rc: 0
+- verify integration rc: 0
+
+- Checklist gaps / notes:
+No gaps detected.
+
+
