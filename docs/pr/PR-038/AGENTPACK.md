@@ -36,8 +36,11 @@ Notes:
 - No API/schema version bump.
 
 ## Acceptance Criteria
-- SolMobile unit tests for precedence + fallback + revoke clearing.
-- Black-box two-turn carry test: stored_latest used on turn B when request memento omitted.
+- Outbound context prefers persisted structured payload and only falls back to summary parse when needed.
+- Outbound send omits `context.thread_memento` safely when neither structured nor parsable summary is available.
+- Malformed structured payload is non-fatal and logs clearly.
+- Revoke/clear operations remove both summary and structured stored representations.
+- `/v1/chat` contract remains unchanged (`memento-v0.2`, no schema bump).
 
 ## Out of Scope
 - infra-docs: update ADR-031 with Addendum A1 and create epic packet files.

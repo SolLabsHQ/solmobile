@@ -18,6 +18,13 @@ if [[ $unit_rc -ne 0 || $lint_rc -ne 0 || $integ_rc -ne 0 ]]; then
   gaps="One or more gates failed in verifier pass. See receipts logs."
 fi
 
+required_unchecked="$(grep -E "^- \[ \].*\(AUTO REQUIRED\)" "$CHECKLIST_PATH" || true)"
+if [[ -n "$required_unchecked" ]]; then
+  status="FAIL"
+  gaps="Unchecked required AUTO checklist items detected:
+$required_unchecked"
+fi
+
 cmds_file="$RECEIPTS_DIR/verifier_cmds.md"
 results_file="$RECEIPTS_DIR/verifier_results.md"
 gaps_file="$RECEIPTS_DIR/verifier_gaps.md"

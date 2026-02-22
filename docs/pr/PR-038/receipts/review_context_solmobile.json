@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-02-22T02:08:03.456215+00:00",
+  "generated_at": "2026-02-22T05:42:14.459559+00:00",
   "epic": "SOLM-EPIC-043",
   "repo": "solmobile",
   "repo_root": "/Users/jmcnulty25/Documents/workspace/projects/SolLabsHQ/solmobile",
@@ -33,11 +33,16 @@
   "canonical": {
     "agentpack_anchor": true,
     "input_anchor": true,
-    "packet_infra_sha": "e65a94613c84132dc72698dcd35bf3778fac628b",
-    "manifest_infra_sha": "e65a94613c84132dc72698dcd35bf3778fac628b",
+    "packet_infra_sha": "c9e113b487b18b658db19bf145632945ba0e613c",
+    "manifest_infra_sha": "c9e113b487b18b658db19bf145632945ba0e613c",
     "infra_sha_match": true,
     "canonical_urls": [
-      "https://github.com/SolLabsHQ/infra-docs/blob/e65a94613c84132dc72698dcd35bf3778fac628b/decisions/ADR-031-threadmemento-v0.2-breakpointengine-context-thread-memento-peak-guardrail.md"
+      "https://github.com/SolLabsHQ/infra-docs/blob/c9e113b487b18b658db19bf145632945ba0e613c/decisions/ADR-031-threadmemento-v0.2-breakpointengine-context-thread-memento-peak-guardrail.md",
+      "https://github.com/SolLabsHQ/infra-docs/blob/c9e113b487b18b658db19bf145632945ba0e613c/codex/epics/SOLM-EPIC-043/AGENTPACK-SOLM-EPIC-043.md",
+      "https://github.com/SolLabsHQ/infra-docs/blob/c9e113b487b18b658db19bf145632945ba0e613c/codex/epics/SOLM-EPIC-043/INPUT-SOLM-EPIC-043.md",
+      "https://github.com/SolLabsHQ/infra-docs/blob/c9e113b487b18b658db19bf145632945ba0e613c/codex/EPIC-042/PR%20%2342%3A%20ThreadMemento%20v0.2%20%26%20Markdown%20Rendering.md",
+      "https://github.com/SolLabsHQ/infra-docs/blob/c9e113b487b18b658db19bf145632945ba0e613c/codex/EPIC-042/AGENTPACK-EPIC-042.md",
+      "https://github.com/SolLabsHQ/infra-docs/blob/c9e113b487b18b658db19bf145632945ba0e613c/codex/EPIC-042/INPUT-EPIC-042.md"
     ]
   },
   "git": {
@@ -70,64 +75,64 @@
       {
         "path": "docs/pr/PR-038/receipts/verify_integration.rc",
         "value": "0",
-        "mtime_utc": "2026-02-22T02:06:06.999872+00:00"
+        "mtime_utc": "2026-02-22T05:41:24.591120+00:00"
       },
       {
         "path": "docs/pr/PR-038/receipts/verify_lint.rc",
         "value": "0",
-        "mtime_utc": "2026-02-22T02:05:44.166810+00:00"
+        "mtime_utc": "2026-02-22T05:40:43.584451+00:00"
       },
       {
         "path": "docs/pr/PR-038/receipts/verify_unit.rc",
         "value": "0",
-        "mtime_utc": "2026-02-22T02:05:20.724397+00:00"
+        "mtime_utc": "2026-02-22T05:40:19.410982+00:00"
       },
       {
         "path": "docs/pr/PR-038/receipts/integration.rc",
         "value": "0",
-        "mtime_utc": "2026-02-22T02:04:57.257533+00:00"
+        "mtime_utc": "2026-02-22T05:39:34.341246+00:00"
       },
       {
         "path": "docs/pr/PR-038/receipts/lint.rc",
         "value": "0",
-        "mtime_utc": "2026-02-22T02:04:32.349777+00:00"
+        "mtime_utc": "2026-02-22T05:39:08.493462+00:00"
       },
       {
         "path": "docs/pr/PR-038/receipts/unit.rc",
         "value": "0",
-        "mtime_utc": "2026-02-22T02:04:06.591314+00:00"
+        "mtime_utc": "2026-02-22T05:38:41.613553+00:00"
       }
     ],
     "log_files": [
       {
         "path": "docs/pr/PR-038/receipts/verify_integration.log",
-        "mtime_utc": "2026-02-22T02:06:03.956746+00:00",
-        "size_bytes": 109580
+        "mtime_utc": "2026-02-22T05:41:21.518274+00:00",
+        "size_bytes": 106504
       },
       {
         "path": "docs/pr/PR-038/receipts/verify_lint.log",
-        "mtime_utc": "2026-02-22T02:05:41.107086+00:00",
-        "size_bytes": 109221
+        "mtime_utc": "2026-02-22T05:40:40.521208+00:00",
+        "size_bytes": 104546
       },
       {
         "path": "docs/pr/PR-038/receipts/verify_unit.log",
-        "mtime_utc": "2026-02-22T02:05:17.671849+00:00",
-        "size_bytes": 109377
+        "mtime_utc": "2026-02-22T05:40:16.342582+00:00",
+        "size_bytes": 109453
       },
       {
         "path": "docs/pr/PR-038/receipts/integration.log",
-        "mtime_utc": "2026-02-22T02:04:54.208586+00:00",
-        "size_bytes": 108960
+        "mtime_utc": "2026-02-22T05:39:31.266083+00:00",
+        "size_bytes": 108149
       },
       {
         "path": "docs/pr/PR-038/receipts/lint.log",
-        "mtime_utc": "2026-02-22T02:04:29.275135+00:00",
-        "size_bytes": 105518
+        "mtime_utc": "2026-02-22T05:39:05.408601+00:00",
+        "size_bytes": 109655
       },
       {
         "path": "docs/pr/PR-038/receipts/unit.log",
-        "mtime_utc": "2026-02-22T02:04:03.401326+00:00",
-        "size_bytes": 300875
+        "mtime_utc": "2026-02-22T05:38:38.394783+00:00",
+        "size_bytes": 175929
       }
     ]
   },

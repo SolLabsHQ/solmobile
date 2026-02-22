@@ -23,6 +23,18 @@ final class TransmissionActionsTests: SwiftDataTestBase {
             value
         }
     }
+
+    private actor CapturedEnvelopeStore {
+        private var envelope: PacketEnvelope?
+
+        func set(_ envelope: PacketEnvelope) {
+            self.envelope = envelope
+        }
+
+        func get() -> PacketEnvelope? {
+            envelope
+        }
+    }
     @MainActor
     private final class TestTransport: ChatTransport {
         private let handler: @Sendable (PacketEnvelope) async throws -> ChatResponse
@@ -494,5 +506,162 @@ final class TransmissionActionsTests: SwiftDataTestBase {
 
         // Assert
         XCTAssertTrue(BudgetStore.shared.state.isBlocked)
+    }
+
+    func test_sendOnce_prefersStructuredThreadMemento_overSummaryFallback() async throws {
+        let sentEnvelope = CapturedEnvelopeStore()
+        let transport = TestTransport { envelope in
+            await sentEnvelope.set(envelope)
+            return ChatResponse(
+                text: "ok",
+                statusCode: 200,
+                transmissionId: "tx-prefer-structured",
+                pending: false,
+                responseInfo: nil,
+                threadMemento: nil,
+                evidenceSummary: nil,
+                evidence: nil,
+                evidenceWarnings: nil,
+                outputEnvelope: nil
+            )
+        }
+
+        let thread = ConversationThread(title: "T1")
+        context.insert(thread)
+
+        let priorPacket = Packet(threadId: thread.id, messageIds: [], messageText: "")
+        context.insert(priorPacket)
+
+        let priorTx = Transmission(packet: priorPacket)
+        priorTx.status = .succeeded
+        priorTx.serverThreadMementoId = "m-structured"
+        priorTx.serverThreadMementoCreatedAtISO = "2026-02-20T00:00:00Z"
+        priorTx.serverThreadMementoSummary = """
+        Arc: Summary Arc
+        Active: summary-active
+        Parked: (none)
+        Decisions: (none)
+        Next: (none)
+        """
+        priorTx.serverThreadMementoPayloadJSON = """
+        {"id":"m-structured","threadId":"\(thread.id.uuidString)","createdAt":"2026-02-20T00:00:00Z","version":"memento-v0.2","arc":"Structured Arc","active":["structured-active"],"parked":[],"decisions":[],"next":[]}
+        """
+        context.insert(priorTx)
+
+        let user = Message(thread: thread, creatorType: .user, text: "hello")
+        thread.messages.append(user)
+        context.insert(user)
+        try context.save()
+
+        let actions = TransmissionActions(modelContext: context, transport: transport)
+        actions.enqueueChat(thread: thread, userMessage: user)
+        await actions.processQueue()
+
+        let capturedEnvelope = await sentEnvelope.get()
+        let envelope = try XCTUnwrap(capturedEnvelope)
+        let memento = try XCTUnwrap(envelope.threadMemento)
+        XCTAssertEqual(memento.arc, "Structured Arc")
+        XCTAssertEqual(memento.active, ["structured-active"])
+    }
+
+    func test_sendOnce_fallsBackToSummary_whenStructuredPayloadMalformed() async throws {
+        let sentEnvelope = CapturedEnvelopeStore()
+        let transport = TestTransport { envelope in
+            await sentEnvelope.set(envelope)
+            return ChatResponse(
+                text: "ok",
+                statusCode: 200,
+                transmissionId: "tx-fallback-summary",
+                pending: false,
+                responseInfo: nil,
+                threadMemento: nil,
+                evidenceSummary: nil,
+                evidence: nil,
+                evidenceWarnings: nil,
+                outputEnvelope: nil
+            )
+        }
+
+        let thread = ConversationThread(title: "T1")
+        context.insert(thread)
+
+        let priorPacket = Packet(threadId: thread.id, messageIds: [], messageText: "")
+        context.insert(priorPacket)
+
+        let priorTx = Transmission(packet: priorPacket)
+        priorTx.status = .succeeded
+        priorTx.serverThreadMementoId = "m-summary"
+        priorTx.serverThreadMementoCreatedAtISO = "2026-02-20T00:00:00Z"
+        priorTx.serverThreadMementoPayloadJSON = "{bad-json"
+        priorTx.serverThreadMementoSummary = """
+        Arc: Summary Arc
+        Active: one | two
+        Parked: parked-one
+        Decisions: keep-summary
+        Next: next-item
+        """
+        context.insert(priorTx)
+
+        let user = Message(thread: thread, creatorType: .user, text: "hello")
+        thread.messages.append(user)
+        context.insert(user)
+        try context.save()
+
+        let actions = TransmissionActions(modelContext: context, transport: transport)
+        actions.enqueueChat(thread: thread, userMessage: user)
+        await actions.processQueue()
+
+        let capturedEnvelope = await sentEnvelope.get()
+        let envelope = try XCTUnwrap(capturedEnvelope)
+        let memento = try XCTUnwrap(envelope.threadMemento)
+        XCTAssertEqual(memento.arc, "Summary Arc")
+        XCTAssertEqual(memento.active, ["one", "two"])
+        XCTAssertEqual(memento.parked, ["parked-one"])
+    }
+
+    func test_sendOnce_omitsThreadMemento_whenNoStructuredOrParsableSummary() async throws {
+        let sentEnvelope = CapturedEnvelopeStore()
+        let transport = TestTransport { envelope in
+            await sentEnvelope.set(envelope)
+            return ChatResponse(
+                text: "ok",
+                statusCode: 200,
+                transmissionId: "tx-omit-context",
+                pending: false,
+                responseInfo: nil,
+                threadMemento: nil,
+                evidenceSummary: nil,
+                evidence: nil,
+                evidenceWarnings: nil,
+                outputEnvelope: nil
+            )
+        }
+
+        let thread = ConversationThread(title: "T1")
+        context.insert(thread)
+
+        let priorPacket = Packet(threadId: thread.id, messageIds: [], messageText: "")
+        context.insert(priorPacket)
+
+        let priorTx = Transmission(packet: priorPacket)
+        priorTx.status = .succeeded
+        priorTx.serverThreadMementoId = "m-garbage"
+        priorTx.serverThreadMementoCreatedAtISO = "2026-02-20T00:00:00Z"
+        priorTx.serverThreadMementoPayloadJSON = "{bad-json"
+        priorTx.serverThreadMementoSummary = "not parseable as formatter output"
+        context.insert(priorTx)
+
+        let user = Message(thread: thread, creatorType: .user, text: "hello")
+        thread.messages.append(user)
+        context.insert(user)
+        try context.save()
+
+        let actions = TransmissionActions(modelContext: context, transport: transport)
+        actions.enqueueChat(thread: thread, userMessage: user)
+        await actions.processQueue()
+
+        let capturedEnvelope = await sentEnvelope.get()
+        let envelope = try XCTUnwrap(capturedEnvelope)
+        XCTAssertNil(envelope.threadMemento)
     }
 }

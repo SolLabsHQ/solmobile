@@ -98,6 +98,9 @@ final class ThreadMementoDecisionTests: SwiftDataTestBase {
         tx.serverThreadMementoId = "draft-123"
         tx.serverThreadMementoCreatedAtISO = "2025-01-01T00:00:00.000Z"
         tx.serverThreadMementoSummary = "Arc: test"
+        tx.serverThreadMementoPayloadJSON = """
+        {"id":"draft-123","threadId":"\(thread.id.uuidString)","createdAt":"2025-01-01T00:00:00.000Z","version":"memento-v0.2","arc":"Arc","active":[],"parked":[],"decisions":[],"next":[]}
+        """
 
         try context.save()
 
@@ -116,6 +119,7 @@ final class ThreadMementoDecisionTests: SwiftDataTestBase {
         XCTAssertNil(fresh.serverThreadMementoId)
         XCTAssertNil(fresh.serverThreadMementoCreatedAtISO)
         XCTAssertNil(fresh.serverThreadMementoSummary)
+        XCTAssertNil(fresh.serverThreadMementoPayloadJSON)
     }
 
     @MainActor
@@ -139,6 +143,9 @@ final class ThreadMementoDecisionTests: SwiftDataTestBase {
         tx.serverThreadMementoId = "draft-456"
         tx.serverThreadMementoCreatedAtISO = "2025-01-01T00:00:00.000Z"
         tx.serverThreadMementoSummary = "Arc: test"
+        tx.serverThreadMementoPayloadJSON = """
+        {"id":"draft-456","threadId":"\(thread.id.uuidString)","createdAt":"2025-01-01T00:00:00.000Z","version":"memento-v0.2","arc":"Arc","active":[],"parked":[],"decisions":[],"next":[]}
+        """
 
         try context.save()
 
@@ -157,6 +164,7 @@ final class ThreadMementoDecisionTests: SwiftDataTestBase {
         XCTAssertNil(fresh.serverThreadMementoId)
         XCTAssertNil(fresh.serverThreadMementoCreatedAtISO)
         XCTAssertNil(fresh.serverThreadMementoSummary)
+        XCTAssertNil(fresh.serverThreadMementoPayloadJSON)
     }
 
     @MainActor
