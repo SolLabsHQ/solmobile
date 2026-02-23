@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-02-23T07:13:55.410987+00:00",
+  "generated_at": "2026-02-23T07:22:24.599773+00:00",
   "epic": "SOLM-EPIC-044",
   "repo": "solmobile",
   "repo_root": "/Users/jmcnulty25/Documents/workspace/projects/SolLabsHQ/solmobile",
@@ -164,39 +164,48 @@
     ],
     "unmapped_epic_criteria": 4,
     "mapped_but_unchecked_criteria": 0,
-    "pr_changed_files_count": 5
+    "pr_changed_files_count": 31
   },
   "git": {
-    "branch": "main",
-    "status_short": [
-      " M docs/pr/PR-039/AGENTPACK.md",
-      " M docs/pr/PR-039/CHECKLIST.md",
-      " M docs/pr/PR-039/FIXLOG.md",
-      " M docs/pr/PR-039/INPUT.md",
-      " M docs/pr/PR-039/spec.lock.json",
-      " M ios/SolMobile/SolMobile/Connectivity/SolServerClient.swift",
-      " M ios/SolMobile/SolMobileTests/Connectivity/AssistantMarkdownRenderingTests.swift",
-      "?? docs/pr/PR-039/receipts/"
-    ],
-    "changed_files": [
-      "docs/pr/PR-039/AGENTPACK.md",
-      "docs/pr/PR-039/CHECKLIST.md",
-      "docs/pr/PR-039/FIXLOG.md",
-      "docs/pr/PR-039/INPUT.md",
-      "docs/pr/PR-039/spec.lock.json",
-      "ios/SolMobile/SolMobile/Connectivity/SolServerClient.swift",
-      "ios/SolMobile/SolMobileTests/Connectivity/AssistantMarkdownRenderingTests.swift"
-    ],
-    "diffstat": "docs/pr/PR-039/AGENTPACK.md                        |  4 +-\n docs/pr/PR-039/CHECKLIST.md                        |  4 +-\n docs/pr/PR-039/FIXLOG.md                           | 92 ++++++++++++++++++++++\n docs/pr/PR-039/INPUT.md                            |  4 +-\n docs/pr/PR-039/spec.lock.json                      |  6 +-\n .../SolMobile/Connectivity/SolServerClient.swift   | 28 ++++++-\n .../AssistantMarkdownRenderingTests.swift          | 40 ++++++++--\n 7 files changed, 160 insertions(+), 18 deletions(-)",
+    "branch": "codex/solm-epic-044",
+    "status_short": [],
+    "changed_files": [],
+    "diffstat": "",
     "pr_base_ref": "origin/main",
     "pr_changed_files": [
       "docs/pr/PR-039/AGENTPACK.md",
       "docs/pr/PR-039/CHECKLIST.md",
       "docs/pr/PR-039/FIXLOG.md",
       "docs/pr/PR-039/INPUT.md",
-      "docs/pr/PR-039/spec.lock.json"
+      "docs/pr/PR-039/receipts/build_fixlog_block.md",
+      "docs/pr/PR-039/receipts/integration.cmd",
+      "docs/pr/PR-039/receipts/integration.log",
+      "docs/pr/PR-039/receipts/integration.rc",
+      "docs/pr/PR-039/receipts/lint.cmd",
+      "docs/pr/PR-039/receipts/lint.log",
+      "docs/pr/PR-039/receipts/lint.rc",
+      "docs/pr/PR-039/receipts/review_context_solmobile.json",
+      "docs/pr/PR-039/receipts/review_context_solmobile.md",
+      "docs/pr/PR-039/receipts/unit.cmd",
+      "docs/pr/PR-039/receipts/unit.log",
+      "docs/pr/PR-039/receipts/unit.rc",
+      "docs/pr/PR-039/receipts/verifier_cmds.md",
+      "docs/pr/PR-039/receipts/verifier_gaps.md",
+      "docs/pr/PR-039/receipts/verifier_results.md",
+      "docs/pr/PR-039/receipts/verify_integration.cmd",
+      "docs/pr/PR-039/receipts/verify_integration.log",
+      "docs/pr/PR-039/receipts/verify_integration.rc",
+      "docs/pr/PR-039/receipts/verify_lint.cmd",
+      "docs/pr/PR-039/receipts/verify_lint.log",
+      "docs/pr/PR-039/receipts/verify_lint.rc",
+      "docs/pr/PR-039/receipts/verify_unit.cmd",
+      "docs/pr/PR-039/receipts/verify_unit.log",
+      "docs/pr/PR-039/receipts/verify_unit.rc",
+      "docs/pr/PR-039/spec.lock.json",
+      "ios/SolMobile/SolMobile/Connectivity/SolServerClient.swift",
+      "ios/SolMobile/SolMobileTests/Connectivity/AssistantMarkdownRenderingTests.swift"
     ],
-    "pr_diffstat": "docs/pr/PR-039/AGENTPACK.md   | 53 +++++++++++++++++++++++++++++++++++++++++++\n docs/pr/PR-039/CHECKLIST.md   |  9 ++++++++\n docs/pr/PR-039/FIXLOG.md      |  4 ++++\n docs/pr/PR-039/INPUT.md       | 53 +++++++++++++++++++++++++++++++++++++++++++\n docs/pr/PR-039/spec.lock.json | 17 ++++++++++++++\n 5 files changed, 136 insertions(+)"
+    "pr_diffstat": "docs/pr/PR-039/AGENTPACK.md                        |   53 +\n docs/pr/PR-039/CHECKLIST.md                        |    9 +\n docs/pr/PR-039/FIXLOG.md                           |   96 ++\n docs/pr/PR-039/INPUT.md                            |   53 +\n docs/pr/PR-039/receipts/build_fixlog_block.md      |   15 +\n docs/pr/PR-039/receipts/integration.cmd            |    1 +\n docs/pr/PR-039/receipts/integration.log            |  923 +++++++++++++\n docs/pr/PR-039/receipts/integration.rc             |    1 +\n docs/pr/PR-039/receipts/lint.cmd                   |    1 +\n docs/pr/PR-039/receipts/lint.log                   |  925 +++++++++++++\n docs/pr/PR-039/receipts/lint.rc                    |    1 +\n .../PR-039/receipts/review_context_solmobile.json  |  290 ++++\n .../pr/PR-039/receipts/review_context_solmobile.md |  141 ++\n docs/pr/PR-039/receipts/unit.cmd                   |    1 +\n docs/pr/PR-039/receipts/unit.log                   | 1452 ++++++++++++++++++++\n docs/pr/PR-039/receipts/unit.rc                    |    1 +\n docs/pr/PR-039/receipts/verifier_cmds.md           |    3 +\n docs/pr/PR-039/receipts/verifier_gaps.md           |    1 +\n docs/pr/PR-039/receipts/verifier_results.md        |    3 +\n docs/pr/PR-039/receipts/verify_integration.cmd     |    1 +\n docs/pr/PR-039/receipts/verify_integration.log     |  919 +++++++++++++\n docs/pr/PR-039/receipts/verify_integration.rc      |    1 +\n docs/pr/PR-039/receipts/verify_lint.cmd            |    1 +\n docs/pr/PR-039/receipts/verify_lint.log            |  923 +++++++++++++\n docs/pr/PR-039/receipts/verify_lint.rc             |    1 +\n docs/pr/PR-039/receipts/verify_unit.cmd            |    1 +\n docs/pr/PR-039/receipts/verify_unit.log            |  920 +++++++++++++\n docs/pr/PR-039/receipts/verify_unit.rc             |    1 +\n docs/pr/PR-039/spec.lock.json                      |   17 +\n .../SolMobile/Connectivity/SolServerClient.swift   |   28 +-\n .../AssistantMarkdownRenderingTests.swift          |   40 +-\n 31 files changed, 6814 insertions(+), 9 deletions(-)"
   },
   "workflows": {
     "workflow_dir": "/Users/jmcnulty25/Documents/workspace/projects/SolLabsHQ/solmobile/.github/workflows",
