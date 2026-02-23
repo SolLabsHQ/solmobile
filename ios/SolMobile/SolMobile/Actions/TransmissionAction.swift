@@ -77,6 +77,55 @@ nonisolated private enum ThreadMementoFormatter {
             "Next: \(join(m.next))",
         ].joined(separator: "\n")
     }
+
+    static func parseSummary(
+        id: String,
+        threadId: String,
+        createdAt: String,
+        summary: String
+    ) -> ThreadMementoDTO? {
+        let lines = summary
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+        func value(for prefix: String) -> String? {
+            lines.first(where: { $0.hasPrefix(prefix) }).map {
+                String($0.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+
+        guard
+            let arcRaw = value(for: "Arc:"),
+            let activeRaw = value(for: "Active:"),
+            let parkedRaw = value(for: "Parked:"),
+            let decisionsRaw = value(for: "Decisions:"),
+            let nextRaw = value(for: "Next:")
+        else {
+            return nil
+        }
+
+        func parseList(_ raw: String) -> [String] {
+            guard raw != "(none)" else { return [] }
+            return raw
+                .split(separator: "|")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        }
+
+        let arc = (arcRaw == "(none)") ? "" : arcRaw
+
+        return ThreadMementoDTO(
+            id: id,
+            threadId: threadId,
+            createdAt: createdAt,
+            version: "memento-v0.2",
+            arc: arc,
+            active: parseList(activeRaw),
+            parked: parseList(parkedRaw),
+            decisions: parseList(decisionsRaw),
+            next: parseList(nextRaw)
+        )
+    }
 }
 
 // MARK: - Transport contracts
@@ -1422,7 +1471,7 @@ final class TransmissionActions {
                 requestId: requestId,
                 contextRefsJson: nil,
                 payloadJson: nil,
-                threadMemento: nil
+                threadMemento: resolveThreadMementoForSend(runId: runId, txId: sel.txId, threadId: sel.threadId)
             )
 
             outboxLog.info("processQueue run=\(runId, privacy: .public) event=send tx=\(short(sel.txId), privacy: .public)")
@@ -1797,8 +1846,70 @@ final class TransmissionActions {
         freshTx.serverThreadMementoId = m.id
         freshTx.serverThreadMementoCreatedAtISO = m.createdAt
         freshTx.serverThreadMementoSummary = ThreadMementoFormatter.format(m)
+        if let payload = try? JSONEncoder().encode(m),
+           let json = String(data: payload, encoding: .utf8) {
+            freshTx.serverThreadMementoPayloadJSON = json
+        } else {
+            freshTx.serverThreadMementoPayloadJSON = nil
+            outboxLog.error("processQueue run=\(runId, privacy: .public) event=memento_payload_encode_failed tx=\(short(txId), privacy: .public) memento=\(m.id, privacy: .public)")
+        }
 
         outboxLog.info("processQueue run=\(runId, privacy: .public) event=memento_draft_saved tx=\(short(txId), privacy: .public) memento=\(m.id, privacy: .public) via=\(via, privacy: .public)")
+    }
+
+    private func resolveThreadMementoForSend(
+        runId: String,
+        txId: UUID,
+        threadId: UUID
+    ) -> ThreadMementoDTO? {
+        let descriptor = FetchDescriptor<Transmission>(
+            predicate: #Predicate { $0.packet.threadId == threadId },
+            sortBy: [SortDescriptor(\Transmission.createdAt, order: .reverse)]
+        )
+
+        guard let transmissions = try? modelContext.fetch(descriptor) else {
+            return nil
+        }
+
+        for source in transmissions {
+            let hasContextCandidate =
+                source.serverThreadMementoPayloadJSON?.isEmpty == false
+                || source.serverThreadMementoSummary?.isEmpty == false
+                || source.serverThreadMementoId?.isEmpty == false
+            guard hasContextCandidate else { continue }
+
+            if let payload = source.serverThreadMementoPayloadJSON, !payload.isEmpty {
+                if let data = payload.data(using: .utf8),
+                   let decoded = try? JSONDecoder().decode(ThreadMementoDTO.self, from: data) {
+                    outboxLog.info("processQueue run=\(runId, privacy: .public) event=memento_context_source tx=\(short(txId), privacy: .public) source=structured_payload_json memento=\(decoded.id, privacy: .public)")
+                    return decoded
+                }
+                outboxLog.error("processQueue run=\(runId, privacy: .public) event=memento_context_decode_failed tx=\(short(txId), privacy: .public) source=structured_payload_json")
+            }
+
+            if
+                let summary = source.serverThreadMementoSummary,
+                let mementoId = source.serverThreadMementoId,
+                !summary.isEmpty,
+                !mementoId.isEmpty
+            {
+                let createdAt = source.serverThreadMementoCreatedAtISO
+                    ?? ISO8601DateFormatter().string(from: source.createdAt)
+
+                if let parsed = ThreadMementoFormatter.parseSummary(
+                    id: mementoId,
+                    threadId: threadId.uuidString,
+                    createdAt: createdAt,
+                    summary: summary
+                ) {
+                    outboxLog.info("processQueue run=\(runId, privacy: .public) event=memento_context_source tx=\(short(txId), privacy: .public) source=summary_parse memento=\(parsed.id, privacy: .public)")
+                    return parsed
+                }
+            }
+        }
+
+        outboxLog.info("processQueue run=\(runId, privacy: .public) event=memento_context_source tx=\(short(txId), privacy: .public) source=omit")
+        return nil
     }
 
     private func pollOnce(
@@ -1979,6 +2090,7 @@ final class TransmissionActions {
                 tx.serverThreadMementoId = nil
                 tx.serverThreadMementoCreatedAtISO = nil
                 tx.serverThreadMementoSummary = nil
+                tx.serverThreadMementoPayloadJSON = nil
             }
 
             try? modelContext.save()

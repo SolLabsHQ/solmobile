@@ -30,6 +30,7 @@ final class Transmission {
     var serverThreadMementoId: String?
     var serverThreadMementoCreatedAtISO: String?
     var serverThreadMementoSummary: String?
+    var serverThreadMementoPayloadJSON: String?
 
     // Local ledger of delivery attempts (used to derive retry/backoff/timeout without redundant fields).
     @Relationship(deleteRule: .cascade, inverse: \DeliveryAttempt.transmission)
