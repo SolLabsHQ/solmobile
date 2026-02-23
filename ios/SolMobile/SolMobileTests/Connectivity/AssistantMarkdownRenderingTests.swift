@@ -51,7 +51,7 @@ final class AssistantMarkdownRenderingTests: XCTestCase {
 
 @MainActor
 final class ChatRequestContextEncodingTests: XCTestCase {
-    func test_requestEncodesContextThreadMemento_whenProvided() throws {
+    func test_requestEncodesContextThreadMementoRef_whenProvided() throws {
         let memento = ThreadMementoDTO(
             id: "m-1",
             threadId: "t-1",
@@ -68,6 +68,36 @@ final class ChatRequestContextEncodingTests: XCTestCase {
             threadId: "t-1",
             clientRequestId: "c-1",
             message: "hello",
+            context: .init(threadMementoRef: memento.asRefDTO())
+        )
+
+        let object = try decodeAsJSONObject(request)
+        let context = try XCTUnwrap(object["context"] as? [String: Any])
+        let encodedRef = try XCTUnwrap(context["thread_memento_ref"] as? [String: Any])
+
+        XCTAssertEqual(encodedRef["mementoId"] as? String, "m-1")
+        XCTAssertEqual(encodedRef["threadId"] as? String, "t-1")
+        XCTAssertEqual(encodedRef["createdTs"] as? String, "2026-02-20T00:00:00Z")
+        XCTAssertNil(context["thread_memento"])
+    }
+
+    func test_requestContext_canEncodeLegacyThreadMementoFallback() throws {
+        let memento = ThreadMementoDTO(
+            id: "m-2",
+            threadId: "t-2",
+            createdAt: "2026-02-20T00:00:00Z",
+            version: "memento-v0.2",
+            arc: "Arc",
+            active: ["a"],
+            parked: ["p"],
+            decisions: ["d"],
+            next: ["n"]
+        )
+
+        let request = Request(
+            threadId: "t-2",
+            clientRequestId: "c-2",
+            message: "hello",
             context: .init(threadMemento: memento.asRequestDTO())
         )
 
@@ -75,12 +105,8 @@ final class ChatRequestContextEncodingTests: XCTestCase {
         let context = try XCTUnwrap(object["context"] as? [String: Any])
         let encodedMemento = try XCTUnwrap(context["thread_memento"] as? [String: Any])
 
-        XCTAssertEqual(encodedMemento["mementoId"] as? String, "m-1")
-        XCTAssertEqual(encodedMemento["createdTs"] as? String, "2026-02-20T00:00:00Z")
-        XCTAssertEqual(encodedMemento["version"] as? String, "memento-v0.2")
-        XCTAssertNotNil(encodedMemento["affect"])
-        XCTAssertNil(encodedMemento["id"])
-        XCTAssertNil(encodedMemento["createdAt"])
+        XCTAssertEqual(encodedMemento["mementoId"] as? String, "m-2")
+        XCTAssertNil(context["thread_memento_ref"])
     }
 
     func test_requestOmitsContext_whenNoThreadMementoProvided() throws {
