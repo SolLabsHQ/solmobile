@@ -68,15 +68,19 @@ final class ChatRequestContextEncodingTests: XCTestCase {
             threadId: "t-1",
             clientRequestId: "c-1",
             message: "hello",
-            context: .init(threadMemento: memento)
+            context: .init(threadMemento: memento.asRequestDTO())
         )
 
         let object = try decodeAsJSONObject(request)
         let context = try XCTUnwrap(object["context"] as? [String: Any])
         let encodedMemento = try XCTUnwrap(context["thread_memento"] as? [String: Any])
 
-        XCTAssertEqual(encodedMemento["id"] as? String, "m-1")
+        XCTAssertEqual(encodedMemento["mementoId"] as? String, "m-1")
+        XCTAssertEqual(encodedMemento["createdTs"] as? String, "2026-02-20T00:00:00Z")
         XCTAssertEqual(encodedMemento["version"] as? String, "memento-v0.2")
+        XCTAssertNotNil(encodedMemento["affect"])
+        XCTAssertNil(encodedMemento["id"])
+        XCTAssertNil(encodedMemento["createdAt"])
     }
 
     func test_requestOmitsContext_whenNoThreadMementoProvided() throws {

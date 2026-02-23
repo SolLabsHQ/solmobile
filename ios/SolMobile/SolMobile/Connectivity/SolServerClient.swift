@@ -16,7 +16,7 @@ struct Request: Codable {
 }
 
 struct RequestContext: Codable {
-    let threadMemento: ThreadMementoDTO
+    let threadMemento: ThreadMementoRequestDTO
 
     enum CodingKeys: String, CodingKey {
         case threadMemento = "thread_memento"
@@ -32,6 +32,52 @@ struct ModeDecision: Codable {
     let version: String
 }
 
+struct ThreadMementoAffectPointDTO: Codable {
+    let endMessageId: String
+    let label: String
+    let intensity: Double
+    let confidence: String
+    let source: String
+}
+
+struct ThreadMementoAffectRollupDTO: Codable {
+    let phase: String
+    let intensityBucket: String
+    let updatedAt: String
+}
+
+struct ThreadMementoAffectDTO: Codable {
+    let points: [ThreadMementoAffectPointDTO]
+    let rollup: ThreadMementoAffectRollupDTO
+}
+
+struct ThreadMementoSignalItemDTO: Codable {
+    let endMessageId: String
+    let kind: String
+    let confidence: String
+    let source: String
+    let summary: String?
+}
+
+struct ThreadMementoSignalsDTO: Codable {
+    let updatedAt: String
+    let items: [ThreadMementoSignalItemDTO]
+}
+
+struct ThreadMementoRequestDTO: Codable {
+    let mementoId: String
+    let threadId: String
+    let createdTs: String
+    let version: String
+    let arc: String
+    let active: [String]
+    let parked: [String]
+    let decisions: [String]
+    let next: [String]
+    let affect: ThreadMementoAffectDTO
+    let signals: ThreadMementoSignalsDTO?
+}
+
 // ThreadMemento is a navigation artifact returned by SolServer.
 // It is not durable knowledge; the client may choose to Accept/Decline.
 struct ThreadMementoDTO: Codable {
@@ -45,6 +91,37 @@ struct ThreadMementoDTO: Codable {
     let parked: [String]
     let decisions: [String]
     let next: [String]
+    let affect: ThreadMementoAffectDTO? = nil
+    let signals: ThreadMementoSignalsDTO? = nil
+
+    func asRequestDTO() -> ThreadMementoRequestDTO {
+        let createdTs = createdAt
+        let resolvedAffect = affect ?? ThreadMementoDTO.defaultAffect(updatedAt: createdTs)
+        return ThreadMementoRequestDTO(
+            mementoId: id,
+            threadId: threadId,
+            createdTs: createdTs,
+            version: "memento-v0.2",
+            arc: arc,
+            active: active,
+            parked: parked,
+            decisions: decisions,
+            next: next,
+            affect: resolvedAffect,
+            signals: signals
+        )
+    }
+
+    private static func defaultAffect(updatedAt: String) -> ThreadMementoAffectDTO {
+        ThreadMementoAffectDTO(
+            points: [],
+            rollup: ThreadMementoAffectRollupDTO(
+                phase: "settled",
+                intensityBucket: "low",
+                updatedAt: updatedAt
+            )
+        )
+    }
 }
 
 struct Response: Codable {
@@ -761,7 +838,7 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision,
             threadId: envelope.threadId.uuidString,
             clientRequestId: envelope.requestId,
             message: envelope.messageText,
-            context: envelope.threadMemento.map { RequestContext(threadMemento: $0) }
+            context: envelope.threadMemento.map { RequestContext(threadMemento: $0.asRequestDTO()) }
         )
         req.httpBody = try JSONEncoder().encode(dto)
 
