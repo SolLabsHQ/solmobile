@@ -16,11 +16,27 @@ struct Request: Codable {
 }
 
 struct RequestContext: Codable {
-    let threadMemento: ThreadMementoRequestDTO
+    let threadMementoRef: ThreadMementoRefDTO?
+    let threadMemento: ThreadMementoRequestDTO?
+
+    init(
+        threadMementoRef: ThreadMementoRefDTO? = nil,
+        threadMemento: ThreadMementoRequestDTO? = nil
+    ) {
+        self.threadMementoRef = threadMementoRef
+        self.threadMemento = threadMemento
+    }
 
     enum CodingKeys: String, CodingKey {
+        case threadMementoRef = "thread_memento_ref"
         case threadMemento = "thread_memento"
     }
+}
+
+struct ThreadMementoRefDTO: Codable {
+    let mementoId: String
+    let threadId: String
+    let createdTs: String
 }
 
 struct ModeDecision: Codable {
@@ -109,6 +125,14 @@ struct ThreadMementoDTO: Codable {
             next: next,
             affect: resolvedAffect,
             signals: signals
+        )
+    }
+
+    func asRefDTO() -> ThreadMementoRefDTO {
+        ThreadMementoRefDTO(
+            mementoId: id,
+            threadId: threadId,
+            createdTs: createdAt
         )
     }
 
@@ -838,7 +862,7 @@ final class SolServerClient: ChatTransportPolling, ChatTransportMementoDecision,
             threadId: envelope.threadId.uuidString,
             clientRequestId: envelope.requestId,
             message: envelope.messageText,
-            context: envelope.threadMemento.map { RequestContext(threadMemento: $0.asRequestDTO()) }
+            context: envelope.threadMemento.map { RequestContext(threadMementoRef: $0.asRefDTO()) }
         )
         req.httpBody = try JSONEncoder().encode(dto)
 
